@@ -25,13 +25,13 @@ import mujoco
 import numpy as np
 
 # Tunables. Barycentric slope limit: sin(a) = m*l*sin(lean max) / ((M+m)*R) = (m/(M+m)) * (l/R) * sin(lean max):
-# ~19 deg for C (m/M 1.5, its gravity feed-forward holds the full 52 deg lean), ~26 for B (m/M 3, 58 deg). C still climbs 20 deg:
-# its foot-force pair acts R_HAM apart (hamster centre vs wall), a small extra drive couple.
+# ~23 deg for C (m/M 2.33, its gravity feed-forward holds the full 52 deg lean), ~26 for B (m/M 3, 58 deg). C's foot force and grip
+# are internal (zero net wrench), so the limit is real: 20 deg needs m/M 1.64 by the formula, ~1.9 measured from rest.
 # Real reference: Syrian hamster 110-140 g in a Kaytee 7 in ball of 222 g gives m/M ~0.56 (limit ~11 deg here);
 # dwarfs (20-50 g) and the 11.5 in ball (907 g) give far less.
 R, T = 0.5, 0.03          # shell radius (game scale, a real ball is 0.09-0.15 m), wall thickness
-N_TILES = 180             # boxes in the compound shell wall; facet impacts act as rolling resistance (~0.6 m/s^2 coasting)
-M_SHELL, M_HAM = 1.2, 1.8   # A and C: m/M 1.5, ~2.7x the real ratio; C climbs 20 deg from rest at any shell orientation from 1.33 (1.27 sticks)
+N_TILES = 180             # boxes in the compound shell wall, colliding only with the hamster; a smooth sphere meets the world
+M_SHELL, M_HAM = 0.9, 2.1   # A and C: m/M 2.33, ~4x the real ratio; C climbs 20 deg from rest at any shell orientation from 1.94 (1.78 sticks)
 B_M_SHELL, B_M_HAM = 0.75, 2.25   # B keeps m/M 3: at 1.5 its cascade tops out at 4.7 m/s against the drag
 R_HAM = 0.12              # hamster sphere radius: R_HAM/R 0.24, a 125 g hamster (3.1 cm sphere) in a ~10 in ball
 L_ARM = R - T - R_HAM     # pendulum arm (B) = contact radius (C)
@@ -39,13 +39,15 @@ TIMESTEP = 0.002
 B_KP, B_KD, B_TAU_MAX = 40.0, 4.0, 12.0   # B_KD was 3: B whirled at e=0.5 with the 2.25 kg hamster
 B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 B whirls around the shell centre (KV_ALONG 0.65 is near its edge)
 C_KP, C_KD, C_F_MAX = 200.0, 32.0, 60.0   # foot-force lean PD and cap (cap stops binding above ~90); C_KD was 28 at 2 kg
+K_GRIP = 2.0              # N m s/rad: C's feet grip the wall, an internal couple damping hamster spin relative to the shell
+                          # (~1 rad/s left at full effort; 5 went unstable at this timestep)
 C_LEAN_MAX = math.radians(52)   # C's lean at full effort (drive torque ~ sin(lean)); whirls at 90 with KV_ALONG >= 0.8
 A_TAU_MAX = 6.0           # direct shell torque at full effort
 KEY_EFFORT, SHIFT_EFFORT = 0.5, 1.0
 V_MAX = 6.0              # speed cascade: input sets target velocity, lean tracks it
-K_DRAG = 0.5              # N/(m/s)^2 horizontal drag on the shell while it touches the world
-V_RUN = 50.0              # C's running-speed fade: its lean (drive) falls linearly to 0 as speed along the input nears V_RUN;
-                          # K_DRAG alone holds C near 6.3 m/s, so this only trims it to ~6 (K_DRAG 0.1 + V_RUN 8 lets the fade set the cap)
+K_DRAG = 0.1              # N/(m/s)^2 horizontal drag on the shell while it touches the world; light, so C coasts
+V_RUN = 9.0               # C's running-speed fade: its lean (drive) falls linearly to 0 as speed along the input nears V_RUN;
+                          # this sets C's cascade-off top speed (~6 m/s); K_DRAG alone would let it reach ~12.5
 KV_ALONG, KV_LAT = 0.65, 0.25  # gains on velocity error along / across the held direction; KV_LAT >= 0.5 shakes C over bumps
 DEADZONE = 0.15
 RAMPS = [(-4, 10), (0, 20), (4, 30)]  # (x, slope deg): 6 m ramps up +y from y=6, top edges are ledges
@@ -64,8 +66,10 @@ def shell_wall(mass):
         p = (R - T / 2) * n
         geoms.append(
             f'<geom type="box" size="{side/2:.4f} {side/2:.4f} {T/2}" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" '
-            f'zaxis="{n[0]:.4f} {n[1]:.4f} {n[2]:.4f}" mass="{mass/N_TILES:.5f}" rgba=".6 .8 1 .25"/>'
+            f'zaxis="{n[0]:.4f} {n[1]:.4f} {n[2]:.4f}" mass="{mass/N_TILES:.5f}" contype="2" conaffinity="2" rgba=".6 .8 1 .25"/>'
         )
+    # smooth outer collider for the world (bit 1): the tiles only hold the hamster in (bit 2) and carry the mass
+    geoms.append(f'<geom type="sphere" size="{R}" mass="0" rgba="0 0 0 0"/>')
     return "\n".join(geoms)
 
 
@@ -88,7 +92,7 @@ def build(kind):
     m_shell, m_ham = masses(kind)
     if kind == "C":
         ham = (f'<body name="ham" pos="0 0 {T + R_HAM + .01}"><freejoint/>'
-               f'<geom type="sphere" size="{R_HAM}" mass="{m_ham}" rgba="1 .6 .2 1"/></body>')
+               f'<geom type="sphere" size="{R_HAM}" mass="{m_ham}" priority="1" condim="1" contype="2" conaffinity="2" rgba="1 .6 .2 1"/></body>')
         inner = ""
     else:  # A and B: pendulum on a ball joint at the shell centre, no contacts
         ham = ""
@@ -120,7 +124,7 @@ def grounded(m, d, s):
                for c in d.contact[: d.ncon])
 
 
-def control(m, d, kind, v, e, v_run=V_RUN):
+def control(m, d, kind, v, e, v_run=None):
     """v: unit run direction in world xy (3-vector, z=0), e: effort in [0,1]. Also applies the ground drag."""
     s, h = m.body("shell").id, m.body("ham").id
     d.xfrc_applied[:] = 0
@@ -132,7 +136,7 @@ def control(m, d, kind, v, e, v_run=V_RUN):
     if kind == "C":
         # foot force tracks the same lean target as B; without this PD the hamster sloshes
         n = (hp - c) / (np.linalg.norm(hp - c) + 1e-9)
-        e *= min(1.0, max(0.0, 1 - np.dot(d.qvel[:2], v[:2]) / v_run))  # can only run so fast; braking and coasting keep full strength
+        e *= min(1.0, max(0.0, 1 - np.dot(d.qvel[:2], v[:2]) / (v_run or V_RUN)))  # can only run so fast; braking and coasting keep full strength
         target = math.sin(e * C_LEAN_MAX) * v + math.cos(e * C_LEAN_MAX) * down
         rel_v = body_vel(m, d, h) - body_vel(m, d, s)
         f = C_KP * L_ARM * (target - n) - C_KD * rel_v
@@ -141,10 +145,14 @@ def control(m, d, kind, v, e, v_run=V_RUN):
         norm = np.linalg.norm(f)
         if norm > C_F_MAX:
             f *= C_F_MAX / norm
-        p = c + n * (R - T)  # foot on the inner wall
+        p = c + n * (R - T)  # foot on the inner wall: both halves of the pair act here, so they add no net couple
         d.xfrc_applied[h, :3] = f
+        d.xfrc_applied[h, 3:] = np.cross(p - hp, f)
         d.xfrc_applied[s, :3] -= f
         d.xfrc_applied[s, 3:] = np.cross(p - d.xipos[s], -f)
+        grip = -K_GRIP * (w_h - d.cvel[s, :3])  # pure couple: the foot force alone would spin the hamster like a slipping wheel
+        d.xfrc_applied[h, 3:] += grip
+        d.xfrc_applied[s, 3:] -= grip
         return
     u = (hp - c) / (np.linalg.norm(hp - c) + 1e-9)
     target = down if kind == "A" else math.sin(e * B_LEAN_MAX) * v + math.cos(e * B_LEAN_MAX) * down
@@ -218,7 +226,7 @@ def smoke():
     assert abs(lean - math.degrees(C_LEAN_MAX)) < 3, "C: lean sags off its target"
     v0, v3 = coast("C")
     print(f"{'C coast':30s} released at {v0:4.2f} m/s, 3 s later {v3:4.2f} m/s")
-    assert 0.3 < v3 < v0, "C: coast stopped too fast or did not slow"  # was 2 < v3 before the drag
+    assert 2 < v3 < v0, "C: coast stopped too fast or did not slow"
     vb = downhill("C", 0)
     print(f"{'C downhill':30s} full effort down {dict(RAMPS)[0]} deg: {vb:4.2f} m/s at the foot (V_MAX {V_MAX})")
     assert vb > 0.9 * V_MAX, "C: cascade capped downhill speed"  # flat cascade speed is ~5 under drag; was vb > V_MAX
