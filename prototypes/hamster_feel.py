@@ -25,12 +25,14 @@ import mujoco
 import numpy as np
 
 # Tunables. Barycentric slope limit: sin(a) = m*l*sin(lean max) / ((M+m)*R) = (m/(M+m)) * (l/R) * sin(lean max):
-# ~24 deg for C at 52 deg lean, ~26 for B at 58. C's lean PD sags to ~39 deg under load, so it climbs 20 deg with little spare.
+# ~19 deg for C (m/M 1.5, its gravity feed-forward holds the full 52 deg lean), ~26 for B (m/M 3, 58 deg). C still climbs 20 deg:
+# its foot-force pair acts R_HAM apart (hamster centre vs wall), a small extra drive couple.
 # Real reference: Syrian hamster 110-140 g in a Kaytee 7 in ball of 222 g gives m/M ~0.56 (limit ~11 deg here);
 # dwarfs (20-50 g) and the 11.5 in ball (907 g) give far less.
 R, T = 0.5, 0.03          # shell radius (game scale, a real ball is 0.09-0.15 m), wall thickness
 N_TILES = 180             # boxes in the compound shell wall; facet impacts act as rolling resistance (~0.6 m/s^2 coasting)
-M_SHELL, M_HAM = 0.75, 2.25   # m/M 3, ~5x the real ratio: the least that climbs 20 deg from rest at any shell orientation (2.33 sticks on a facet)
+M_SHELL, M_HAM = 1.2, 1.8   # A and C: m/M 1.5, ~2.7x the real ratio; C climbs 20 deg from rest at any shell orientation from 1.33 (1.27 sticks)
+B_M_SHELL, B_M_HAM = 0.75, 2.25   # B keeps m/M 3: at 1.5 its cascade tops out at 4.7 m/s against the drag
 R_HAM = 0.12              # hamster sphere radius: R_HAM/R 0.24, a 125 g hamster (3.1 cm sphere) in a ~10 in ball
 L_ARM = R - T - R_HAM     # pendulum arm (B) = contact radius (C)
 TIMESTEP = 0.002
@@ -41,7 +43,9 @@ C_LEAN_MAX = math.radians(52)   # C's lean at full effort (drive torque ~ sin(le
 A_TAU_MAX = 6.0           # direct shell torque at full effort
 KEY_EFFORT, SHIFT_EFFORT = 0.5, 1.0
 V_MAX = 6.0              # speed cascade: input sets target velocity, lean tracks it
-K_DRAG = 0.5              # N/(m/s)^2 horizontal drag on the shell while it touches the world; caps C's top speed near V_MAX
+K_DRAG = 0.5              # N/(m/s)^2 horizontal drag on the shell while it touches the world
+V_RUN = 50.0              # C's running-speed fade: its lean (drive) falls linearly to 0 as speed along the input nears V_RUN;
+                          # K_DRAG alone holds C near 6.3 m/s, so this only trims it to ~6 (K_DRAG 0.1 + V_RUN 8 lets the fade set the cap)
 KV_ALONG, KV_LAT = 0.65, 0.25  # gains on velocity error along / across the held direction; KV_LAT >= 0.5 shakes C over bumps
 DEADZONE = 0.15
 RAMPS = [(-4, 10), (0, 20), (4, 30)]  # (x, slope deg): 6 m ramps up +y from y=6, top edges are ledges
@@ -49,7 +53,7 @@ RAMPS = [(-4, 10), (0, 20), (4, 30)]  # (x, slope deg): 6 m ramps up +y from y=6
 NAMES = {"A": "A direct torque on shell", "B": "B lean-controlled pendulum", "C": "C contact body + foot force"}
 
 
-def shell_wall():
+def shell_wall(mass):
     side = math.sqrt(4 * math.pi * R * R / N_TILES) * 1.25
     golden = math.pi * (3 - math.sqrt(5))
     geoms = []
@@ -60,7 +64,7 @@ def shell_wall():
         p = (R - T / 2) * n
         geoms.append(
             f'<geom type="box" size="{side/2:.4f} {side/2:.4f} {T/2}" pos="{p[0]:.4f} {p[1]:.4f} {p[2]:.4f}" '
-            f'zaxis="{n[0]:.4f} {n[1]:.4f} {n[2]:.4f}" mass="{M_SHELL/N_TILES:.5f}" rgba=".6 .8 1 .25"/>'
+            f'zaxis="{n[0]:.4f} {n[1]:.4f} {n[2]:.4f}" mass="{mass/N_TILES:.5f}" rgba=".6 .8 1 .25"/>'
         )
     return "\n".join(geoms)
 
@@ -76,22 +80,27 @@ def course():
     return "\n".join(g)
 
 
+def masses(kind):
+    return (B_M_SHELL, B_M_HAM) if kind == "B" else (M_SHELL, M_HAM)
+
+
 def build(kind):
+    m_shell, m_ham = masses(kind)
     if kind == "C":
         ham = (f'<body name="ham" pos="0 0 {T + R_HAM + .01}"><freejoint/>'
-               f'<geom type="sphere" size="{R_HAM}" mass="{M_HAM}" rgba="1 .6 .2 1"/></body>')
+               f'<geom type="sphere" size="{R_HAM}" mass="{m_ham}" rgba="1 .6 .2 1"/></body>')
         inner = ""
     else:  # A and B: pendulum on a ball joint at the shell centre, no contacts
         ham = ""
         inner = (f'<body name="ham"><joint type="ball" damping=".001"/>'
-                 f'<geom type="sphere" size="{R_HAM}" pos="0 0 {-L_ARM}" mass="{M_HAM}" contype="0" conaffinity="0" rgba="1 .6 .2 1"/>'
+                 f'<geom type="sphere" size="{R_HAM}" pos="0 0 {-L_ARM}" mass="{m_ham}" contype="0" conaffinity="0" rgba="1 .6 .2 1"/>'
                  f'<geom type="capsule" fromto="0 0 0 0 0 {-L_ARM}" size=".01" mass=".001" contype="0" conaffinity="0" rgba="1 .6 .2 1"/></body>')
     xml = f"""<mujoco><option timestep="{TIMESTEP}" integrator="implicitfast"/>
 <visual><global offwidth="1280" offheight="720"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/>
 {course()}
 <body name="shell" pos="0 0 {R}"><freejoint/>
-{shell_wall()}
+{shell_wall(m_shell)}
 {inner}
 </body>
 {ham}
@@ -111,7 +120,7 @@ def grounded(m, d, s):
                for c in d.contact[: d.ncon])
 
 
-def control(m, d, kind, v, e):
+def control(m, d, kind, v, e, v_run=V_RUN):
     """v: unit run direction in world xy (3-vector, z=0), e: effort in [0,1]. Also applies the ground drag."""
     s, h = m.body("shell").id, m.body("ham").id
     d.xfrc_applied[:] = 0
@@ -123,9 +132,11 @@ def control(m, d, kind, v, e):
     if kind == "C":
         # foot force tracks the same lean target as B; without this PD the hamster sloshes
         n = (hp - c) / (np.linalg.norm(hp - c) + 1e-9)
+        e *= min(1.0, max(0.0, 1 - np.dot(d.qvel[:2], v[:2]) / v_run))  # can only run so fast; braking and coasting keep full strength
         target = math.sin(e * C_LEAN_MAX) * v + math.cos(e * C_LEAN_MAX) * down
         rel_v = body_vel(m, d, h) - body_vel(m, d, s)
         f = C_KP * L_ARM * (target - n) - C_KD * rel_v
+        f -= M_HAM * 9.81 * (down - np.dot(down, target) * target)  # gravity feed-forward: hold the hamster at the target lean
         f -= np.dot(f, n) * n  # tangential only: the wall carries the normal load
         norm = np.linalg.norm(f)
         if norm > C_F_MAX:
@@ -201,6 +212,10 @@ def smoke():
     v6, v10 = top_speed("C")
     print(f"{'C top speed':30s} cascade off, full effort: {v6:4.2f} m/s at 6 s, {v10:4.2f} at 10 s")
     assert abs(v10 - v6) < 0.1 * v6 and v10 < 8, "C: drag does not settle the top speed"
+    assert abs(v10 - 6) < 0.6, "C: cascade-off top speed is not near 6 m/s"
+    lean = steady_lean("C")
+    print(f"{'C steady lean':30s} cascade off, full effort, no speed fade: {lean:4.1f} deg (C_LEAN_MAX {math.degrees(C_LEAN_MAX):.0f})")
+    assert abs(lean - math.degrees(C_LEAN_MAX)) < 3, "C: lean sags off its target"
     v0, v3 = coast("C")
     print(f"{'C coast':30s} released at {v0:4.2f} m/s, 3 s later {v3:4.2f} m/s")
     assert 0.3 < v3 < v0, "C: coast stopped too fast or did not slow"  # was 2 < v3 before the drag
@@ -253,6 +268,19 @@ def top_speed(kind, v=(-1.0, 0, 0)):
             mujoco.mj_step(m, d)
         out.append(np.linalg.norm(d.qvel[:2]))
     return out
+
+
+def steady_lean(kind, v=(-1.0, 0, 0), t_end=10.0, settle=6.0):
+    """Cascade off, full effort on flat ground with the speed fade off: mean hamster lean from vertical (deg) after settling."""
+    m, d = build(kind)
+    s, h, lean = m.body("shell").id, m.body("ham").id, []
+    while d.time < t_end:
+        control(m, d, kind, np.array(v), 1.0, v_run=math.inf)
+        mujoco.mj_step(m, d)
+        if d.time > settle:
+            u = d.xipos[h] - d.xpos[s]
+            lean.append(math.degrees(math.acos(-u[2] / np.linalg.norm(u))))
+    return float(np.mean(lean))
 
 
 def on_ramp(x, s0, lift=0.1):
@@ -435,7 +463,7 @@ def play():
         left = "\n".join(["model", "cascade", "speed", "lean cmd", "hamster lean", "penetration", "sim/real", "", "masses M/m", "R / arm", "B kp/kd/taumax", "KV along/lat"])
         right = "\n".join([NAMES[kind], "on (target speed)" if pending["cascade"] else "off (direct lean/force)", f"{np.linalg.norm(d.qvel[:3]):.2f} m/s", f"{e:.2f}", f"{lean:.0f} deg",
                            f"{penetration(d)*1000:.1f} mm", f"{rate:.2f}" + ("  ESCAPED" if escaped(m, d) else ""), "",
-                           f"{M_SHELL} / {M_HAM} kg", f"{R} / {L_ARM:.2f} m", f"{B_KP}/{B_KD}/{B_TAU_MAX}", f"{KV_ALONG}/{KV_LAT}"])
+                           "%s / %s kg" % masses(kind), f"{R} / {L_ARM:.2f} m", f"{B_KP}/{B_KD}/{B_TAU_MAX}", f"{KV_ALONG}/{KV_LAT}"])
 
         w, hgt = glfw.get_framebuffer_size(win)
         vp = mujoco.MjrRect(0, 0, w, hgt)
