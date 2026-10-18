@@ -31,12 +31,13 @@ R_HAM = 0.12              # hamster sphere radius
 L_ARM = R - T - R_HAM     # pendulum arm (B) = contact radius (C)
 TIMESTEP = 0.002
 B_KP, B_KD, B_TAU_MAX = 40.0, 3.0, 12.0
-B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 B whirls around the shell centre (KV 0.65 is near its edge)
+B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 B whirls around the shell centre (KV_ALONG 0.65 is near its edge)
 C_KP, C_KD, C_F_MAX = 200.0, 28.0, 60.0   # foot-force lean PD and cap (cap stops binding above ~90)
-C_LEAN_MAX = math.radians(75)   # C's lean at full effort; passes checks 58..85, whirls at 90 with KV >= 0.8
+C_LEAN_MAX = math.radians(75)   # C's lean at full effort; passes checks 58..85, whirls at 90 with KV_ALONG >= 0.8
 A_TAU_MAX = 6.0           # direct shell torque at full effort
 KEY_EFFORT, SHIFT_EFFORT = 0.5, 1.0
-V_MAX, KV = 6.0, 0.65    # speed cascade: input sets target velocity, lean tracks it (C passes KV 0.3..~1.3)
+V_MAX = 6.0              # speed cascade: input sets target velocity, lean tracks it
+KV_ALONG, KV_LAT = 0.65, 0.25  # gains on velocity error along / across the held direction; KV_LAT >= 0.5 shakes C over bumps
 DEADZONE = 0.15
 RAMPS = [(-4, 10), (0, 20), (4, 30)]  # (x, slope deg): 6 m ramps up +y from y=6, top edges are ledges
 
@@ -143,7 +144,7 @@ def cascade(d, v, e):
         return np.zeros(3), 0.0
     err = v[:2] * e * V_MAX - d.qvel[:2]
     along = np.dot(err, v[:2])
-    cmd = KV * (err + (max(along, 0.0) - along) * v[:2])  # drop the along-direction brake, keep lateral
+    cmd = KV_ALONG * max(along, 0.0) * v[:2] + KV_LAT * (err - along * v[:2])  # no along-direction brake
     mag = np.linalg.norm(cmd)
     if mag < 1e-6:
         return np.zeros(3), 0.0
@@ -191,6 +192,12 @@ def smoke():
     print(f"{'C downhill':30s} full effort down {dict(RAMPS)[0]} deg: {vb:4.2f} m/s at the foot (V_MAX {V_MAX})")
     assert vb > V_MAX, "C: cascade capped downhill speed"
     print(f"{'C bumps':30s} worst spin/limit={bumps('C'):4.2f} (info: hops over the bumps)")
+    std, flips = shake("C")
+    print(f"{'C bump shake':30s} hamster side offset std={std*100:3.1f} cm, side lean flips={flips} (KV_LAT 0.65: 2.9 cm, 31)")
+    assert std < 0.012 and flips < 20, "C: hamster shakes sideways over the bumps"
+    tt = turn("C")
+    print(f"{'C turn':30s} -x at 5 m/s, then hold +y: heading turns 60 deg in {tt:4.2f} s")
+    assert tt < 2, "C: steering too slow"
     print("smoke ok")
 
 
@@ -255,6 +262,41 @@ def bumps(kind, e=1.0, t_end=4.0):
         mujoco.mj_step(m, d)
         worst = max(worst, spin_ratio(d))
     return worst
+
+
+def shake(kind="C", y0=0.0, t_end=5.0):
+    """Cascade at full effort from (0, y0) toward -y across the bump field, after t > 0.8 s:
+    std of the hamster's sideways offset from the shell centre (m), and sign flips of the sideways lean command."""
+    m, d = build(kind)
+    place(m, d, kind, (0, y0, R))
+    s, h = m.body("shell").id, m.body("ham").id
+    v, off, flips, last = np.array([0, -1.0, 0]), [], 0, 0
+    while d.time < t_end:
+        cv, ce = cascade(d, v, 1.0)
+        control(m, d, kind, cv, ce)
+        mujoco.mj_step(m, d)
+        if d.time > 0.8:
+            off.append(d.xipos[h, 0] - d.xpos[s, 0])
+            sg = np.sign(round(cv[0] * ce, 2))
+            flips += bool(sg and last and sg != last)
+            last = sg or last
+    return float(np.std(off)), flips
+
+
+def turn(kind="C", v_start=5.0, t_end=4.0):
+    """Full effort toward -x until v_start, then hold +y: seconds until the velocity heading has turned 60 deg."""
+    m, d = build(kind)
+    v = np.array([-1.0, 0, 0])
+    while np.linalg.norm(d.qvel[:2]) < v_start and d.time < 12:
+        control(m, d, kind, *cascade(d, v, 1.0))
+        mujoco.mj_step(m, d)
+    v, t0 = np.array([0, 1.0, 0]), d.time
+    while d.time < t0 + t_end:
+        control(m, d, kind, *cascade(d, v, 1.0))
+        mujoco.mj_step(m, d)
+        if math.degrees(math.atan2(d.qvel[1], -d.qvel[0])) >= 60:
+            return d.time - t0
+    return math.inf
 
 
 def climb(kind, x=0, t_end=10.0):
@@ -358,10 +400,10 @@ def play():
         h = m.body("ham").id
         u = d.xipos[h] - d.xpos[s]
         lean = math.degrees(math.acos(np.clip(-u[2] / (np.linalg.norm(u) + 1e-9), -1, 1)))
-        left = "\n".join(["model", "cascade", "speed", "lean cmd", "hamster lean", "penetration", "sim/real", "", "masses M/m", "R / arm", "B kp/kd/taumax"])
+        left = "\n".join(["model", "cascade", "speed", "lean cmd", "hamster lean", "penetration", "sim/real", "", "masses M/m", "R / arm", "B kp/kd/taumax", "KV along/lat"])
         right = "\n".join([NAMES[kind], "on (target speed)" if pending["cascade"] else "off (direct lean/force)", f"{np.linalg.norm(d.qvel[:3]):.2f} m/s", f"{e:.2f}", f"{lean:.0f} deg",
                            f"{penetration(d)*1000:.1f} mm", f"{rate:.2f}" + ("  ESCAPED" if escaped(m, d) else ""), "",
-                           f"{M_SHELL} / {M_HAM} kg", f"{R} / {L_ARM:.2f} m", f"{B_KP}/{B_KD}/{B_TAU_MAX}"])
+                           f"{M_SHELL} / {M_HAM} kg", f"{R} / {L_ARM:.2f} m", f"{B_KP}/{B_KD}/{B_TAU_MAX}", f"{KV_ALONG}/{KV_LAT}"])
 
         w, hgt = glfw.get_framebuffer_size(win)
         vp = mujoco.MjrRect(0, 0, w, hgt)
