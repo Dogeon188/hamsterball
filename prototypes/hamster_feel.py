@@ -9,6 +9,7 @@ Answers the "Abstract hamster model" ticket. Not production code.
 Run:   uv run prototypes/hamster_feel.py
 Check: uv run prototypes/hamster_feel.py --smoke
 
+Starts on model C with the speed cascade off.
 Keys: 1/2/3 switch model (A direct torque, B pendulum, C contact), WASD run
 (camera-relative), Shift full effort, T toggle speed cascade, Q/E orbit camera,
 R reset, Esc quit.
@@ -23,7 +24,7 @@ import glfw
 import mujoco
 import numpy as np
 
-# Tunables. Barycentric slope limit: sin(a) = m*l*sin(lean max) / ((M+m)*R): ~23 deg at B's 58 deg lean, ~27 at C's 75 (28 at 90).
+# Tunables. Barycentric slope limit: sin(a) = m*l*sin(lean max) / ((M+m)*R): ~23 deg at B's 58 deg lean, ~19 at C's 45 (28 at 90).
 R, T = 0.5, 0.03          # shell radius, wall thickness
 N_TILES = 180             # boxes in the compound shell wall; facet impacts act as rolling resistance (~0.6 m/s^2 coasting)
 M_SHELL, M_HAM = 1.0, 2.0
@@ -33,7 +34,7 @@ TIMESTEP = 0.002
 B_KP, B_KD, B_TAU_MAX = 40.0, 3.0, 12.0
 B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 B whirls around the shell centre (KV_ALONG 0.65 is near its edge)
 C_KP, C_KD, C_F_MAX = 200.0, 28.0, 60.0   # foot-force lean PD and cap (cap stops binding above ~90)
-C_LEAN_MAX = math.radians(75)   # C's lean at full effort; passes checks 58..85, whirls at 90 with KV_ALONG >= 0.8
+C_LEAN_MAX = math.radians(45)   # C's lean at full effort (drive torque ~ sin(lean)); was 75, whirls at 90 with KV_ALONG >= 0.8
 A_TAU_MAX = 6.0           # direct shell torque at full effort
 KEY_EFFORT, SHIFT_EFFORT = 0.5, 1.0
 V_MAX = 6.0              # speed cascade: input sets target velocity, lean tracks it
@@ -160,7 +161,7 @@ def escaped(m, d):
 
 
 def smoke():
-    """Headless check: each model rolls on flat ground without whirling; B and C climb 20 deg; C coasts and runs on downhill."""
+    """Headless check: each model rolls on flat ground without whirling; B climbs 20 deg, C 10 deg; C coasts and runs on downhill."""
     for kind in "ABC":
         m, d = build(kind)
         v = np.array([1.0, 0, 0])
@@ -182,9 +183,10 @@ def smoke():
             assert spin < 1, f"{kind}: hamster whirls, shell spins too fast at e={e} dir={dirn}"
             assert abs(speed - e * V_MAX) < 0.2 * e * V_MAX, f"{kind}: cascade speed off at e={e} dir={dirn}"
         if kind != "A":
-            ok = climb(kind)
-            print(f"{'':30s} climbs the {dict(RAMPS)[0]} deg ramp: {ok}")
-            assert ok, f"{kind}: could not climb the {dict(RAMPS)[0]} deg ramp"
+            x = -4 if kind == "C" else 0  # C's 45 deg lean limits it to ~19 deg slopes
+            ok = climb(kind, x)
+            print(f"{'':30s} climbs the {dict(RAMPS)[x]} deg ramp: {ok}")
+            assert ok, f"{kind}: could not climb the {dict(RAMPS)[x]} deg ramp"
     v0, v3 = coast("C")
     print(f"{'C coast':30s} released at {v0:4.2f} m/s, 3 s later {v3:4.2f} m/s")
     assert 2 < v3 < v0, "C: coast stopped too fast or did not slow"
@@ -338,8 +340,8 @@ def play():
     win = glfw.create_window(1280, 720, "PROTOTYPE hamster feel", None, None)
     glfw.make_context_current(win)
     glfw.swap_interval(1)
-    kind = "B"
-    pending = {"kind": None, "reset": False, "cascade": True}
+    kind = "C"
+    pending = {"kind": None, "reset": False, "cascade": False}
 
     def on_key(_w, key, _sc, action, _mods):
         if action != glfw.PRESS:
