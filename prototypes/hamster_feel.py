@@ -23,7 +23,7 @@ import glfw
 import mujoco
 import numpy as np
 
-# Tunables. Barycentric slope limit: sin(a) = m*l / ((M+m)*R) = ~28 deg here.
+# Tunables. Barycentric slope limit: sin(a) = m*l*sin(lean max) / ((M+m)*R): ~23 deg at 58 deg lean (28 at 90).
 R, T = 0.5, 0.03          # shell radius, wall thickness
 N_TILES = 180             # boxes in the compound shell wall
 M_SHELL, M_HAM = 1.0, 2.0
@@ -31,12 +31,13 @@ R_HAM = 0.12              # hamster sphere radius
 L_ARM = R - T - R_HAM     # pendulum arm (B) = contact radius (C)
 TIMESTEP = 0.002
 B_KP, B_KD, B_TAU_MAX = 40.0, 3.0, 12.0
-B_LEAN_MAX = math.radians(70)   # lean at full effort
+B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 (or KV > ~0.6) B whirls around the shell centre
 C_KP, C_KD, C_F_MAX = 200.0, 28.0, 30.0   # foot-force lean PD and cap
 A_TAU_MAX = 6.0           # direct shell torque at full effort
 KEY_EFFORT, SHIFT_EFFORT = 0.5, 1.0
-V_MAX, KV = 4.0, 0.8     # speed cascade: input sets target velocity, lean tracks it
+V_MAX, KV = 4.0, 0.5     # speed cascade: input sets target velocity, lean tracks it
 DEADZONE = 0.15
+RAMPS = [(-4, 10), (0, 20), (4, 30)]  # (x, slope deg): 6 m ramps up +y from y=6, top edges are ledges
 
 NAMES = {"A": "A direct torque on shell", "B": "B lean-controlled pendulum", "C": "C contact body + foot force"}
 
@@ -59,7 +60,7 @@ def shell_wall():
 
 def course():
     g = ['<geom type="plane" size="40 40 .1" rgba=".35 .4 .35 1"/>']
-    for x, deg in [(-4, 10), (0, 20), (4, 30)]:  # ramps up +y; their top edges are ledges
+    for x, deg in RAMPS:
         a = math.radians(deg)
         g.append(f'<geom type="box" size="1.5 3 .1" pos="{x} {6 + 3*math.cos(a):.3f} {3*math.sin(a):.3f}" '
                  f'euler="{deg} 0 0" rgba=".7 .6 .4 1"/>')
@@ -152,7 +153,7 @@ def escaped(m, d):
 
 
 def smoke():
-    """Headless check: each model rolls forward on flat ground, and C's hamster stays inside."""
+    """Headless check: each model rolls on flat ground without whirling, C's hamster stays inside, B and C climb 20 deg."""
     for kind in "ABC":
         m, d = build(kind)
         v = np.array([1.0, 0, 0])
@@ -170,7 +171,43 @@ def smoke():
             mujoco.mj_step(m, d)
         print(f"{'':30s} cascade after 5 s: vx={d.qvel[0]:5.2f} m/s (target {V_MAX})")
         assert abs(d.qvel[0] - V_MAX) < 1.5, f"{kind}: cascade did not track V_MAX"
+        for e in (0.5, 1.0):  # cascade on flat ground (-x): no whirl, shell spin near the no-slip rate
+            spin, speed = whirl(kind, e)
+            print(f"{'':30s} whirl e={e}: worst spin/limit={spin:4.2f}  speed={speed:4.2f} m/s (target {e*V_MAX})")
+            assert spin < 1, f"{kind}: hamster whirls, shell spins too fast at e={e}"
+            assert abs(speed - e * V_MAX) < 0.2 * e * V_MAX, f"{kind}: cascade speed off at e={e}"
+        if kind != "A":
+            ok = climb(kind)
+            print(f"{'':30s} climbs the {dict(RAMPS)[0]} deg ramp: {ok}")
+            assert ok, f"{kind}: could not climb the {dict(RAMPS)[0]} deg ramp"
     print("smoke ok")
+
+
+def whirl(kind, e, t_end=8.0, settle=3.0):
+    """Worst shell spin over its limit 1.5 |v|/R + 1 rad/s after settling, and final speed."""
+    m, d = build(kind)
+    v, worst = np.array([-1.0, 0, 0]), 0.0
+    while d.time < t_end:
+        control(m, d, kind, *cascade(d, v, e))
+        mujoco.mj_step(m, d)
+        if d.time > settle:
+            worst = max(worst, np.linalg.norm(d.qvel[3:6]) / (1.5 * np.linalg.norm(d.qvel[:2]) / R + 1.0))
+    return worst, np.linalg.norm(d.qvel[:2])
+
+
+def climb(kind, x=0, t_end=10.0):
+    """Cascade at full effort from 1.5 m before the foot of the ramp at x; True once the shell passes its top edge."""
+    m, d = build(kind)
+    d.qpos[0:2] = x, 4.5
+    if kind == "C":
+        d.qpos[7:9] = x, 4.5
+    v = np.array([0, 1.0, 0])
+    while d.time < t_end:
+        control(m, d, kind, *cascade(d, v, 1.0))
+        mujoco.mj_step(m, d)
+        if d.qpos[1] > 6 + 6 * math.cos(math.radians(dict(RAMPS)[x])):
+            return True
+    return False
 
 
 def read_input(win, fwd):
