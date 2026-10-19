@@ -40,6 +40,7 @@ TILE_COUNTS = [180, 80, 320]
 SOFTS = {"default": "0.02 1", "stiff": "0.004 1", "soft": "0.04 2"}  # solref on the hamster-tile pair
 MARGINS = [0.0, 0.002]  # hamster geom margin (m): contact acts before touching
 ROLL = 0.04  # rolling friction (m) for sphere+roll; ~0.7 m/s^2 coast loss on paper, the tiles' facet drag
+TORSION = 0.05  # torsional friction (m) for sphere+roll; at the plane's 0.005 a turn leaves the stopped shell spinning in yaw
 
 
 def shell_wall(outer, n_tiles, soft):
@@ -60,7 +61,7 @@ def shell_wall(outer, n_tiles, soft):
     if outer == "sphere":
         geoms.append(f'<geom type="sphere" size="{R}" mass="0" rgba="0 0 0 0"/>')
     elif outer == "sphere+roll":  # friction mixes by max, so the plane's tiny rolling term loses
-        geoms.append(f'<geom type="sphere" size="{R}" mass="0" condim="6" friction="1 0.005 {ROLL}" rgba="0 0 0 0"/>')
+        geoms.append(f'<geom type="sphere" size="{R}" mass="0" condim="6" friction="1 {TORSION} {ROLL}" rgba="0 0 0 0"/>')
     return "\n".join(geoms)
 
 
