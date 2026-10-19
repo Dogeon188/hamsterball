@@ -57,6 +57,10 @@ _Avoid_: trigger, checkpoint
 A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height
 
+**Spawn**:
+Where a task in a level starts the hamsterball, together with the initial camera yaw.
+_Avoid_: start point, respawn
+
 **Hazard**:
 A marker that ends the episode in failure when the hamsterball enters it.
 _Avoid_: trap, death zone
