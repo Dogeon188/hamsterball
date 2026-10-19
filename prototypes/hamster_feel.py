@@ -38,7 +38,10 @@ L_ARM = R - T - R_HAM     # pendulum arm (B) = contact radius (C)
 TIMESTEP = 0.002
 B_KP, B_KD, B_TAU_MAX = 40.0, 4.0, 12.0   # B_KD was 3: B whirled at e=0.5 with the 2.25 kg hamster
 B_LEAN_MAX = math.radians(58)   # lean at full effort; past ~60 B whirls around the shell centre (KV_ALONG 0.65 is near its edge)
-C_KP, C_KD, C_F_MAX = 200.0, 32.0, 60.0   # foot-force lean PD and cap (cap stops binding above ~90); C_KD was 28 at 2 kg
+C_KP, C_KD, C_F_MAX = 200.0, 32.0, 120.0   # foot-force lean PD and cap; C_KD was 28 at 2 kg. Demand peaks at ~72 N for a few steps
+                          # (command steps, landings), cruise ~7, climb ~16: 120 never binds; 60 clipped those peaks and ~2% over bumps
+C_TOUCH, C_GRACE = 0.002, 0.02   # C drives only while its hamster is within C_TOUCH (m) of a tile face, or was C_GRACE (s) ago;
+                          # bridges the ~10-30 ms chatter over tile seams (strict contact misses ~35% of flat steps), cuts real hops
 K_GRIP = 2.0              # N m s/rad: C's feet grip the wall, an internal couple damping hamster spin relative to the shell
                           # (~1 rad/s left at full effort; 5 went unstable at this timestep)
 C_LEAN_MAX = math.radians(52)   # C's lean at full effort (drive torque ~ sin(lean)); whirls at 90 with KV_ALONG >= 0.8
@@ -99,7 +102,7 @@ def build(kind):
         inner = (f'<body name="ham"><joint type="ball" damping=".001"/>'
                  f'<geom type="sphere" size="{R_HAM}" pos="0 0 {-L_ARM}" mass="{m_ham}" contype="0" conaffinity="0" rgba="1 .6 .2 1"/>'
                  f'<geom type="capsule" fromto="0 0 0 0 0 {-L_ARM}" size=".01" mass=".001" contype="0" conaffinity="0" rgba="1 .6 .2 1"/></body>')
-    xml = f"""<mujoco><option timestep="{TIMESTEP}" integrator="implicitfast"/>
+    xml = f"""<mujoco><option timestep="{TIMESTEP}" integrator="implicitfast"/><size nuserdata="1"/>
 <visual><global offwidth="1280" offheight="720"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/>
 {course()}
@@ -124,6 +127,15 @@ def grounded(m, d, s):
                for c in d.contact[: d.ncon])
 
 
+def wall_gap(m, d):
+    """C: hamster surface to the nearest inner tile face (m), negative when pressed in; within 0.1 mm of MuJoCo's contact distance."""
+    s, h = m.body("shell").id, m.body("ham").id
+    a = m.body_geomadr[s]
+    normals = m.geom_pos[a:a + N_TILES] / (R - T / 2)  # tiles come first in the shell body
+    r = d.xmat[s].reshape(3, 3).T @ (d.xipos[h] - d.xpos[s])
+    return R - T - R_HAM - (normals @ r).max()
+
+
 def control(m, d, kind, v, e, v_run=None):
     """v: unit run direction in world xy (3-vector, z=0), e: effort in [0,1]. Also applies the ground drag."""
     s, h = m.body("shell").id, m.body("ham").id
@@ -134,6 +146,10 @@ def control(m, d, kind, v, e, v_run=None):
     down = np.array([0, 0, -1.0])
     w_h = d.cvel[h, :3]
     if kind == "C":
+        if wall_gap(m, d) <= C_TOUCH:
+            d.userdata[0] = d.time  # last touch
+        if d.time - d.userdata[0] > C_GRACE:
+            return  # airborne: feet off the wall push nothing, so no foot force, feed-forward or grip
         # foot force tracks the same lean target as B; without this PD the hamster sloshes
         n = (hp - c) / (np.linalg.norm(hp - c) + 1e-9)
         e *= min(1.0, max(0.0, 1 - np.dot(d.qvel[:2], v[:2]) / (v_run or V_RUN)))  # can only run so fast; braking and coasting keep full strength
@@ -192,7 +208,7 @@ def escaped(m, d):
 
 def smoke():
     """Headless check: each model rolls on flat ground without whirling; B climbs 20 deg from a run-up, C from rest on the ramp;
-    C settles at a drag-limited top speed, coasts and runs on downhill."""
+    C settles at a drag-limited top speed, coasts, runs on downhill and drives nothing while its hamster is airborne."""
     for kind in "ABC":
         m, d = build(kind)
         v = np.array([1.0, 0, 0])
@@ -237,6 +253,10 @@ def smoke():
     tt = turn("C")
     print(f"{'C turn':30s} -x at 5 m/s, then hold +y: heading turns 60 deg in {tt:4.2f} s")
     assert tt < 2, "C: steering too slow"
+    air, leak, x = airborne("C")
+    print(f"{'C airborne':30s} dropped from the centre: {air*1000:3.0f} ms in the air past the grace, worst applied {leak:.1e}, then rolls to x={x:5.2f} m")
+    assert air > 0.1 and leak == 0, "C: hamster drives while airborne"
+    assert x < -0.3, "C: control did not resume after landing"
     print("smoke ok")
 
 
@@ -366,6 +386,24 @@ def turn(kind="C", v_start=5.0, t_end=4.0):
         if math.degrees(math.atan2(d.qvel[1], -d.qvel[0])) >= 60:
             return d.time - t0
     return math.inf
+
+
+def airborne(kind="C", t_end=1.5):
+    """Hamster dropped from the shell centre at rest, full effort toward -x held throughout: (airtime past the grace (s),
+    worst applied hamster wrench and shell torque in it, shell x at t_end). Control must be off in the air and resume after landing."""
+    m, d = build(kind)
+    s, h = m.body("shell").id, m.body("ham").id
+    d.qpos[7:10] = d.qpos[0:3]
+    mujoco.mj_forward(m, d)
+    air, leak, landed = 0.0, 0.0, False
+    while d.time < t_end:
+        landed = landed or wall_gap(m, d) <= C_TOUCH
+        control(m, d, kind, np.array([-1.0, 0, 0]), 1.0)
+        if not landed and d.time > C_GRACE:
+            air += TIMESTEP
+            leak = max(leak, np.abs(d.xfrc_applied[h]).max(), np.abs(d.xfrc_applied[s, 3:]).max())
+        mujoco.mj_step(m, d)
+    return air, leak, d.qpos[0]
 
 
 def climb(kind, x=0, s0=None, casc=True, t_end=10.0):
