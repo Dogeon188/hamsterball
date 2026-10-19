@@ -278,7 +278,7 @@ def play():
         if np.linalg.norm(vel) > 0.8:
             err = (math.degrees(math.atan2(vel[1], vel[0])) - cam.azimuth + 180) % 360 - 180
             cam.azimuth += 0.03 * err
-        cam.azimuth += 2.0 * ((glfw.get_key(win, glfw.KEY_E) == glfw.PRESS) - (glfw.get_key(win, glfw.KEY_Q) == glfw.PRESS))
+        cam.azimuth += 2.0 * ((glfw.get_key(win, glfw.KEY_Q) == glfw.PRESS) - (glfw.get_key(win, glfw.KEY_E) == glfw.PRESS))
         cam.lookat[:] = d.xpos[s]
 
         wall = time.perf_counter() - t0
