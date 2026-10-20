@@ -1,0 +1,60 @@
+ -InternalBattery-0 (id=22610019)	100%; charged; 0:00 remaining present: true
+# macOS-27.0.1-arm64-arm-64bit arm cpus=8 python=3.12.9 mujoco=3.16.0 gymnasium=1.4.0 numpy=2.5.4 secs=5.0 reps=3
+raw  flat   mj_step/s     58122  env-equiv/s    5812
+raw  hfield mj_step/s     30626  env-equiv/s    3063
+single flat   asis env/s    1410  us/env-step control= 490.2 mj_step= 184.4 yaw=   8.5 marker=   6.2 obs=  14.8 total= 708.0
+single flat   fast env/s    1550  us/env-step control= 432.5 mj_step= 183.5 yaw=   8.4 marker=   6.0 obs=   9.5 total= 643.9
+single hfield asis env/s    1267  us/env-step control= 486.5 mj_step= 268.5 yaw=   8.6 marker=   6.1 obs=  14.6 total= 788.1
+single hfield fast env/s    1337  us/env-step control= 440.1 mj_step= 277.5 yaw=   8.8 marker=   6.2 obs=   9.8 total= 746.5
+vector sync  flat   asis n= 1 env/s    1402  per-copy   1402
+vector sync  flat   asis n= 4 env/s    1397  per-copy    349
+vector sync  flat   asis n=16 env/s    1402  per-copy     88
+vector async flat   asis n= 1 env/s    1237  per-copy   1237
+vector async flat   asis n= 2 env/s    2410  per-copy   1205
+vector async flat   asis n= 4 env/s    4482  per-copy   1120
+vector async flat   asis n= 8 env/s    4899  per-copy    612
+vector async flat   asis n=16 env/s    3968  per-copy    248
+vector sync  flat   fast n= 1 env/s    1541  per-copy   1541
+vector sync  flat   fast n= 4 env/s    1552  per-copy    388
+vector sync  flat   fast n=16 env/s    1526  per-copy     95
+vector async flat   fast n= 1 env/s    1398  per-copy   1398
+vector async flat   fast n= 2 env/s    2665  per-copy   1332
+vector async flat   fast n= 4 env/s    4911  per-copy   1228
+vector async flat   fast n= 8 env/s    4487  per-copy    561
+vector async flat   fast n=16 env/s    5385  per-copy    337
+vector sync  hfield asis n= 1 env/s    1248  per-copy   1248
+vector sync  hfield asis n= 4 env/s    1246  per-copy    312
+vector sync  hfield asis n=16 env/s    1180  per-copy     74
+vector async hfield asis n= 1 env/s    1164  per-copy   1164
+vector async hfield asis n= 2 env/s    2156  per-copy   1078
+vector async hfield asis n= 4 env/s    3809  per-copy    952
+vector async hfield asis n= 8 env/s    3515  per-copy    439
+vector async hfield asis n=16 env/s    4320  per-copy    270
+vector sync  hfield fast n= 1 env/s    1362  per-copy   1362
+vector sync  hfield fast n= 4 env/s    1288  per-copy    322
+vector sync  hfield fast n=16 env/s    1316  per-copy     82
+vector async hfield fast n= 1 env/s    1271  per-copy   1271
+vector async hfield fast n= 2 env/s    2344  per-copy   1172
+vector async hfield fast n= 4 env/s    2838  per-copy    709
+vector async hfield fast n= 8 env/s    3730  per-copy    466
+vector async hfield fast n=16 env/s    4061  per-copy    254
+
+# rerun after replacing np.cross in FastCore
+single flat   fast env/s    2161  us/env-step control= 250.8 mj_step= 182.8 yaw=   8.1 marker=   6.0 obs=   9.7 total= 461.2
+single hfield fast env/s    1811  us/env-step control= 251.3 mj_step= 271.6 yaw=   8.3 marker=   6.0 obs=   9.7 total= 550.7
+vector sync  flat   fast n= 1 env/s    2172  per-copy   2172
+vector sync  flat   fast n= 4 env/s    2180  per-copy    545
+vector sync  flat   fast n=16 env/s    2121  per-copy    133
+vector async flat   fast n= 1 env/s    1956  per-copy   1956
+vector async flat   fast n= 2 env/s    3610  per-copy   1805
+vector async flat   fast n= 4 env/s    6528  per-copy   1632
+vector async flat   fast n= 8 env/s    4464  per-copy    558
+vector async flat   fast n=16 env/s    5077  per-copy    317
+vector sync  hfield fast n= 1 env/s    1797  per-copy   1797
+vector sync  hfield fast n= 4 env/s    1824  per-copy    456
+vector sync  hfield fast n=16 env/s    1800  per-copy    112
+vector async hfield fast n= 1 env/s    1660  per-copy   1660
+vector async hfield fast n= 2 env/s    3046  per-copy   1523
+vector async hfield fast n= 4 env/s    5466  per-copy   1366
+vector async hfield fast n= 8 env/s    6062  per-copy    758
+vector async hfield fast n=16 env/s    6031  per-copy    377
