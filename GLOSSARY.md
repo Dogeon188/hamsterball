@@ -65,6 +65,10 @@ _Avoid_: map, stage, track
 The set of levels an env picks from when an episode starts: hand-authored levels, or a procedural generator.
 _Avoid_: level set, curriculum
 
+**Difficulty**:
+How hard a generated level is: a number from 0 (easiest) to 1 (hardest) that a level generator maps to its terrain and markers.
+_Avoid_: level (as a difficulty grade), tier
+
 **Marker**:
 A volume in a level that a task reacts to when the hamsterball's centre enters it: a goal, waypoint, item, key, survive region, or hazard.
 _Avoid_: trigger, checkpoint
@@ -80,6 +84,10 @@ _Avoid_: start point, respawn
 **Hazard**:
 A marker that ends the episode in failure when the hamsterball enters it.
 _Avoid_: trap, death zone
+
+**Cliff**:
+A vertical drop in a level that the hamsterball can go down but not up.
+_Avoid_: ledge, step
 
 **Task**:
 The objective of an episode within a level, which defines success, failure, and reward. v1 has five: **reach goal**, **waypoint race** (ordered waypoints), **collect items**, **unlock goal** (collect every key, then reach the goal), and **balance/survive** (stay inside the survive region until time runs out).
@@ -97,6 +105,10 @@ The human-playable front end: the env driven by a human at real-time pace, with 
 **Env**:
 The headless, faster-than-real-time front end that policies train against.
 _Avoid_: gym, simulator (for the front end)
+
+**Backend**:
+The physics implementation an env runs on: the **CPU core**, which is the reference that judges policies and records trajectories, or the **GPU-batched backend**, which runs many worlds at once for training and may drift from the CPU core.
+_Avoid_: engine, device
 
 **View**:
 A camera from which pixel observations or the game's screen are rendered: the **chase view**, the **follow view**, or the **first-person view**.
