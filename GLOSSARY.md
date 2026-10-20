@@ -43,6 +43,14 @@ _Avoid_: thrust, drive force
 Whoever issues actions to the hamster: a human player or a policy.
 _Avoid_: agent (ambiguous with the hamster)
 
+**Physics step**:
+One integration step of the core: the smallest unit of simulated time.
+_Avoid_: tick, substep (alone)
+
+**Env step**:
+One action from the controller, held over a fixed number of physics steps, followed by one observation; the game shows one env step per frame.
+_Avoid_: frame, timestep
+
 ### World
 
 **Level**:
