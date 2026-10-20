@@ -43,6 +43,10 @@ _Avoid_: thrust, drive force
 Whoever issues actions to the hamster: a human player or a policy.
 _Avoid_: agent (ambiguous with the hamster)
 
+**Low-level policy**:
+A policy that turns a run direction and effort into the articulated tier's joint torques, so a human can play the articulated tier.
+_Avoid_: gait controller, motor policy
+
 **Physics step**:
 One integration step of the core: the smallest unit of simulated time.
 _Avoid_: tick, substep (alone)
