@@ -484,13 +484,10 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,latex
 
-docs/
 data/
 
 # Local issue tracker (nested git repo)
 .scratch/
-
-CLAUDE.md
 
 # MuJoCo crash logs
 MUJOCO_LOG.TXT
