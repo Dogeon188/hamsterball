@@ -57,6 +57,10 @@ _Avoid_: frame, timestep
 The static 3D world a hamsterball moves through: terrain, ramps, edges, and task-relevant markers.
 _Avoid_: map, stage, track
 
+**Level pool**:
+The set of levels an env picks from when an episode starts: hand-authored levels, or a procedural generator.
+_Avoid_: level set, curriculum
+
 **Marker**:
 A volume in a level that a task reacts to when the hamsterball's centre enters it: a goal, waypoint, item, key, survive region, or hazard.
 _Avoid_: trigger, checkpoint
@@ -113,3 +117,11 @@ _Avoid_: heading, view angle
 **Trajectory**:
 A recorded episode of a controller's actions and the resulting states.
 _Avoid_: replay, demo, log
+
+**Abandoned run**:
+An episode the human leaves before success, failure, or the time limit ends it; the game discards it rather than recording it.
+_Avoid_: quit episode, partial trajectory
+
+**Human baseline**:
+The success rate and completion times humans reach on a level and task, measured from their recorded trajectories.
+_Avoid_: high score, leaderboard
