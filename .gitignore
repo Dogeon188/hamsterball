@@ -491,3 +491,6 @@ data/
 .scratch/
 
 CLAUDE.md
+
+# MuJoCo crash logs
+MUJOCO_LOG.TXT
