@@ -8,6 +8,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 - `import hamsterball` registers spec §2's six ids at `hamsterball.ENV_VERSION` (N = 0), each with `entry_point="hamsterball.env:HamsterballEnv"`: `Hamsterball-v0` (every kwarg free) and the presets `HamsterballReachGoal`, `HamsterballWaypointRace`, `HamsterballCollectItems`, `HamsterballUnlockGoal`, `HamsterballSurvive`, each fixing `tasks` to its one task. `hamsterball.register_ids(n)` also registers every version below n as an id whose entry point raises `gymnasium.error.DeprecatedEnv` naming the release to install (`hamsterball==<old N>.*`).
 - `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, views=(), view_size=(84, 84), obs_state=True, frame_skip=10, time_limit_s=None, shaped=False, shaping_gamma=0.99, model_cache=16)`. `levels` is a list of `Level` objects, bundled level names (stems in `hamsterball/levels/`), level file paths, or directories (their `*.yaml`); `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
+- `make_vec(num_envs, backend="cpu", **kwargs)`: every id's `vector_entry_point`, so `gymnasium.make_vec("Hamsterball-v0", num_envs=N, tasks=..., ...)` (mode `None` or `"vector_entry_point"`) calls it with the id's kwargs plus the caller's. It returns a stock `gymnasium.vector.AsyncVectorEnv` of `HamsterballEnv(**kwargs)` copies: `context="spawn"` on macOS and `"forkserver"` elsewhere, `shared_memory=True` only when `views` is non-empty, and `AutoresetMode.SAME_STEP` (the ended episode's observation in `info["final_obs"]`, its info in `info["final_info"]`). `backend` other than `"cpu"` raises `NotImplementedError` (spec §15's `"warp"`). `vectorization_mode="sync"` or `"async"` never reaches it: Gymnasium builds its own `SyncVectorEnv`/`AsyncVectorEnv` from the entry point, with Gymnasium's defaults (next-step autoreset) unless `vector_kwargs` says otherwise.
 - `env.set_levels(levels)`: replaces the pool from the next reset, with the same entries and the same check; on a vector env, `venv.call("set_levels", levels)`.
 - `reset(seed=None, options=None)`: `options` may hold `level` (a `Level` or canonical YAML string) and `task`; see How it works.
 - `DiscreteAction(env)`: a wrapper with `Discrete(25)`: 0 is a no-op; `1 + 8·e + k` runs toward `k·45°` clockwise from camera forward (k = 0 forward, 2 right, 4 back) at effort `(0.25, 0.5, 1.0)[e]`. Under the camera flag `cam_yaw` stays 0.
@@ -38,6 +39,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 ## Invariants and checks
 
+- `uv run pytest tests/test_vector.py`: `make_vec` per spec §10 Vector envs, views included.
 - `uv run pytest tests/test_env.py`: frames (yaw 0 faces +y), the swept goal, success, the kill plane, truncation at the step count, `info` keys, the 120°/s orbit, and a run over the `hill` hfield. The tests pin `levels=["first_goal"]` unless they name another, as the default pool is every bundled level.
 - `uv run pytest tests/test_tasks.py`: waypoints i and i + 1 in one step, waypoints out of order, the nearest item, the unlock goal ignored then unlocked, marker looks, shaping with γ 0.99 and 0.5, and each multi-target task played to success on its bundled level by a scripted controller (velocity tracking toward the current target, 3 m/s cap).
 - `uv run pytest tests/test_episode_setup.py`: same seed same (level, task), each option case, replay from `reset_options` on an env with other kwargs, pool entry kinds, `set_levels` direct and through `SyncVectorEnv.call`, LRU hits and eviction with `mj_resetData` on a hit, every preset with its default pool, a retired id's error, and the `DiscreteAction` table.
@@ -48,7 +50,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - The step-limit conversion subtracts 1e-9 before `ceil`, so a whole number of env steps doesn't round up through float error.
 - Waypoints stay visible once passed; spec §7 hides only collected items and keys.
 - A marker test runs on the whole step's segment, not the part after the previous target, so a step that crosses waypoint i + 1 before i (in space) still counts both when it also crosses i.
-- Not yet: `make_vec` and the ids' `vector_entry_point`, and the generator's `difficulty` (kwarg, reset option, and `set_levels(..., difficulty=)`). Those are ticket 14 and the generator ticket.
+- Not yet: the generator's `difficulty` (kwarg, reset option, and `set_levels(..., difficulty=)`). That is the generator ticket.
 - `action_space` comes from compiling the pool's first level, which takes one LRU slot.
 - The `MUJOCO_GL` default only takes effect if `hamsterball` is imported before `mujoco`.
 
@@ -61,6 +63,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 - 2026-10-22, ticket hamsterball-v1/07: the release named for a retired id is `hamsterball==<N>.*`, since spec §2 makes each N bump a major release and both start at 0; no release table to keep.
 - 2026-10-22, ticket hamsterball-v1/07: a `{task}` reset option draws from the whole pool, not only levels with an allowed task, since options override kwargs.
+- 2026-10-22, ticket hamsterball-v1/14: `make_vec` lives in `env.py` beside the env; the project owns no vector env (issue 23). Each worker builds its env from a `functools.partial(HamsterballEnv, **kwargs)`, which pickles under `spawn`; the renderer is already lazy, so it's made in the worker. `vectorization_mode="sync"` keeps Gymnasium's own path and next-step autoreset default rather than being forced to same-step, since Gymnasium never calls the entry point in that mode.
 
 ## Tried and rejected
 
@@ -75,3 +78,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/06: added `views`, `view_size`, `obs_state`, and `close()`; `info` now takes `state` and `goal` from the vectors, not the observation.
 - 2026-10-22, ticket hamsterball-v1/07: reset options and `info['reset_options']`, directories in the pool, `set_levels`, the `model_cache` LRU, the six ids with retired versions, and `DiscreteAction`.
 - 2026-10-22, merge of ticket 07 into ticket 06: each `model_cache` entry is `[core, renderer or None]`, so a renderer evicts with its model (spec §7, §11), replacing ticket 06's separate unbounded renderer cache.
+- 2026-10-22, ticket hamsterball-v1/14: added `make_vec` and registered it as every current id's `vector_entry_point`. `tests/test_vector.py`: the async env's context, shared memory, and autoreset mode; same-step reset with `final_obs`; forkserver under a Linux platform; sync mode; the warp error; two views rendered in spawned workers.

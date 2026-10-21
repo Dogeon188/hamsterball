@@ -34,7 +34,12 @@ def _retired(env_id, n, **_):
 def register_ids(n=ENV_VERSION):
     """Register the six ids at version n, and every older version as an id that raises naming its release."""
     for name, task in PRESETS.items():
-        register(id=f"{name}-v{n}", entry_point="hamsterball.env:HamsterballEnv", kwargs={"tasks": [task]} if task else {})
+        register(
+            id=f"{name}-v{n}",
+            entry_point="hamsterball.env:HamsterballEnv",
+            vector_entry_point="hamsterball.env:make_vec",
+            kwargs={"tasks": [task]} if task else {},
+        )
         for old in range(n):
             register(id=f"{name}-v{old}", entry_point=partial(_retired, f"{name}-v{old}", old))
 
