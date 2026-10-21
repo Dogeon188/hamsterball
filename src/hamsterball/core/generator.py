@@ -1,5 +1,6 @@
 """Procedural levels (spec §8): the LevelGenerator protocol and ProceduralGenerator, which builds a solvable hfield
-level for any task at any difficulty, the same level on every platform for the same (task, seed, difficulty, version)."""
+level for any task at any difficulty, and the same level on every platform for the same (task, seed, difficulty,
+version)."""
 
 import base64
 import heapq
@@ -325,7 +326,8 @@ def _hfield(h, shape, centre):
     # samples span 0..65535 exactly, as MuJoCo scales the lowest to 0 and the highest to the max height
     q = np.round((h - lo) / (hi - lo) * 65535).astype("<u2")
     nrow, ncol = shape
-    geom = {"type": "hfield", "pos": [centre[0], centre[1], z0], "size": [(ncol - 1) * CELL / 2, (nrow - 1) * CELL / 2, top],
+    size = [(ncol - 1) * CELL / 2, (nrow - 1) * CELL / 2, top]
+    geom = {"type": "hfield", "pos": [centre[0], centre[1], z0], "size": size,
             "nrow": nrow, "ncol": ncol, "samples": base64.b64encode(q.tobytes()).decode()}
     return geom, z0 + q / 65535 * top
 

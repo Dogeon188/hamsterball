@@ -173,3 +173,76 @@ def test_the_seed_difficulty_sweep_matches_its_golden_hashes(capsys):
     assert got == GOLDEN
     assert rate < 0.25
     assert GEN("waypoint_race", 3, 0.5).id == GEN("waypoint_race", 3, 0.5).id
+
+
+# --- the env's generator pool and difficulty (spec §10) ---
+
+
+def test_the_env_draws_generated_levels_and_reports_their_difficulty():
+    env = HamsterballEnv(["waypoint_race", "survive"], levels=GEN, difficulty=0.3)
+    seen = set()
+    for s in range(6):
+        _, info = env.reset(seed=s)
+        opts = info["reset_options"]
+        level = Level.from_yaml(opts["level"])
+        assert opts["difficulty"] == 0.3 == level.generator["difficulty"]
+        assert opts["task"] == level.generator["task"] in ("waypoint_race", "survive")
+        seen.add(opts["task"])
+    assert seen == {"waypoint_race", "survive"}
+    _, a = env.reset(seed=11)
+    _, b = env.reset(seed=11)
+    assert a["reset_options"] == b["reset_options"]
+
+
+def test_reset_options_override_the_difficulty_and_pick_the_task():
+    env = HamsterballEnv(["reach_goal"], levels=GEN)
+    _, info = env.reset(seed=0)
+    assert info["reset_options"]["difficulty"] == 0.5  # the default
+    _, info = env.reset(seed=0, options={"difficulty": 0.9, "task": "collect_items"})
+    assert info["reset_options"]["difficulty"] == 0.9 and info["reset_options"]["task"] == "collect_items"
+
+
+def test_a_generated_episode_replays_from_its_reset_options_on_a_file_pool_env():
+    env = HamsterballEnv(["unlock_goal"], levels=GEN, difficulty=0.6)
+    _, info = env.reset(seed=4)
+    opts = info["reset_options"]
+    other = HamsterballEnv(["reach_goal"], levels=["first_goal"])
+    _, info2 = other.reset(options={"level": opts["level"], "task": opts["task"]})
+    assert info2["reset_options"] == opts  # difficulty comes from the level's provenance
+
+
+def test_a_non_default_difficulty_with_a_file_pool_raises():
+    with pytest.raises(ValueError):
+        HamsterballEnv(["reach_goal"], levels=["first_goal"], difficulty=0.7)
+    env = HamsterballEnv(["reach_goal"], levels=["first_goal"])
+    with pytest.raises(ValueError):
+        env.set_levels(["first_goal"], difficulty=0.7)
+    with pytest.raises(ValueError):
+        env.reset(options={"difficulty": 0.7})
+    _, info = env.reset(seed=0)
+    assert "difficulty" not in info["reset_options"]
+
+
+def test_set_levels_swaps_in_a_generator_with_a_difficulty():
+    env = HamsterballEnv(["reach_goal"], levels=["first_goal"])
+    env.set_levels(GEN, difficulty=0.2)
+    _, info = env.reset(seed=0)
+    assert info["reset_options"]["difficulty"] == 0.2
+    env.set_levels(["first_goal"])
+    _, info = env.reset(seed=0)
+    assert "difficulty" not in info["reset_options"]
+
+
+def test_levels_accepts_any_object_that_satisfies_the_protocol():
+    class Flat:
+        tasks = ("reach_goal",)
+        version = 3
+
+        def __call__(self, task, seed, difficulty):
+            return GEN(task, seed % 4, difficulty)
+
+    env = HamsterballEnv(["reach_goal", "survive"], levels=Flat(), difficulty=0.1)
+    _, info = env.reset(seed=0)
+    assert info["reset_options"]["task"] == "reach_goal" and info["reset_options"]["difficulty"] == 0.1
+    with pytest.raises(ValueError):
+        HamsterballEnv(["survive"], levels=Flat())  # no task the generator supports
