@@ -32,7 +32,7 @@ def test_the_hamsterball_rests_at_a_generated_spawn():
 def toward_target(obs):
     """test_tasks.py's scripted controller: steer the shell's velocity toward the current target at up to 3 m/s."""
     g, v = obs["goal"][:2], obs["state"][6:8]
-    a = g / np.linalg.norm(g) * min(3.0, np.linalg.norm(g)) - v
+    a = g / max(np.linalg.norm(g), 1e-9) * min(3.0, np.linalg.norm(g)) - v
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
 
 
@@ -48,7 +48,9 @@ def test_a_scripted_controller_finishes_an_easy_generated_level_within_its_time_
 
 
 def test_the_hamsterball_survives_an_easy_plateau_with_no_input():
-    env = HamsterballEnv(["survive"], levels=[GEN("survive", 0, 0.0)], time_limit_s=3)
+    level = GEN("survive", 3, 0.0)
+    assert layout(level) == "plateau"
+    env = HamsterballEnv(["survive"], levels=[level], time_limit_s=3)
     env.reset(seed=0)
     while True:
         _, _, terminated, truncated, info = env.step(np.zeros(2, np.float32))
@@ -124,23 +126,87 @@ def test_the_time_limit_covers_the_route_at_5_m_s_times_the_slack():
             assert block["time_limit_s"] >= straight / 5 * GEN.params(d)["time_slack"] - 0.01
 
 
-def test_survive_picks_a_plateau_disc_or_a_ridge_by_seed():
+def layout(level):
+    """Which of survive's six layouts a generated level is."""
+    region = level.tasks["survive"]["region"]
+    if level.collapse:
+        return "collapse"
+    if level.bodies:
+        return "seesaw" if "joint" in level.bodies[0] else "platform" if "attach" in region else "obstacles"
+    f = region["fromto"]
+    return "ridge" if f[:2] != f[3:5] else "plateau"
+
+
+def test_survive_picks_one_of_six_layouts_by_seed():
+    from collections import Counter
+
+    counts = Counter(layout(GEN("survive", s, 0.0)) for s in range(120))
+    assert set(counts) == {"plateau", "ridge", "obstacles", "platform", "seesaw", "collapse"}
+    assert all(10 <= n <= 30 for n in counts.values()), counts  # 1/6 each
+
+
+def test_plateau_and_ridge_regions_follow_the_table():
     p = GEN.params(0.0)
-    shapes = []
-    for s in range(20):
-        block = GEN("survive", s, 0.0).tasks["survive"]
+    for s in range(40):
+        level = GEN("survive", s, 0.0)
+        if layout(level) not in ("plateau", "ridge"):
+            continue
+        block = level.tasks["survive"]
         region, spawn = block["region"], block["spawn"]["pos"]
-        f = region["fromto"]
-        ridge = f[:2] != f[3:5]
-        shapes.append(ridge)
+        ridge = layout(level) == "ridge"
         assert region["radius"] == (p["survive_ridge_width"] / 2 if ridge else p["survive_disc_radius"])
         assert spawn == list(centre(region))  # the region's centre, at shell-centre height (spec §9)
         assert block["time_limit_s"] == p["survive_duration"]
-    assert 5 <= sum(shapes) <= 15
 
 
-def survive_levels(d, seeds=range(8)):
-    return [GEN("survive", s, d) for s in seeds]
+def spiral_walk(obs, walk):
+    """Collapse's scripted controller: roll at 2 m/s through the tile centres in a square spiral out from the spawn's
+    tile (`walk` = [the spiral's points, the next one's index]), so each tile is left before it falls."""
+    pts, i = walk
+    p, (sy, cy) = obs["state"][:2], obs["state"][4:6]
+    if np.linalg.norm(pts[i] - p) < 0.4:
+        walk[1] = i = i + 1
+    w = pts[i] - p
+    g = np.array([w[0] * cy + w[1] * sy, -w[0] * sy + w[1] * cy])  # world -> camera yaw frame, as the goal vector
+    a = g / max(np.linalg.norm(g), 1e-9) * 2.0 - obs["state"][6:8]
+    return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
+
+
+def spiral(n, pitch):
+    out, x, y, dx, dy, leg = [(0, 0)], 0, 0, 1, 0, 1
+    while len(out) < n:
+        for _ in range(2):
+            for _ in range(leg):
+                x, y = x + dx, y + dy
+                out.append((x, y))
+            dx, dy = -dy, dx
+        leg += 1
+    return np.array(out[:n], float) * pitch
+
+
+def test_every_survive_layout_at_difficulty_zero_is_survived_by_a_scripted_controller():
+    from hamsterball.core.generator import TILE_PITCH
+
+    seen = set()
+    for seed in range(36):
+        level = GEN("survive", seed, 0.0)
+        seen.add(layout(level))
+        walk = [spiral(100, TILE_PITCH), 0]
+        env = HamsterballEnv(["survive"], levels=[level])
+        obs, _ = env.reset(seed=0)
+        while True:
+            a = spiral_walk(obs, walk) if level.collapse else toward_target(obs)
+            obs, _, terminated, truncated, info = env.step(a)
+            if terminated or truncated:
+                break
+        assert info["success"], (seed, layout(level), info["failure_reason"])
+    assert len(seen) == 6
+
+
+def survive_levels(d, n=8):
+    """The first n plateau or ridge levels by seed, the layouts that carry ticket 07's movers."""
+    levels = (GEN("survive", s, d) for s in range(1000))
+    return [lv for lv in levels if layout(lv) in ("plateau", "ridge")][:n]
 
 
 def test_easy_survive_levels_hold_still():
@@ -182,7 +248,7 @@ def test_survive_hazards_move_more_and_faster_with_difficulty_and_start_clear_of
 
 @pytest.mark.parametrize("d", [0.5, 0.75, 1.0])
 def test_survive_from_mid_difficulty_fails_with_no_input(d):
-    for seed in range(4):
+    for seed in range(12):
         env = HamsterballEnv(["survive"], levels=[GEN("survive", seed, d)])
         env.reset(seed=0)
         while True:
@@ -190,6 +256,34 @@ def test_survive_from_mid_difficulty_fails_with_no_input(d):
             if terminated or truncated:
                 break
         assert not info["success"], (seed, d)
+
+
+def first(kind, d):
+    return next(lv for lv in (GEN("survive", s, d) for s in range(1000)) if layout(lv) == kind)
+
+
+@pytest.mark.parametrize("d, pillars, speed, tilt, k, off, delay", [
+    (0.0, 1, 0.5, None, 400, 0.25, 2.0), (1.0, 3, 2.0, 12, 50, 1.5, 0.5),
+])
+def test_the_body_layouts_scale_with_difficulty(d, pillars, speed, tilt, k, off, delay):
+    peak = lambda m: m["amplitude"] * 2 * np.pi / m["period"]  # noqa: E731
+    bodies = first("obstacles", d).bodies
+    assert len(bodies) == pillars and all(abs(peak(b["motion"]) - speed) < 0.01 for b in bodies)
+    m = first("platform", d).bodies[0]["motion"]
+    assert abs(peak(m) - GEN.params(d)["platform_speed"]) < 0.01
+    assert (m["tilt"]["amplitude"] if "tilt" in m else None) == tilt
+    seesaw = first("seesaw", d)
+    assert seesaw.bodies[0]["joint"]["stiffness"] == k
+    assert abs(np.linalg.norm(seesaw.tasks["survive"]["spawn"]["pos"][:2]) - off) < 0.01
+    collapse = first("collapse", d).collapse
+    assert collapse["delay"] == delay and len(collapse["tiles"]) < 100  # tickets 06: under about 100 tiles
+
+
+def test_a_collapse_time_limit_never_outlasts_its_tiles():
+    for d in (0.0, 0.5, 1.0):
+        level = first("collapse", d)
+        c = level.collapse
+        assert level.tasks["survive"]["time_limit_s"] <= 0.5 * len(c["tiles"]) * c["delay"] + 1e-9
 
 
 def test_hazards_appear_with_difficulty():
@@ -200,11 +294,11 @@ def test_hazards_appear_with_difficulty():
 # sha256 over the space-joined level ids of the sweep, per task. A change here is a change to the generator's
 # output: bump ProceduralGenerator.version and update these (spec §8 Determinism).
 GOLDEN = {
-    "reach_goal": "c9aea83e946be0d48f1a20c51b871310ad5a16129e5fadee081a29789df4337f",
-    "waypoint_race": "86cbe3377440abbca2539b7aad2b1a1200854ce32996637da4564d5e620b631b",
-    "collect_items": "6b5c27b24b355ba4c251d21a8d35b7e4c9f6cc5cba4f66f4fe1efda3e1d2297f",
-    "unlock_goal": "670ec8bbe8553fe4918d328d96ee198ee885bd962d2b5789c0913ca2bce5cc08",
-    "survive": "7a61d6e2572477aec5b5cce0d3709ba29382eb3b2853289d055b913aefd8a9ff",
+    "reach_goal": "1ab838ff7faf8f1137c185493ae1033d625004640ce34739e4af88e61345ab59",
+    "waypoint_race": "559b001ff63d82bb59597ea0040339bacd63d0bb83bc39f6d7575e89814529b8",
+    "collect_items": "1ecd136f0503cb7a6bf173bc61aaaa769d9e4147c1d87742d3f56f4d078fca1d",
+    "unlock_goal": "b4c6c6028116478b3c10de6b9f0e9dc85b769a3f57a7e7caad6a0401cf8514f4",
+    "survive": "f130e29280f328d8922da9a0cec9730d75abdf5ce17d1fa02687957cb1e95833",
 }
 
 

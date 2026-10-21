@@ -29,15 +29,22 @@ TABLE = {
     "items": (2, 8),
     "keys": (1, 4),
     "time_slack": (3.0, 1.5),
-    "survive_disc_radius": (4.0, 1.5),
+    "survive_disc_radius": (4.0, 2.0),
     "survive_ridge_width": (3.0, 1.5),
     "survive_falloff_grade": (10.0, 30.0),
     "survive_duration": (10.0, 60.0),
     "survive_drift_speed": (0.0, 1.5),
     "moving_hazards": (0, 3),
     "hazard_speed": (1.0, 2.0),
+    "obstacles": (1, 3),
+    "obstacle_speed": (0.5, 2.0),
+    "platform_speed": (0.25, 1.0),
+    "platform_tilt": (0.0, 12.0),
+    "seesaw_stiffness": (400.0, 50.0),
+    "seesaw_offset": (0.25, 1.5),
+    "tile_delay": (2.0, 0.5),
 }
-COUNTS = ("waypoints", "items", "keys", "moving_hazards")  # round to whole markers
+COUNTS = ("waypoints", "items", "keys", "moving_hazards", "obstacles")  # round to whole markers
 CLIFFS_FROM = 0.5  # difficulty at which cliffs start
 
 # Spec §8's fixed values
@@ -66,6 +73,14 @@ HAZARD_CLEAR = 2.0  # hazard centre to spawn or target, at least (m)
 MOVER_RADIUS = 0.4  # survive's moving hazards are spheres this size (m)
 MOVER_SWEEP = 3.0  # a moving hazard's amplitude (m)
 DODGE_SPEED = 2.5  # the speed the dodge check grants the hamsterball (m/s)
+LAYOUTS = ("plateau", "ridge", "obstacles", "platform", "seesaw", "collapse")  # survive's, 1/6 each by seed
+PILLAR = (0.4, 0.5)  # an obstacle: a vertical capsule's radius and half-length (m)
+SLAB = 2.0  # a platform's or seesaw's half-side (m); its top sits at z = 0
+PLATFORM_SWEEP = 3.0  # a driven platform's amplitude (m)
+TILT_PERIOD = 7.0  # a driven platform's rocking period (s)
+SEESAW = {"type": "ball", "damping": 20.0, "range": 15.0, "mass": 20.0}
+TILE_PITCH, TILE_SIDES = 1.5, (7, 9)  # collapse: tile spacing (m), and the tiles per side the seed picks from
+TILE_USE = 0.5  # collapse: the time limit is at most this times tiles x delay, the time the tiles can hold the ball
 
 
 @runtime_checkable
@@ -90,7 +105,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 3
+    version = 4
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -119,9 +134,11 @@ class ProceduralGenerator:
             raise ValueError(f"difficulty {difficulty} is not in [0, 1]")
         rng = np.random.Generator(np.random.PCG64(seed))  # retries take the next draws from the same stream
         p = self.params(difficulty)
+        # survive's layout is drawn once, so retries stay in it and the seed's 1/6 split holds at every difficulty
+        kind = LAYOUTS[int(rng.random() * len(LAYOUTS))] if task == "survive" else None
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                d = _survive(p, rng) if task == "survive" else _route(task, p, rng)
+                d = _survive(kind, p, rng) if task == "survive" else _route(task, p, rng)
             except _Retry:
                 continue
             d["generator"] = {"name": self.name, "version": self.version, "task": task, "seed": int(seed),
@@ -248,9 +265,14 @@ def _profile(length, p, rng):
     return np.array(us), np.array(hs)
 
 
-def _survive(p, rng):
-    """A disc region on a plateau or a capsule region along a ridge, 50/50; each falls off at the falloff grade."""
-    if rng.random() < 0.5:
+def _survive(kind, p, rng):
+    """One of LAYOUTS, 1/6 each: a disc region on a plateau (bare or with moving obstacles) or a capsule region along
+    a ridge, each falling off at the falloff grade; or a driven platform, a seesaw, or a floor of collapsing tiles."""
+    if kind in ("platform", "seesaw"):
+        return _slab(kind, p, rng)
+    if kind == "collapse":
+        return _tiles(p, rng)
+    if kind != "ridge":
         a = b = np.zeros(2)
         flat = p["survive_disc_radius"]
         # a vertical capsule centred at shell-centre height, so the goal vector to its centre lies flat
@@ -270,6 +292,8 @@ def _survive(p, rng):
     dist, _ = _nearest(x, y, pts, seg, seg_len, np.array([0.0, float(seg_len[0])]))
     h = -np.maximum(0.0, dist - flat) * math.tan(math.radians(p["survive_falloff_grade"]))
     hfield, h = _hfield(h, shape, centre)
+    if kind == "obstacles":
+        return _obstacles(p, rng, x, y, dist <= flat, region, h, hfield, _cell(np.zeros(2), shape, centre))
     if p["survive_drift_speed"] > 0:
         # new draws come after the layout's, so a still level keeps its draws
         axis = (b - a) / RIDGE_LENGTH if any(b) else _heading(rng.uniform(0, math.pi))
@@ -286,8 +310,9 @@ def _survive(p, rng):
         hz = _oscillate(_heading(rng.uniform(0, math.pi)), MOVER_SWEEP, p["hazard_speed"], round(rng.random(), 3))
         hazards.append({"type": "sphere", "pos": [round(float(c[0]), 3), round(float(c[1]), 3), SHELL_R],
                         "radius": MOVER_RADIUS, "motion": hz})
-    if (hazards or "motion" in region) and not _dodge(x, y, pts, dist <= flat, region, hazards, p,
-                                                                _cell(np.zeros(2), shape, centre)):
+    movers = [(hz["pos"][:2], hz["motion"], MOVER_RADIUS, p["hazard_speed"]) for hz in hazards]
+    if (hazards or "motion" in region) and not _dodge(x, y, pts, dist <= flat, region, movers, p,
+                                                      _cell(np.zeros(2), shape, centre)):
         raise _Retry
     return {
         "kill_plane_z": round(float(h.min()) - KILL_DEPTH, 3),
@@ -297,6 +322,78 @@ def _survive(p, rng):
                               "time_limit_s": round(p["survive_duration"], 3)}},
         "follow_yaw_deg": yaw,
     }
+
+
+def _sweep_point(flat, rng, first):
+    """A mover's centre: the spawn for the first, so standing still is hit; else a random point of the plateau."""
+    if first:
+        return np.zeros(2)
+    r, phi = flat * math.sqrt(rng.random()), rng.uniform(0, 2 * math.pi)
+    return r * np.array([math.cos(phi), math.sin(phi)])
+
+
+def _obstacles(p, rng, x, y, top, region, h, hfield, start):
+    """The plateau with `obstacles` solid pillars oscillating MOVER_SWEEP either side of their centres at
+    `obstacle_speed`; the dodge check asks that the hamsterball can keep clear of every one."""
+    flat, bodies, movers = region["radius"], [], []
+    for i in range(p["obstacles"]):
+        c = _sweep_point(flat, rng, not i)
+        m = _oscillate(_heading(rng.uniform(0, math.pi)), MOVER_SWEEP, p["obstacle_speed"], round(rng.random(), 3))
+        pos = [round(float(c[0]), 3), round(float(c[1]), 3), PILLAR[1] + PILLAR[0]]  # its foot on the ground
+        bodies.append({"pos": pos, "geoms": [{"type": "capsule", "size": list(PILLAR), "rgba": [0.85, 0.45, 0.1, 1]}],
+                       "motion": m})
+        movers.append((pos[:2], m, PILLAR[0], p["obstacle_speed"]))
+    if not _dodge(x, y, np.zeros((2, 2)), top, region, movers, p, start):
+        raise _Retry
+    return {
+        "kill_plane_z": round(float(h.min()) - KILL_DEPTH, 3),
+        "geoms": [hfield],
+        "bodies": bodies,
+        "tasks": {"survive": {"spawn": {"pos": [0.0, 0.0, SHELL_R], "yaw_deg": 0.0}, "region": region,
+                              "time_limit_s": round(p["survive_duration"], 3)}},
+        "follow_yaw_deg": 0.0,
+    }
+
+
+def _slab(kind, p, rng):
+    """A 4 m square slab over nothing, the region riding it: a driven platform oscillating PLATFORM_SWEEP at
+    `platform_speed` and rocking up to `platform_tilt` about a random axis, spawn at its centre; or a seesaw on a ball
+    joint of `seesaw_stiffness`, spawn `seesaw_offset` off the pivot in a random direction."""
+    body = {"pos": [0.0, 0.0, -0.1], "geoms": [{"type": "box", "size": [SLAB, SLAB, 0.1],
+                                                  "rgba": [0.55, 0.4, 0.25, 1]}]}
+    spawn = [0.0, 0.0, SHELL_R]
+    if kind == "platform":
+        body["motion"] = _oscillate(_heading(rng.uniform(0, math.pi)), PLATFORM_SWEEP, p["platform_speed"], 0.0)
+        phi = rng.uniform(0, math.pi)
+        if p["platform_tilt"] > 0:
+            body["motion"]["tilt"] = {"axis": [*map(float, _heading(phi)), 0.0],
+                                      "amplitude": round(p["platform_tilt"], 3), "period": TILT_PERIOD}
+    else:
+        body["joint"] = SEESAW | {"stiffness": round(p["seesaw_stiffness"], 3)}
+        q = p["seesaw_offset"] * _heading(rng.uniform(0, 2 * math.pi))
+        spawn = [round(float(q[0]), 3), round(float(q[1]), 3), SHELL_R]
+    region = {"type": "box", "pos": [0.0, 0.0, 0.6], "size": [SLAB, SLAB, 0.5], "attach": 0}
+    return {"kill_plane_z": -KILL_DEPTH, "geoms": [], "bodies": [body],
+            "tasks": {"survive": {"spawn": {"pos": spawn, "yaw_deg": 0.0}, "region": region,
+                                  "time_limit_s": round(p["survive_duration"], 3)}},
+            "follow_yaw_deg": 0.0}
+
+
+def _tiles(p, rng):
+    """A floor of 7 or 9 by 7 or 9 collapsing tiles TILE_PITCH apart, each falling `tile_delay` after the first touch,
+    spawn on the centre tile. The time limit is the smaller of `survive_duration` and TILE_USE x tiles x delay, so a
+    short delay never asks for more time than the tiles can give."""
+    nx, ny = (TILE_SIDES[int(rng.random() * len(TILE_SIDES))] for _ in range(2))
+    half = TILE_PITCH / 2 - 0.01
+    tiles = [{"type": "box", "pos": [(i - nx // 2) * TILE_PITCH, (j - ny // 2) * TILE_PITCH, -0.1],
+              "size": [half, half, 0.1]} for i in range(nx) for j in range(ny)]
+    delay = round(p["tile_delay"], 3)
+    region = {"type": "box", "pos": [0.0, 0.0, SHELL_R], "size": [nx * TILE_PITCH / 2, ny * TILE_PITCH / 2, 2.0]}
+    limit = round(min(p["survive_duration"], TILE_USE * len(tiles) * delay), 3)
+    return {"kill_plane_z": -KILL_DEPTH, "geoms": [], "collapse": {"delay": delay, "tiles": tiles},
+            "tasks": {"survive": {"spawn": {"pos": [0.0, 0.0, SHELL_R], "yaw_deg": 0.0}, "region": region,
+                                  "time_limit_s": limit}},
+            "follow_yaw_deg": 0.0}
 
 
 # --- terrain --------------------------------------------------------------------------------------------------------
@@ -442,20 +539,21 @@ def _astar(h, ok, nrow, ncol, src, dst, cliff):
     return None
 
 
-def _dodge(x, y, pts, top, region, hazards, p, start):
+def _dodge(x, y, pts, top, region, movers, p, start):
     """Whether the hamsterball, moving at DODGE_SPEED over the flat top `top`, can keep its centre inside the region
-    and clear of every moving hazard for the whole survive duration. A time-expanded flood fill: each layer is one
+    and clear of every mover for the whole survive duration. `movers` are (centre xy, motion, radius, peak speed):
+    moving hazards, or obstacle pillars, which shove rather than end the episode, so keeping clear of them is
+    stricter than surviving them. A time-expanded flood fill: each layer is one
     cell of travel later (CELL / DODGE_SPEED s), the reachable nodes grow by one 4-neighbour step and keep only the
     nodes that are safe then. A node is safe at time t when it sits CELL plus a layer's drift inside the region and
-    further than the hazard radius, the shell radius, half a cell and a layer of the hazard's travel from every hazard
+    further than the mover's radius, the shell radius, half a cell and a layer of the mover's travel from every mover's
     centre. Starts from the spawn's node, so a spawn inside a hazard at t = 0 fails."""
     dt = CELL / DODGE_SPEED
     drift = region.get("motion")
     inner = region["radius"] - CELL - (p["survive_drift_speed"] * dt if drift else 0.0)
-    clear = (MOVER_RADIUS + SHELL_R + CELL / 2 + p["hazard_speed"] * dt) ** 2
     seg = (pts[1] - pts[0])[None]
     seg_len = np.sqrt((seg**2).sum(1))
-    movers = [(np.array(hz["pos"][:2]), load_motion(hz["motion"])) for hz in hazards]
+    movers = [(np.array(c), load_motion(m), (r + SHELL_R + CELL / 2 + v * dt) ** 2) for c, m, r, v in movers]
     drift = drift and load_motion(drift)
     reach = None
     for k in range(math.ceil(p["survive_duration"] / dt) + 1):
@@ -463,7 +561,7 @@ def _dodge(x, y, pts, top, region, hazards, p, start):
         o = pose(drift, t)[0][:2] if drift else np.zeros(2)
         d, _ = _nearest(x, y, pts + o, seg, seg_len, np.array([0.0, float(seg_len[0])]))
         safe = top & (d <= inner)
-        for c, m in movers:
+        for c, m, clear in movers:
             q = c + pose(m, t)[0][:2]
             safe &= (x - q[0]) ** 2 + (y - q[1]) ** 2 > clear
         if reach is None:
