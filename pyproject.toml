@@ -1,0 +1,20 @@
+[project]
+name = "hamsterball"
+version = "0.0.0"
+description = "A hamster running inside a rolling shell: a Gymnasium env and a human-playable game on one MuJoCo core."
+requires-python = ">=3.11"
+dependencies = [
+    "mujoco==3.16.0",
+    "gymnasium>=1.4,<2",
+    "numpy",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
