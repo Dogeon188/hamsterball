@@ -12,6 +12,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - `make_vec(num_envs, backend="cpu", **kwargs)`: every id's `vector_entry_point`, so `gymnasium.make_vec("Hamsterball-v0", num_envs=N, tasks=..., ...)` (mode `None` or `"vector_entry_point"`) calls it with the id's kwargs plus the caller's. It returns a stock `gymnasium.vector.AsyncVectorEnv` of `HamsterballEnv(**kwargs)` copies: `context="spawn"` on macOS and `"forkserver"` elsewhere, `shared_memory=True` only when `views` is non-empty, and `AutoresetMode.SAME_STEP` (the ended episode's observation in `info["final_obs"]`, its info in `info["final_info"]`). `backend` other than `"cpu"` raises `NotImplementedError` (spec §15's `"warp"`). `vectorization_mode="sync"` or `"async"` never reaches it: Gymnasium builds its own `SyncVectorEnv`/`AsyncVectorEnv` from the entry point, with Gymnasium's defaults (next-step autoreset) unless `vector_kwargs` says otherwise.
 - `env.set_levels(levels)`: replaces the pool from the next reset, with the same entries and the same check; on a vector env, `venv.call("set_levels", levels)`.
 - `reset(seed=None, options=None)`: `options` may hold `level` (a `Level` or canonical YAML string) and `task`; see How it works.
+- `env.unwrapped.step_to(core_state)`: one env step to a recorded core state, set with `Core.set_state` in place of stepping physics, then the rest of `step` as usual (marker tests, outcome, reward, observation, `info`). Re-render uses it (see [rerender.md](data/rerender.md)); it returns what `step` returns.
 - `DiscreteAction(env)`: a wrapper with `Discrete(25)`: 0 is a no-op; `1 + 8·e + k` runs toward `k·45°` clockwise from camera forward (k = 0 forward, 2 right, 4 back) at effort `(0.25, 0.5, 1.0)[e]`. Under the camera flag `cam_yaw` stays 0.
 - Action: the core's (`[run_x, run_y]`, plus `cam_yaw` under `camera_action`).
 - Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables, plus one `Box(0, 255, (H, W, 3), uint8)` per entry of `views` (see [core/views.md](core/views.md)). `obs_state=False` drops `state` and `goal`, and then needs at least one view.
@@ -65,6 +66,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/07: the release named for a retired id is `hamsterball==<N>.*`, since spec §2 makes each N bump a major release and both start at 0; no release table to keep.
 - 2026-10-22, ticket hamsterball-v1/07: a `{task}` reset option draws from the whole pool, not only levels with an allowed task, since options override kwargs.
 - 2026-10-22, ticket hamsterball-v1/14: `make_vec` lives in `env.py` beside the env; the project owns no vector env (issue 23). Each worker builds its env from a `functools.partial(HamsterballEnv, **kwargs)`, which pickles under `spawn`; the renderer is already lazy, so it's made in the worker. `vectorization_mode="sync"` keeps Gymnasium's own path and next-step autoreset default rather than being forced to same-step, since Gymnasium never calls the entry point in that mode.
+- 2026-10-22, ticket hamsterball-v1/09: `step` is the physics then `_advance()`; `step_to` swaps the physics for a stored core state, so re-render reuses the marker tests, marker looks, and view posing instead of copying them.
 
 ## Tried and rejected
 
@@ -81,3 +83,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, merge of ticket 07 into ticket 06: each `model_cache` entry is `[core, renderer or None]`, so a renderer evicts with its model (spec §7, §11), replacing ticket 06's separate unbounded renderer cache.
 - 2026-10-22, ticket hamsterball-v1/08: stores `tier` as an attribute, for the Collector's `env_spec`.
 - 2026-10-22, ticket hamsterball-v1/14: added `make_vec` and registered it as every current id's `vector_entry_point`. `tests/test_vector.py`: the async env's context, shared memory, and autoreset mode; same-step reset with `final_obs`; forkserver under a Linux platform; sync mode; the warp error; two views rendered in spawned workers.
+- 2026-10-22, ticket hamsterball-v1/09: added `step_to(core_state)` for re-render.

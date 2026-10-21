@@ -153,6 +153,15 @@ class HamsterballEnv(gym.Env):
 
     def step(self, action):
         self.core.step(np.asarray(action), n=self.frame_skip)
+        return self._advance()
+
+    def step_to(self, core_state):
+        """One env step to a recorded core state, set in place of stepping physics (re-render: any platform)."""
+        self.core.set_state(core_state)
+        return self._advance()
+
+    def _advance(self):
+        """The env step after the physics: marker tests, outcome, reward, observation, info."""
         self._steps += 1
         pos = self.core.data.qpos[0:3].copy()
         event = 0.0
