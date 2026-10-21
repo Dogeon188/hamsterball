@@ -7,14 +7,14 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 ## Interface
 
 - `LevelGenerator`: a `runtime_checkable` protocol with `tasks`, `version`, and `__call__(task, seed, difficulty) -> Level`. The env's `levels=` takes any object that satisfies it (see [env.md](../env.md)).
-- `ProceduralGenerator(**overrides)`: `name = "procedural"`, `version = 2`, `tasks` = all five. Each override is a row of `TABLE` given as `(value at d = 0, value at d = 1)`, such as `ProceduralGenerator(climb_grade=(5, 10))`; an unknown name raises `TypeError`.
+- `ProceduralGenerator(**overrides)`: `name = "procedural"`, `version = 3`, `tasks` = all five. Each override is a row of `TABLE` given as `(value at d = 0, value at d = 1)`, such as `ProceduralGenerator(climb_grade=(5, 10))`; an unknown name raises `TypeError`.
 - `gen(task, seed, difficulty)`: the `Level`, whose `generator` block is `{name, version, task, seed, difficulty}`. `gen.generate(...)` returns `(level, attempts)`, which the golden test uses for the resample failure rate.
 - `gen.params(difficulty)`: every table row at that difficulty.
 - `GenerationError`: raised when 32 attempts all fail.
 
 ## How it works
 
-- `params`: each row is linear in d between its endpoints. `cliff_height` is 0 up to d = 0.5 and linear from 0 to its d = 1 value above. Marker counts round half up (`floor(v + 0.5)`). Grades are degrees; `hazards_per_m` is spec §8's "1 per 8 m" as 1/8.
+- `params`: each row is linear in d between its endpoints. `cliff_height` is 0 up to d = 0.5 and linear from 0 to its d = 1 value above. Marker counts round half up (`floor(v + 0.5)`). Grades are degrees; `hazards_per_m` is spec §8's "1 per 8 m" as 1/8. Survive's movers: `survive_drift_speed` (0 → 1.5 m/s, the region's peak speed), `moving_hazards` (0 → 3, a count), `hazard_speed` (1 → 2 m/s, each moving hazard's peak speed).
 - One PCG64 stream per call, seeded with `seed`; a failed attempt (`_Retry`) moves on to the stream's next draws, up to 32 attempts.
 - Route tasks (`_route`), spec §8 steps 1–5:
   1. Spine: one target per leg (reach goal 1, waypoint race `waypoints`, collect items `items`, unlock goal `keys` + 1 with the goal last), each leg `route_length / n`, split into straights of at most `STRAIGHT` = 8 m. A random start heading, then a turn at each vertex up to `MAX_TURN` = 45°, smaller when straights are short (below). Vertices round to the millimetre.
@@ -24,15 +24,19 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
   5. The flood fill again with the hazard footprints blocked, then `time_limit_s = path length / 5 m/s · time_slack`.
   - Markers: targets are 1 m spheres at the vertex, 0.5 m above the node below (shell-centre height). The spawn is at the first vertex, 0.5 m above the highest corridor node within 0.5 m, facing the first straight; `follow_yaw_deg` points from the spawn to the last target.
 - Survive (`_survive`): `rng.random() < 0.5` picks a plateau disc: a flat top of `survive_disc_radius` at z = 0, the region a vertical capsule of that radius from 0 to 1 m, centred at shell-centre height (0.5 m), so the goal vector to the region's centre lies flat. Otherwise a ridge: a flat top `survive_ridge_width` wide along a random-yaw 8 m segment through the origin, the region a horizontal capsule along it at 0.5 m. Both fall off at `survive_falloff_grade` to a grid edge 4 m past the flat top; no noise. Spawn at the region's centre, (0, 0, 0.5); the time limit is `survive_duration`.
+  - Movers (draws after the layout's, so a level with neither keeps its layout draws). When `survive_drift_speed` > 0 the region takes an `oscillate` motion with phase 0 (so it starts at the spawn): along the ridge with amplitude 2 m, or along a random horizontal axis on the plateau with amplitude half the disc radius (`DRIFT_REACH` = 0.5). Its centre so stays on the flat top. The period is `2π · amplitude / speed`, rounded to the millisecond, so the peak speed is the table's.
+  - `moving_hazards` spheres of radius 0.4 m (`MOVER_RADIUS`) at shell-centre height, each oscillating 3 m (`MOVER_SWEEP`) either side of its centre along a random horizontal axis, at a random phase, period from `hazard_speed` as above. The first is centred on the spawn, so a hamsterball that stands still is hit; the rest on a random point of the flat top.
+  - The dodge check (`_dodge`, below) runs whenever the region or a hazard moves.
 - Quantization (`_hfield`): node heights map to uint16 so the lowest is 0 and the highest 65535 (MuJoCo rescales samples to that range anyway); `pos` z is the lowest height and `size[2]` the span, each rounded to the millimetre. Every later step (flood fill, marker heights, kill plane for survive) reads the heights MuJoCo will see, `z0 + q / 65535 · span`. Row 0 is the +y edge (see [level.md](level.md)).
 - Solvability (`_reach`, `_astar`): A* over 8-neighbour node steps, leg by leg from the spawn's node to each target's node in spine order (for unlock goal, the keys then the goal). A step passes if it climbs at most 15° (`dh ≤ tan 15° · step length`) and drops at most `tan 30° · step length + cliff_height`. Nodes outside the corridor (below the kill plane) and hazard footprints block. The path length is the sum of the legs' lengths.
+- Survive dodge check (`_dodge`): a time-expanded flood fill over the flat-top nodes for the whole survive duration. Layer k is time `k · CELL / DODGE_SPEED` (`DODGE_SPEED` = 2.5 m/s, so one 4-neighbour cell per layer). The reachable set starts at the spawn's node, grows by one cell per layer (or stays), and keeps only the nodes safe at that layer's time: on the flat top, at least a cell plus one layer's drift inside the moving region, and more than hazard radius + shell radius + half a cell + one layer of hazard travel from every moving hazard's centre at that time. An empty set fails the attempt. Moving hazards count by their pose at each layer, not by their swept volume, so a level can make the hamsterball step aside as a hazard passes. The spawn's node must be safe at t = 0, so a spawn inside a hazard at t = 0 never ships (the loader does not check this).
 
 ## Invariants and checks
 
 - Same (task, seed, difficulty, version) → same level id, on every platform: `uv run pytest tests/test_generator.py -k golden` over 5 tasks × d ∈ {0, 0.25, 0.5, 0.75, 1} × seeds 0–7 (200 levels, about 1 s). It prints the resample failure rate and fails above 25%.
 - Any change to the output bumps `ProceduralGenerator.version` and the golden hashes.
 - Every generated level loads through `Level.from_dict`, so it passes the loader's checks (256×256 grid, 0.25 m cells).
-- `uv run pytest tests/test_generator.py`: provenance, the table rows and overrides, marker counts, cliffs only from d = 0.5, `GenerationError`, the time limit against the straight-line route, survive's 50/50 shapes with the spawn at the region's centre, hazard counts, the hamsterball resting at a spawn, the test_tasks scripted controller finishing reach goal, waypoint race, and unlock goal at d = 0.2, and an inputless survive on a d = 0 plateau.
+- `uv run pytest tests/test_generator.py`: provenance, the table rows and overrides, marker counts, cliffs only from d = 0.5, `GenerationError`, the time limit against the straight-line route, survive's 50/50 shapes with the spawn at the region's centre, hazard counts, the hamsterball resting at a spawn, the test_tasks scripted controller finishing reach goal, waypoint race, and unlock goal at d = 0.2, an inputless survive on a d = 0 plateau, survive levels still at d = 0, the drifting region's centre on the flat top, moving-hazard counts and speeds with the spawn clear at t = 0, and an inputless ball failing survive from d = 0.5.
 
 ## Known quirks
 
@@ -40,7 +44,8 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 - Overrides change the output, but the provenance block carries no overrides: two generators with different tables give the same (task, seed, difficulty, version) different levels. The canonical level, which trajectories embed, is still exact.
 - Short legs bend less: at d = 0 with 3 waypoints over 5 m the turn limit is near 0, so easy routes are near straight, and reach goal at low d is one straight.
 - The corridor can still fold back near an earlier straight. When neighbouring corridor nodes map to spine points more than 1 m apart and differ in height by more than a 15° cell step, the attempt retries (`_seams`). No sweep so far has hit it.
-- Measured 2026-10-22 over the golden sweep: resample failure rate 2.0% (4 of 204 attempts), all at d = 1, all from hazard placement in the 3 m corridor; the flood fill itself never failed there. Generation takes about 0.5 ms (d = 0) to 10 ms (d = 1, reach goal) per level.
+- Measured 2026-10-22 over the golden sweep (version 3): resample failure rate 18.4% (45 of 245 attempts). Route tasks retry 4 times, all at d = 1 from hazard placement in the 3 m corridor. Survive retries 41 times, 31 of them at d = 1, where a 1.5 m plateau holds three movers; the dodge check is the limit there. The survive sweep takes about 1 s (the dodge check, up to 480 layers at d = 1). Generation takes about 0.5 ms (d = 0) to 10 ms (d = 1, reach goal) per level.
+- The dodge check grants the hamsterball 2.5 m/s from a standstill with no acceleration limit. The shell reaches 3 m/s in about a second on the flat, so a level can demand a sharper start than the ball has. No scripted controller tests a d = 1 survive level for survival; the tests check the region stays on the flat top, hazards start clear of the spawn, and an inputless ball fails from d = 0.5.
 - The scripted controller of test_tasks.py (3 m/s cap, no planning) finishes 18 of 18 levels at d = 0.2, 13 of 18 at d = 0.5, and 0 of 18 at d = 0.8 (reach goal, waypoint race, collect items, seeds 0–5): the table's upper half needs a controller that climbs and plans.
 
 ## Decisions
@@ -52,7 +57,13 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 - 2026-10-22, ticket hamsterball-v1/10: shape constants spec §8 leaves open are module constants, not table rows: 45° bends, 8 m straights, 5 m hill segments, 0.75 m landings, the 8 m ridge, a 1 m pit, 20 tries per hazard, 2 m hazard clearance.
 - 2026-10-22, ticket hamsterball-v1/10: `generate()` returning `(level, attempts)` is public so the golden test can report the failure rate without the generator keeping state.
 
+- 2026-10-22, ticket survive-movers/07: survive's moving hazards are spheres (any hazard can move since ticket 02), not the route tasks' boxes: a sphere's swept test has no rotation term, and its pose is its centre.
+- 2026-10-22, ticket survive-movers/07: the first moving hazard always sweeps through the spawn, so from d = 0.5 (two movers, a drifting region) standing still fails; on the plateau the drift alone (half the radius) never carries the region off a still ball.
+- 2026-10-22, ticket survive-movers/07: the dodge check tests hazards at each time, not by their swept volume. A swept-volume rule (no region point a hazard's path ever covers) can't hold once the first hazard is centred on the spawn, and leaves little of a 1.5 m plateau at d = 1.
+
 ## Tried and rejected
+
+- 2026-10-22, ticket survive-movers/07: four moving hazards of radius 0.5 at up to 2.5 m/s with a 2 m/s dodge speed. Two of eight d = 1 seeds failed all 32 attempts; three hazards of 0.4 m at up to 2 m/s with a 2.5 m/s dodge speed give an 18% resample rate over the sweep.
 
 - 2026-10-22, ticket hamsterball-v1/10 (design, before code): heights from the nearest spine point with no landings. On the inner side of a bend, the nearest point jumps from one straight to the next, a height jump of `2 · half-width · tan(turn/2) · grade` (about 1.3 m for a 12 m corridor, a 45° bend, and a 15° climb), which would put walls and cliffs into levels below d = 0.5. Flat landings at bends remove the jump.
 
@@ -60,3 +71,4 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 
 - 2026-10-22, ticket hamsterball-v1/10: added, with the `generator` provenance block in [level.md](level.md).
 - 2026-10-22, code review of hamsterball-v1: the plateau disc's region (capsule from 0.5 to 1.5 m) had its centre 0.5 m above the shell centre, so the goal vector and shaping pointed upward; spec §9 makes the region centre the current target. The capsule now runs 0 to 1 m. Version 1 → 2; golden hashes regenerated.
+- 2026-10-22, ticket survive-movers/07: survive's drifting region and moving hazards, three table rows, the dodge check. Version 2 → 3; golden hashes regenerated.

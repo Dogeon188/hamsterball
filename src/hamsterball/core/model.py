@@ -50,15 +50,16 @@ def _shell_xml():
 GAME_SIZE = (720, 1280)  # (height, width) of the game window, the smallest offscreen buffer a model gets
 
 
-def build(tier, level=FLAT, view_size=GAME_SIZE, bodies=""):
+def build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0):
     """Compile the shell, the tier's fragment, the view mocaps, and the level (top-level MJCF sections: assets,
     worldbody geoms), with an offscreen buffer that holds both the game window and `view_size` (height, width).
-    `bodies` (top-level MJCF sections too, from `Level.body_mjcf()`) goes last, so its bodies follow the view mocaps."""
+    `bodies` (top-level MJCF sections too, from `Level.body_mjcf()`) goes last, so its bodies follow the view mocaps.
+    `slots` more userdata slots go after the tier's (a level's collapsing tiles)."""
     from .views import FRAGMENT as VIEWS  # views imports this module's ids
 
     h, w = max(view_size[0], GAME_SIZE[0]), max(view_size[1], GAME_SIZE[1])
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
-<size nuserdata="{1 + tier.nuserdata}"/>
+<size nuserdata="{1 + tier.nuserdata + slots}"/>
 <visual><global offwidth="{w}" offheight="{h}"/><map znear="0.001"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}

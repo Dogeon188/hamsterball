@@ -10,6 +10,8 @@ from typing import Protocol, runtime_checkable
 import numpy as np
 
 from .level import Level
+from .motion import load as load_motion
+from .motion import pose
 
 TASKS = ("reach_goal", "waypoint_race", "collect_items", "unlock_goal", "survive")
 # Spec §8's endpoint table: each row is (value at d = 0, value at d = 1), and a constructor override.
@@ -31,8 +33,11 @@ TABLE = {
     "survive_ridge_width": (3.0, 1.5),
     "survive_falloff_grade": (10.0, 30.0),
     "survive_duration": (10.0, 60.0),
+    "survive_drift_speed": (0.0, 1.5),
+    "moving_hazards": (0, 3),
+    "hazard_speed": (1.0, 2.0),
 }
-COUNTS = ("waypoints", "items", "keys")  # round to whole markers
+COUNTS = ("waypoints", "items", "keys", "moving_hazards")  # round to whole markers
 CLIFFS_FROM = 0.5  # difficulty at which cliffs start
 
 # Spec §8's fixed values
@@ -55,8 +60,12 @@ STRAIGHT = 8.0  # longest straight between bends (m)
 SEGMENT = 5.0  # target length of one hill or valley segment (m)
 LANDING = 0.75  # flat radius around the spawn and each target (m)
 RIDGE_LENGTH = 8.0  # survive ridge, end to end (m)
+DRIFT_REACH = 0.5  # a drifting region's centre sweeps this fraction of the plateau radius or the ridge's half-length
 HAZARD_TRIES = 20
 HAZARD_CLEAR = 2.0  # hazard centre to spawn or target, at least (m)
+MOVER_RADIUS = 0.4  # survive's moving hazards are spheres this size (m)
+MOVER_SWEEP = 3.0  # a moving hazard's amplitude (m)
+DODGE_SPEED = 2.5  # the speed the dodge check grants the hamsterball (m/s)
 
 
 @runtime_checkable
@@ -81,7 +90,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 2
+    version = 3
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -261,9 +270,29 @@ def _survive(p, rng):
     dist, _ = _nearest(x, y, pts, seg, seg_len, np.array([0.0, float(seg_len[0])]))
     h = -np.maximum(0.0, dist - flat) * math.tan(math.radians(p["survive_falloff_grade"]))
     hfield, h = _hfield(h, shape, centre)
+    if p["survive_drift_speed"] > 0:
+        # new draws come after the layout's, so a still level keeps its draws
+        axis = (b - a) / RIDGE_LENGTH if any(b) else _heading(rng.uniform(0, math.pi))
+        amp = round(DRIFT_REACH * (RIDGE_LENGTH / 2 if any(b) else flat), 3)
+        region["motion"] = _oscillate(axis, amp, p["survive_drift_speed"], 0.0)
+    hazards = []
+    for i in range(p["moving_hazards"]):
+        # the first sweeps through the spawn, so standing still is hit; the rest through a point of the flat top
+        if i:
+            r, phi = flat * math.sqrt(rng.random()), rng.uniform(0, 2 * math.pi)
+            c = a + rng.random() * (b - a) + r * np.array([math.cos(phi), math.sin(phi)])
+        else:
+            c = np.zeros(2)
+        hz = _oscillate(_heading(rng.uniform(0, math.pi)), MOVER_SWEEP, p["hazard_speed"], round(rng.random(), 3))
+        hazards.append({"type": "sphere", "pos": [round(float(c[0]), 3), round(float(c[1]), 3), SHELL_R],
+                        "radius": MOVER_RADIUS, "motion": hz})
+    if (hazards or "motion" in region) and not _dodge(x, y, pts, dist <= flat, region, hazards, p,
+                                                                _cell(np.zeros(2), shape, centre)):
+        raise _Retry
     return {
         "kill_plane_z": round(float(h.min()) - KILL_DEPTH, 3),
         "geoms": [hfield],
+        "hazards": hazards,
         "tasks": {"survive": {"spawn": {"pos": [0.0, 0.0, SHELL_R], "yaw_deg": yaw}, "region": region,
                               "time_limit_s": round(p["survive_duration"], 3)}},
         "follow_yaw_deg": yaw,
@@ -340,6 +369,16 @@ def _cell(q, shape, centre):
             int(round((q[0] - centre[0] + (ncol - 1) * CELL / 2) / CELL)))
 
 
+def _heading(phi):
+    return np.array([round(math.cos(phi), 3), round(math.sin(phi), 3)])
+
+
+def _oscillate(axis, amp, speed, phase):
+    """A horizontal oscillate motion whose peak speed is `speed`; the period rounds to the millisecond."""
+    return {"type": "oscillate", "axis": [float(axis[0]), float(axis[1]), 0.0], "amplitude": amp,
+            "period": round(2 * math.pi * amp / speed, 3), "phase": phase}
+
+
 def _yaw(v):
     """Yaw (degrees, 0 faces +y) facing direction v."""
     return round(math.degrees(math.atan2(-float(v[0]), float(v[1]))), 3)
@@ -401,6 +440,46 @@ def _astar(h, ok, nrow, ncol, src, dst, cliff):
                         dist[j], prev[j] = nd, i
                         heapq.heappush(heap, (nd + heur(j), j))
     return None
+
+
+def _dodge(x, y, pts, top, region, hazards, p, start):
+    """Whether the hamsterball, moving at DODGE_SPEED over the flat top `top`, can keep its centre inside the region
+    and clear of every moving hazard for the whole survive duration. A time-expanded flood fill: each layer is one
+    cell of travel later (CELL / DODGE_SPEED s), the reachable nodes grow by one 4-neighbour step and keep only the
+    nodes that are safe then. A node is safe at time t when it sits CELL plus a layer's drift inside the region and
+    further than the hazard radius, the shell radius, half a cell and a layer of the hazard's travel from every hazard
+    centre. Starts from the spawn's node, so a spawn inside a hazard at t = 0 fails."""
+    dt = CELL / DODGE_SPEED
+    drift = region.get("motion")
+    inner = region["radius"] - CELL - (p["survive_drift_speed"] * dt if drift else 0.0)
+    clear = (MOVER_RADIUS + SHELL_R + CELL / 2 + p["hazard_speed"] * dt) ** 2
+    seg = (pts[1] - pts[0])[None]
+    seg_len = np.sqrt((seg**2).sum(1))
+    movers = [(np.array(hz["pos"][:2]), load_motion(hz["motion"])) for hz in hazards]
+    drift = drift and load_motion(drift)
+    reach = None
+    for k in range(math.ceil(p["survive_duration"] / dt) + 1):
+        t = k * dt
+        o = pose(drift, t)[0][:2] if drift else np.zeros(2)
+        d, _ = _nearest(x, y, pts + o, seg, seg_len, np.array([0.0, float(seg_len[0])]))
+        safe = top & (d <= inner)
+        for c, m in movers:
+            q = c + pose(m, t)[0][:2]
+            safe &= (x - q[0]) ** 2 + (y - q[1]) ** 2 > clear
+        if reach is None:
+            reach = np.zeros_like(safe)
+            reach[start] = True
+        else:
+            grown = reach.copy()
+            grown[1:] |= reach[:-1]
+            grown[:-1] |= reach[1:]
+            grown[:, 1:] |= reach[:, :-1]
+            grown[:, :-1] |= reach[:, 1:]
+            reach = grown
+        reach &= safe
+        if not reach.any():
+            return False
+    return True
 
 
 def _footprint(x, y, pos):

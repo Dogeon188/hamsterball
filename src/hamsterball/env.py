@@ -17,7 +17,7 @@ import numpy as np
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
-from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
+from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, TILE_WARN_RGBA, Level
 from .core.marker import centre, crosses
 from .core.motion import pose
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
@@ -44,6 +44,7 @@ class _Cached:
     core: Core
     renderer: "mujoco.Renderer | None" = None
     movers: list = field(default_factory=list)  # (geom id, motion, authored geom_pos, authored geom_quat) per moving marker
+    tile_rgba: list = field(default_factory=list)  # each collapsing tile's authored colour
 
 
 def _levels(x):
@@ -119,7 +120,9 @@ class HamsterballEnv(gym.Env):
                       for g, mk in ((m.geom(name).id, mk) for name, mk in level.movers())]
             for g, *_ in movers:  # the compiler marks a geom whose frame matches its body's, and kinematics then
                 m.geom_sameframe[g] = mujoco.mjtSameFrame.mjSAMEFRAME_NONE  # skips its geom_quat: posing needs both
-            self._cores[level.id] = _Cached(core, movers=movers)
+            tiles = core.tiles
+            tile_rgba = [m.geom_rgba[m.body_geomadr[tiles[1] + i]].copy() for i in range(len(tiles[3]))] if tiles else []
+            self._cores[level.id] = _Cached(core, movers=movers, tile_rgba=tile_rgba)
             if len(self._cores) > self.model_cache:
                 evicted = self._cores.popitem(last=False)[1]
                 if evicted.renderer is not None:
@@ -309,6 +312,7 @@ class HamsterballEnv(gym.Env):
     def _observe(self):
         m, d = self.core.model, self.core.data
         self._pose_movers()
+        self._look_tiles()
         # mj_step leaves derived quantities at the state before it; recompute them (derived only: the state is untouched)
         mujoco.mj_kinematics(m, d)
         mujoco.mj_comPos(m, d)
@@ -366,6 +370,18 @@ class HamsterballEnv(gym.Env):
             offset, yaw = pose(motion, self.core.data.time)
             m.geom_pos[g] = pos0 + offset
             mujoco.mju_mulQuat(m.geom_quat[g], np.array([math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]), quat0)
+
+    def _look_tiles(self):
+        """Blend each touched tile's colour toward TILE_WARN_RGBA over its delay: a look derived from the core state
+        (each tile's trigger time), so it needs no reset and a re-render draws it the same."""
+        tiles = self.core.tiles
+        if tiles is None:
+            return
+        m, d = self.core.model, self.core.data
+        slot, b0, delay, adrs = tiles
+        for i, rgba in enumerate(self._cores[self.level.id].tile_rgba):
+            f = min(1.0, (d.time - d.userdata[slot + i]) / delay) if delay else 1.0
+            m.geom_rgba[m.body_geomadr[b0 + i]] = rgba + max(0.0, f) * (np.array(TILE_WARN_RGBA) - rgba)
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""
