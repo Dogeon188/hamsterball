@@ -14,12 +14,15 @@ dependencies = [
 [project.optional-dependencies]
 # Minari 0.5's DataCollector imports jax, which only its `create` extra installs.
 data = [
-    "av>=18.1.0",
+    "av",
     "minari[arrow,create]==0.5.*",
-    "pillow>=13.0.0",
+    "pillow",
 ]
 game = ["imgui-bundle", "glfw"]
 all = ["hamsterball[data,game]"]
+lerobot = [
+    "lerobot[dataset]>=0.6 ; python_full_version >= '3.12' and python_full_version < '3.14'",
+]
 
 [project.scripts]
 hamsterball-play = "hamsterball.game.window:main"

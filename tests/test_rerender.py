@@ -7,7 +7,7 @@ import pytest
 minari = pytest.importorskip("minari")
 
 import hamsterball  # noqa: F401  registers the env ids
-from hamsterball.data import Collector, rerender, to_video
+from hamsterball.data import Collector, rerender, to_lerobot, to_video
 from test_tasks import toward_target
 
 
@@ -76,3 +76,22 @@ def test_to_video_writes_an_mp4_at_the_env_step_rate(tmp_path):
         assert stream.average_rate == 30
     assert len(frames) == src.total_steps + 1  # the reset frame and one per step
     assert (frames[0].height, frames[0].width) == (48, 64)
+
+
+def test_to_lerobot_exports_a_rerendered_dataset(tmp_path):
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")  # the lerobot extra, Python 3.12+
+    src = play("reach_goal", "first_goal")
+    ds = rerender(src, ("chase", "follow"), (24, 32), "test/rerendered-v0")
+    to_lerobot(ds, "hamsterball/test", tmp_path / "lerobot", use_videos=False)  # images: lossless, comparable
+    out = lerobot_dataset.LeRobotDataset("hamsterball/test", root=tmp_path / "lerobot")
+    ep = next(ds.iterate_episodes())
+    n = len(ep.actions)  # LeRobot frames pair an observation with the action taken from it: the last one has none
+    assert (out.num_episodes, out.num_frames, out.fps) == (1, n, 60)
+    last = out[n - 1]
+    assert last["task"] == "reach_goal"
+    np.testing.assert_array_equal(last["action"].numpy(), ep.actions[-1])
+    np.testing.assert_array_equal(last["observation.state"].numpy(), ep.observations["state"][n - 1])
+    np.testing.assert_array_equal(last["observation.goal"].numpy(), ep.observations["goal"][n - 1])
+    img = (last["observation.images.chase"].numpy() * 255).round().astype(np.uint8).transpose(1, 2, 0)
+    np.testing.assert_array_equal(img, ep.observations["chase"][n - 1])
+    assert last["next.reward"].item() == pytest.approx(ep.rewards[-1]) and last["next.done"].item()
