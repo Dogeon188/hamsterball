@@ -12,6 +12,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables.
 - `info` on every step: `core_state`, `state`, `goal`, `success`, `failure_reason` (`None` or `"kill_plane"`), `reward_terms` (`event`, `time`, `shaping`). On reset: `core_state`, `state`, `goal`.
 - Bundled level `first_goal`: a 20 m square box platform, goal sphere (1 m) 8 m along +y, kill plane at −5 m, 30 s.
+- Bundled level `hill`: `first_goal` with a 0.4 m round hfield hill (`hill.png`, 11×11, 5 m square) centred 4 m along +y, on the way to the goal.
 
 ## How it works
 
@@ -21,7 +22,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 ## Invariants and checks
 
-- `uv run pytest tests/test_env.py`: frames (yaw 0 faces +y), the swept goal, success, the kill plane, truncation at the step count, `info` keys, and the 120°/s orbit.
+- `uv run pytest tests/test_env.py`: frames (yaw 0 faces +y), the swept goal, success, the kill plane, truncation at the step count, `info` keys, the 120°/s orbit, and a run over the `hill` hfield. The tests pin `levels=["first_goal"]` unless they name another, as the default pool is every bundled level.
 
 ## Known quirks
 
@@ -38,3 +39,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/02: added as the reach-goal tracer.
+- 2026-10-22, ticket hamsterball-v1/05: bundled the `hill` hfield level; a run straight at the goal climbs over the hill (shell centre above 0.8 m) and succeeds.
