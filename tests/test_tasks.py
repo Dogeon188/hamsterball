@@ -60,6 +60,21 @@ def test_one_step_crossing_waypoints_i_and_i_plus_1_counts_both():
     assert hit[0][0]["goal"][4] == pytest.approx(1 / 3)
 
 
+def test_a_passed_waypoint_turns_dim_green_and_reset_restores_it():
+    from hamsterball.core.level import MARKER_RGBA, PASSED_RGBA
+
+    env, _ = make("waypoint_race", level("waypoint_race", waypoints=[wall(3), far(15, -15)]))
+    for _ in range(300):
+        if env.step(FORWARD)[4]["reward_terms"]["event"]:  # waypoint 0 passed
+            break
+    else:
+        raise AssertionError("never reached waypoint 0")
+    assert rgba(env, "waypoint_race/waypoints/0") == pytest.approx(PASSED_RGBA)
+    assert rgba(env, "waypoint_race/waypoints/1") == pytest.approx(MARKER_RGBA["waypoints"])
+    env.reset(seed=0)
+    assert rgba(env, "waypoint_race/waypoints/0") == pytest.approx(MARKER_RGBA["waypoints"])
+
+
 def test_a_waypoint_out_of_order_does_not_count():
     env, _ = make("waypoint_race", level("waypoint_race", waypoints=[far(15, -15), wall(3)]), frame_skip=60)
     steps = roll_forward(env, 25)

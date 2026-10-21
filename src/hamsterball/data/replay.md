@@ -19,7 +19,7 @@ Re-step replay (spec §12): a determinism check that recorded episodes reproduce
 
 ## Invariants and checks
 
-- `uv run pytest tests/test_data.py`: an episode of every task replays bit for bit (CI runs it on macOS arm64 and Linux x86_64, Python 3.11 and 3.14), a recording under a different drag constant fails at step 1, and a different stored MuJoCo version and platform warn.
+- `uv run pytest tests/test_data.py`: an episode of every task replays bit for bit (CI runs it on macOS arm64 and Linux x86_64, Python 3.11 and 3.14), an episode recorded with `truncate=False` past its time limit replays, a recording under a different drag constant fails at step 1, and a different stored MuJoCo version and platform warn.
 
 ## Known quirks
 
@@ -34,3 +34,4 @@ Re-step replay (spec §12): a determinism check that recorded episodes reproduce
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/08: added.
+- 2026-10-22, user play-test request (no time-up for a human player): the env's `truncate` and `time_limit_s` reach `env_spec` (see [collector.md](collector.md)), so an episode that ran past its level's time limit replays; no change here.

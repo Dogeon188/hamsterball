@@ -28,7 +28,7 @@ class Session:
         else:  # the menu remembers a generated level's difficulty, which a file pool refuses
             pool, self._first, difficulty = [str(level)], None, None
         env = gym.make(f"Hamsterball-v{ENV_VERSION}", tasks=[task], levels=pool, difficulty=difficulty,
-                       camera_action=True)
+                       camera_action=True, truncate=False)  # no time-up for a human (survive keeps its limit)
         if record:
             from ..data import Collector  # the data extra; only recording needs it
 

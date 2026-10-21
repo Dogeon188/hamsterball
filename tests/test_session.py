@@ -103,3 +103,10 @@ def test_a_file_level_ignores_the_menus_remembered_difficulty():
     s = Session("collect_items", str(LEVELS_DIR / "item_scatter.yaml"), difficulty=0.59, record=False)
     s.start()
     s.close()
+
+
+def test_a_human_player_has_no_time_up_and_the_dataset_says_so():
+    s = Session("reach_goal", str(LEVELS_DIR / "first_goal.yaml"), player="eric")
+    assert s.env.unwrapped.truncate is False
+    assert s.env.unwrapped.spec.kwargs["truncate"] is False  # what the dataset's env_spec carries to replay
+    s.close()

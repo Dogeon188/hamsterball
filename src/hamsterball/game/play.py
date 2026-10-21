@@ -147,10 +147,11 @@ def progress(env):
 
 
 def hud(env, act, recording):
-    """The HUD's lines: sim time against the limit, task progress, recording state, effort, and shell speed."""
+    """The HUD's lines: sim time (against the limit for survive only), task progress, recording state, effort, and
+    shell speed. A human's non-survive episode has no time limit (the session's env doesn't truncate)."""
     t, limit = sim_time(env)
     return [
-        f"{t:.1f} / {limit:.1f} s",
+        f"{t:.1f} / {limit:.1f} s" if env.unwrapped.task == "survive" else f"{t:.1f} s",
         progress(env),
         "REC" if recording else "not recording",
         f"effort {min(math.hypot(act[0], act[1]), 1.0):.2f}",
