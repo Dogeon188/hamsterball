@@ -29,6 +29,7 @@ The abstract control tier of spec §5: the hamster is one 2.4 kg sphere, and a r
 
 - The PD alone holds about 54° against the 70° ceiling: there is no gravity feed-forward, by decision.
 - With the hamster exactly at the shell centre, `n` is the zero vector (the `+1e-9` guard), as in the prototype.
+- The airborne cut runs a 320×3 `TILE_NORMALS @ p` every physics step: the shell is faceted, so the gap to the inner wall is the gap to the nearest tile plane, not to a sphere; one fixed-size matrix-vector product per step is small next to MuJoCo's contact solve over the same 320 tiles, and it maps directly onto a GPU kernel (spec §15).
 
 ## Decisions
 
