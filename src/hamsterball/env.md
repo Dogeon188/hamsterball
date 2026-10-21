@@ -14,11 +14,12 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - Action: the core's (`[run_x, run_y]`, plus `cam_yaw` under `camera_action`).
 - Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables.
 - `info` on every step: `core_state`, `state`, `goal`, `success`, `failure_reason` (`None`, `"hazard"`, `"kill_plane"`, or `"left_region"`), `reward_terms` (`event`, `time`, `shaping`). On reset: `reset_options` (`{level: canonical YAML, level_id, task}`), `core_state`, `state`, `goal`.
-- Bundled levels, one per task so far, each a box platform over a kill plane at −5 m:
+- Bundled levels, at least one per task, each a box platform over a kill plane at −5 m:
   - `first_goal` (reach goal): 20 m square, goal sphere (1 m) 8 m along +y, 30 s.
   - `waypoint_loop` (waypoint race): 30 m square, four waypoint spheres looping round the spawn, 45 s.
   - `item_scatter` (collect items): 30 m square, three item spheres (0.8 m), 45 s.
   - `locked_goal` (unlock goal): 30 m square, two keys (0.8 m) to the sides, the goal 9 m ahead, 45 s.
+  - `hill` (reach goal): `first_goal` with a 0.4 m round hfield hill (`hill.png`, 11×11, 5 m square) centred 4 m along +y, on the way to the goal.
   - `first_survive` (survive): 20 m square, a capsule region (radius 2 m, axis x = −1 to 1 m) around the spawn, 10 s.
 
 ## How it works
@@ -34,7 +35,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 ## Invariants and checks
 
-- `uv run pytest tests/test_env.py`: frames (yaw 0 faces +y), the swept goal, success, the kill plane, truncation at the step count, `info` keys, and the 120°/s orbit.
+- `uv run pytest tests/test_env.py`: frames (yaw 0 faces +y), the swept goal, success, the kill plane, truncation at the step count, `info` keys, the 120°/s orbit, and a run over the `hill` hfield. The tests pin `levels=["first_goal"]` unless they name another, as the default pool is every bundled level.
 - `uv run pytest tests/test_tasks.py`: waypoints i and i + 1 in one step, waypoints out of order, the nearest item, the unlock goal ignored then unlocked, marker looks, shaping with γ 0.99 and 0.5, and each multi-target task played to success on its bundled level by a scripted controller (velocity tracking toward the current target, 3 m/s cap).
 - `uv run pytest tests/test_episode_setup.py`: same seed same (level, task), each option case, replay from `reset_options` on an env with other kwargs, pool entry kinds, `set_levels` direct and through `SyncVectorEnv.call`, LRU hits and eviction with `mj_resetData` on a hit, every preset with its default pool, a retired id's error, and the `DiscreteAction` table.
 - `uv run pytest tests/test_survive_and_hazards.py`: survive success at the limit and `left_region`, a hazard at the spawn on every task, a swept hazard, and success over a hazard in one step.
@@ -66,4 +67,5 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/02: added as the reach-goal tracer.
 - 2026-10-22, ticket hamsterball-v1/03: waypoint race, collect items, unlock goal, marker looks, and `shaped`/`shaping_gamma`, with a bundled level per task.
 - 2026-10-22, ticket hamsterball-v1/04: added the survive task, hazards, and the `first_survive` level.
+- 2026-10-22, ticket hamsterball-v1/05: bundled the `hill` hfield level; a run straight at the goal climbs over the hill (shell centre above 0.8 m) and succeeds.
 - 2026-10-22, ticket hamsterball-v1/07: reset options and `info['reset_options']`, directories in the pool, `set_levels`, the `model_cache` LRU, the six ids with retired versions, and `DiscreteAction`.
