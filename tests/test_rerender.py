@@ -9,6 +9,7 @@ minari = pytest.importorskip("minari")
 import hamsterball  # noqa: F401  registers the env ids
 from hamsterball.data import Collector, replay, rerender, to_lerobot, to_video
 from test_motion import drift_env, run, track
+from test_moving_hazards import dodge, sweepers_env
 from test_tasks import toward_target
 
 
@@ -108,4 +109,18 @@ def test_a_survive_drift_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
         out = rerender(src, ("chase",), (24, 32), "test/drift-rerendered-v0")
     a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
     np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_sweepers_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(sweepers_env())
+    assert run(env, dodge)["success"]
+    src = env.create_dataset("test/sweepers-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/sweepers-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.rewards, a.rewards)
     np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))

@@ -35,3 +35,4 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 ## History
 
 - 2026-10-22, ticket survive-movers/01: added, for the drifting survive region of `survive_drift`.
+- 2026-10-22, ticket survive-movers/02: hazards use it too (`survive_sweepers`).

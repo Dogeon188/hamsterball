@@ -22,14 +22,12 @@ def centre(marker, t=0.0):
     return c + pose(marker["motion"], t)[0] if "motion" in marker else c
 
 
-def crosses(marker, p0, p1, t=0.0):
-    """The swept test against the marker posed at sim time t (a moving marker holds still over the segment)."""
+def crosses(marker, p0, p1, t=0.0, t0=None):
+    """The swept test from p0 at sim time t0 (default t) to p1 at sim time t. A moving marker is tested on the
+    relative path: p0 in its frame at t0, p1 in its frame at t, joined by a straight segment."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
     if "motion" in marker:  # test in the marker's authored frame: undo its offset, then its spin about its centre
-        offset, yaw = pose(marker["motion"], t)
-        c, cy, sy = centre(marker, 0.0), math.cos(yaw), math.sin(yaw)
-        rot = np.array([[cy, sy, 0], [-sy, cy, 0], [0, 0, 1]])  # Rz(-yaw)
-        p0, p1 = (c + (p - c - offset) @ rot.T for p in (p0, p1))
+        p0, p1 = _authored(marker, p0, t if t0 is None else t0), _authored(marker, p1, t)
     kind = marker["type"]
     if kind == "sphere":
         return _seg_seg_dist(p0, p1, np.array(marker["pos"]), np.array(marker["pos"])) <= marker["radius"]
@@ -37,6 +35,14 @@ def crosses(marker, p0, p1, t=0.0):
         f = marker["fromto"]
         return _seg_seg_dist(p0, p1, np.array(f[:3]), np.array(f[3:])) <= marker["radius"]
     return _seg_box(p0, p1, marker)
+
+
+def _authored(marker, p, t):
+    """Point p at sim time t in the marker's authored frame."""
+    offset, yaw = pose(marker["motion"], t)
+    c, cy, sy = centre(marker, 0.0), math.cos(yaw), math.sin(yaw)
+    rot = np.array([[cy, sy, 0], [-sy, cy, 0], [0, 0, 1]])  # Rz(-yaw)
+    return c + (p - c - offset) @ rot.T
 
 
 def _seg_seg_dist(p1, q1, p2, q2):

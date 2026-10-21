@@ -1,0 +1,14 @@
+# Stay inside an 8 m square region for 15 s while two balls sweep across its middle and a bar spins in one corner.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [10, 10, 0.5]}
+hazards:
+  - {type: sphere, pos: [0, 0, 0.5], radius: 0.6, motion: {type: oscillate, axis: [1, 0, 0], amplitude: 3.5, period: 6, phase: 0.25}}
+  - {type: sphere, pos: [0, 0, 0.5], radius: 0.6, motion: {type: oscillate, axis: [0, 1, 0], amplitude: 3.5, period: 8, phase: 0.75}}
+  - {type: capsule, fromto: [-4, -2.5, 0.5, -1, -2.5, 0.5], radius: 0.2, motion: {type: oscillate, axis: [1, 0, 0], amplitude: 0, period: 1, spin: 45}}
+tasks:
+  survive:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    region: {type: box, pos: [0, 0, 0.5], size: [4, 4, 1]}
+    time_limit_s: 15
