@@ -199,7 +199,7 @@ def _play(window, session):
                 held = {n for n, ks in KEYS.items() if any(imgui.is_key_down(k) for k in ks)}
                 left, right_x = _sticks()
                 act = action(held, left, right_x)
-                pacer.tick()
+                pacer.wait()
                 _, _, terminated, truncated, info = session.step(act, pacer.overruns)
                 if text := outcome(terminated, truncated, info):
                     flow.end(text)

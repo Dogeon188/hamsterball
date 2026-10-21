@@ -60,11 +60,11 @@ def test_pacer_holds_real_time_and_counts_overruns_without_catching_up():
 
     c = FakeClock()
     p = Pacer(1 / 60, clock=c, sleep=c.sleep)
-    p.tick()  # the first frame starts now
+    p.wait()  # the first frame starts now
     starts = [c.t]
     for work in [0.005, 0.005, 0.05, 0.005, 0.005]:  # the third frame's work takes 3 periods
         c.t += work
-        p.tick()
+        p.wait()
         starts.append(c.t)
     gaps = np.diff(starts)
     np.testing.assert_allclose(gaps[[0, 1, 3, 4]], 1 / 60)
@@ -77,15 +77,15 @@ def test_pacer_tolerates_a_late_wake_and_reset_forgets_a_pause():
 
     c = FakeClock()
     p = Pacer(1 / 60, clock=c, sleep=c.sleep)
-    p.tick()
+    p.wait()
     c.t += 1 / 60 + 0.001  # within the slack
-    p.tick()
+    p.wait()
     assert p.overruns == 0
     c.t += 5.0  # paused
     p.reset()
-    p.tick()
+    p.wait()
     c.t += 0.005
-    p.tick()
+    p.wait()
     assert p.overruns == 0
 
 

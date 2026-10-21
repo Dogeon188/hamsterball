@@ -19,7 +19,7 @@ FRAGMENT = "\n".join(f'<body name="view_{v}" mocap="true"><camera name="{v}" fov
 
 
 def _quat(yaw, pitch):
-    """Orientation of a camera facing heading `yaw` (0 = +y, as the camera yaw) tilted `pitch` below the horizon.
+    """Orientation of a camera facing yaw `yaw` (0 = +y, as the camera yaw) tilted `pitch` below the horizon.
 
     A MuJoCo camera looks along its -z with +y up.
     """

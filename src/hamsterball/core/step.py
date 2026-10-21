@@ -46,7 +46,7 @@ def wrap(a):
 
 
 def camera_yaw(data, cam):
-    """Chase the shell's heading, add the orbit input, store and return the yaw."""
+    """Turn toward the shell's direction of travel, add the orbit input, store and return the yaw."""
     yaw = data.userdata[0]
     vx, vy = data.qvel[SHELL_DOF], data.qvel[SHELL_DOF + 1]
     if vx * vx + vy * vy > CHASE_MIN_SPEED2:

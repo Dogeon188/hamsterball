@@ -27,7 +27,7 @@ Kernel shape: ids and constants are module constants, small-vector maths is writ
 ## Known quirks
 
 - Containment is a step-level state edit, not a MuJoCo constraint, so one step can still carry the hamster past the 20 mm stop by that step's travel. Measured worst sinks for throws at 0 / 4 / 8 / 12 m/s are 14 / 17 / 20 / 23 mm, under spec §5's 16 / 21 / 30 / 36 mm, because this core reads fresh positions (see History, 2026-10-22).
-- The chase yaw follows any shell motion above 0.8 m/s, backwards included. Driving up a 20° slope from rest, the shell first rolls back at up to 1.4 m/s, and the yaw swings about 56° toward the downhill heading, which turns a held "forward" off the slope: the climb drops from 5.17 m to 4.34 m in 3 s. The feel test turns the chase off to measure the drive alone.
+- The chase yaw follows any shell motion above 0.8 m/s, backwards included. Driving up a 20° slope from rest, the shell first rolls back at up to 1.4 m/s, and the yaw swings about 56° toward downhill, which turns a held "forward" off the slope: the climb drops from 5.17 m to 4.34 m in 3 s. The feel test turns the chase off to measure the drive alone.
 - The Fibonacci tiles aren't isotropic: the uncapped 1–3 s acceleration is 4.05 m/s² along +x and 4.16 along +y. The feel test runs along +x, as the prototype did.
 
 ## Decisions

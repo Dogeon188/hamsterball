@@ -7,7 +7,7 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 ## Interface
 
 - `action(keys, left=(0, 0), right_x=0)`: `[run_x, run_y, cam_yaw]` (camera frame, x right, y forward) from the held key names (`w a s d shift ctrl q e`) and GLFW stick axes (y down).
-- `Pacer(period, clock=perf_counter, sleep=time.sleep, slack=0.002)`: `tick()` before each env step sleeps to the frame's deadline; `overruns` counts late frames; `reset()` starts a fresh schedule (after a pause or at an episode start).
+- `Pacer(period, clock=perf_counter, sleep=time.sleep, slack=0.002)`: `wait()` before each env step sleeps to the frame's deadline; `overruns` counts late frames; `reset()` starts a fresh schedule (after a pause or at an episode start).
 - `Flow`: `state` is `"play"`, `"paused"`, `"result"` (then `"menu"` or `"quit"` once left); `end(outcome)` shows the result card; `press(name)` takes `esc`, `enter`, `r`, the pause buttons `resume retry menu quit`, or `close`, and returns the shell's command (`retry`, `next`, `menu`, `quit`) or `None`.
 - `outcome(terminated, truncated, info)`: the result card's headline (`Success`, `Failed: hazard`, `Failed: fell off`, `Failed: left the region`, `Time up`) or `None`.
 - `hud(env, action, recording)`: five lines: `t / limit s`, task progress, `REC` or `not recording`, `effort e`, `speed v m/s`. `sim_time(env)` and `progress(env)` are its parts.
@@ -16,7 +16,7 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 
 - Keys: WASD sum to a direction, normalised, at effort 0.5; Shift 0.25, Ctrl 1.0, both 0.25. Q gives `cam_yaw` +1 (the yaw rises, so the view turns left), E −1, both 0.
 - Sticks: a radial deadzone of 0.15, effort `(m − 0.15) / 0.85` capped at 1. The left stick outside its deadzone replaces the WASD run; the right stick's x outside its deadzone replaces Q/E, right turning right. Each stick overrides only its own keys.
-- Pacer: deadlines follow an ideal 1/60 s schedule. A tick past its deadline by more than `slack` counts an overrun and restarts the schedule at now, so a slow machine slows the game and never bursts steps to catch up; an early tick sleeps.
+- Pacer: deadlines follow an ideal 1/60 s schedule. A `wait` past its deadline by more than `slack` counts an overrun and restarts the schedule at now, so a slow machine slows the game and never bursts steps to catch up; an early `wait` sleeps.
 - Flow is a table `state → {input: (next state, command)}`. Esc toggles pause; R and Enter work only on the result card; `close` quits from anywhere. Leaving by retry, menu, quit, or close before the result is an abandoned run (ticket 12 discards it).
 - HUD progress: waypoint `passed+1 / n` (capped at `n/n` after a win), items and keys `collected / n` (then `keys n/n: reach the goal`), `reach the goal`, survive `limit − t` left. Speed is the shell's world speed (`qvel[0:3]`).
 
@@ -43,3 +43,4 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 
 - 2026-10-22, ticket hamsterball-v1/11: added, test-first.
 - 2026-10-22, code review of hamsterball-v1: the waypoint HUD read `waypoint 5/4` after a win; it now caps at `n/n`.
+- 2026-10-22, code review of hamsterball-v1: `Pacer.tick()` renamed `Pacer.wait()`, since GLOSSARY.md avoids "tick" (it means a physics step there).

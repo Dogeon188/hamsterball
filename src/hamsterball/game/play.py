@@ -41,7 +41,7 @@ def action(keys, left=(0.0, 0.0), right_x=0.0):
 
 
 class Pacer:
-    """One env step per frame at real-time pace: tick() sleeps until the frame's deadline.
+    """One env step per frame at real-time pace: wait() sleeps until the frame's deadline.
 
     A frame that ends more than `slack` past its deadline is an overrun: it's counted, and the schedule restarts from
     now, so the game slows down rather than skipping or bursting steps (spec §13).
@@ -53,10 +53,10 @@ class Pacer:
         self.reset()
 
     def reset(self):
-        """Start a fresh schedule at the next tick (after a pause, or a new episode)."""
+        """Start a fresh schedule at the next wait (after a pause, or a new episode)."""
         self._deadline = None
 
-    def tick(self):
+    def wait(self):
         now = self.clock()
         if self._deadline is None:
             self._deadline = now
