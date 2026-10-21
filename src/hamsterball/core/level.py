@@ -33,7 +33,7 @@ MARKER_RGBA = {
     "region": (0.6, 0.3, 0.9, 0.25),
 }
 HAZARD_RGBA = (0.9, 0.1, 0.1, 0.5)  # level-wide, so the env never hides a hazard
-LOCKED_GOAL_RGBA = (0.5, 0.5, 0.5, 0.15)
+LOCKED_RGBA = (0.5, 0.5, 0.5, 0.15)  # a marker that can't trigger yet: the unlock goal, a later waypoint
 PASSED_RGBA = (0.2, 0.9, 0.3, 0.2)  # a passed waypoint: the goal's green, fainter
 CONTACT = {"friction": 2, "solref": 2, "solimp": 5}  # optional per-geom contact values and their lengths
 HFIELD_BASE = 1.0  # depth (m) of the solid slab under each hfield; MuJoCo needs one
