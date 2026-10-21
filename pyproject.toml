@@ -8,7 +8,11 @@ dependencies = [
     "gymnasium>=1.4,<2",
     "numpy",
     "pyyaml>=6.0.3",
+    "click>=8.1",
 ]
+
+[project.scripts]
+hamsterball-bench = "hamsterball.bench:main"
 
 [dependency-groups]
 dev = ["pytest"]
