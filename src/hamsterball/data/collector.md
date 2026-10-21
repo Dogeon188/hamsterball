@@ -7,11 +7,12 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 ## Interface
 
 - `Collector(env, **kw)`: a `minari.DataCollector` over a `gym.make`d hamsterball env (it needs `env.spec`). `kw` passes through to Minari (`action_space`, `jpeg_encoding`); the observation space (`OBSERVATION`), step callback, episode metadata callback, `record_infos`, and `data_format="arrow"` are fixed.
-- `reset`, `step`, `create_dataset(dataset_id, **kw)`, `add_to_dataset(dataset)`, `close()`: Minari's.
+- `reset`, `step`, `create_dataset(dataset_id, **kw)`, `close()`: Minari's.
+- `add_to_dataset(dataset)`: Minari's, but each appended episode keeps its seed and reset options and gets the episode metadata callback's fields, as in `create_dataset`.
 - `discard_episode()`: drops the episode in progress (an abandoned run). Call `reset` before stepping again.
 - `provenance()`: `{hamsterball_version, mujoco_version, platform}` of this build, `platform` as `<OS>-<arch>` from `platform.system()` and `platform.machine()`.
 - `SPACE_KWARGS`: the env kwargs written into the dataset's `env_spec`.
-- `OBSERVATION`: the stored observation space, `Dict(state=Box(19), goal=Box(10))` float32, whatever the env's.
+- `OBSERVATION`: the stored observation space, `Dict(goal=Box(10), state=Box(19))` float32, whatever the env's.
 
 ## How it works
 
@@ -24,11 +25,14 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - `uv run pytest tests/test_data.py`: reset options and seeds per episode, `discard_episode`, dataset metadata and `env_spec` kwargs with `recover_environment()`, episode outcomes, a pixel env (`views`, `obs_state=False`) storing `state` and `goal` and replaying, and the replay tests of [replay.md](replay.md).
 - `discard_episode` sets Minari's private `DataCollector._buffer` to None; `reset` and `create_dataset` flush `_buffer` and skip it when None. `test_discard_episode_drops_the_episode_in_progress` fails if that internal changes.
 - `step` reads Minari's private `DataCollector._episode_id` to key each episode's outcome; `test_episode_metadata_holds_the_outcome_return_and_length` fails if it changes.
+- `add_to_dataset` calls Minari's private `_flush_to_storage` and reads `_storage` and `_episode_metadata_callback`; `test_appended_episodes_get_the_outcome_metadata_too` fails if they change, and replays the appended episode.
+- `OBSERVATION`'s keys stay in sorted order (see Known quirks); the same test fails on a mismatch.
 
 ## Known quirks
 
 - Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the core dependencies are `minari[arrow,create]==0.5.*` and `pillow`, beyond spec §2's `minari[arrow]`.
-- The episode metadata callback runs only in `create_dataset`. Minari's `add_to_dataset` copies episodes without running it, so appended episodes lack `success`, `failure_reason`, `return`, and `length`.
+- Minari 0.5.4 runs the episode metadata callback only in `create_dataset`, and its `add_to_dataset` copies episodes through `MinariStorage.update_from_storage`, which rebuilds each from its steps and drops the seed and options. The Collector's `add_to_dataset` writes them back with the callback's fields.
+- Minari's episode buffer stores a `Dict` observation in sorted key order (jax's `tree_map`), but `update_from_storage` re-encodes in the space's key order. With any other order an appended episode gets a different Arrow schema and reading the dataset fails with `ArrowTypeError`, so `OBSERVATION` lists `goal` before `state`.
 - `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`.
 - `views` and `view_size` come back from `env_spec` as JSON lists; the env turns them into tuples.
 - Not yet: the low-level policy's run vector as an extra per-step field, and the game's overrun count.
@@ -46,3 +50,4 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 - 2026-10-22, ticket hamsterball-v1/08: added. Found that minari 0.5.4's `DataCollector` imports `jax` and its Arrow storage imports `PIL`, neither in the `arrow` extra.
 - 2026-10-22, ticket hamsterball-v1/08: after merging ticket 06's views, the Collector stores `state` and `goal` from `info` instead of the env's observation, and writes `views`, `view_size`, and `obs_state` into `env_spec`.
+- 2026-10-22, ticket hamsterball-v1/13: agent finding while building baselines over appended episodes: Minari's `add_to_dataset` dropped the seed, reset options, and callback fields, and an appended episode's observation schema clashed with the first's. The Collector now overrides `add_to_dataset`, and `OBSERVATION` lists `goal` first.
