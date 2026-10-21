@@ -13,7 +13,11 @@ dependencies = [
     "click>=8.1",
 ]
 
+[project.optional-dependencies]
+game = ["imgui-bundle", "glfw", "click"]
+
 [project.scripts]
+hamsterball-play = "hamsterball.game.window:main"
 hamsterball-bench = "hamsterball.bench:main"
 
 [dependency-groups]
