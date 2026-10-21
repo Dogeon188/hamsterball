@@ -247,3 +247,20 @@ def test_levels_accepts_any_object_that_satisfies_the_protocol():
     with pytest.raises(ValueError):
         HamsterballEnv(["survive"], levels=Flat())  # no task the generator supports
 
+
+
+def test_a_generated_episode_records_and_replays(tmp_path, monkeypatch):
+    import gymnasium as gym
+
+    import hamsterball  # noqa: F401  registers the env ids
+    from hamsterball.data import Collector, replay
+
+    monkeypatch.setenv("MINARI_DATASETS_PATH", str(tmp_path))
+    env = Collector(gym.make("HamsterballCollectItems-v0", levels=GEN, difficulty=0.7))
+    env.action_space.seed(0)
+    env.reset(seed=3)
+    for _ in range(20):
+        env.step(env.action_space.sample())
+    ds = env.create_dataset("test/generated-v0", algorithm_name="random")
+    assert next(iter(ds.storage.get_episode_metadata([0])))["options"]["difficulty"] == 0.7
+    replay(ds)

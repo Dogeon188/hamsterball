@@ -29,7 +29,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 - Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the `data` extra holds `minari[arrow,create]==0.5.*` and `pillow`. Install `hamsterball[data]` to record or replay.
 - The episode metadata callback runs only in `create_dataset`. Minari's `add_to_dataset` copies episodes without running it, so appended episodes lack `success`, `failure_reason`, `return`, and `length`.
-- `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`.
+- `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`. A `LevelGenerator` pool is the exception: the Collector drops `levels` and `difficulty` from the spec, since each episode's options hold its generated level and difficulty; the recovered env has the default pool.
 - `views` and `view_size` come back from `env_spec` as JSON lists; the env turns them into tuples.
 - Not yet: the low-level policy's run vector as an extra per-step field, and the game's overrun count.
 
@@ -47,3 +47,4 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 - 2026-10-22, ticket hamsterball-v1/08: added. Found that minari 0.5.4's `DataCollector` imports `jax` and its Arrow storage imports `PIL`, neither in the `arrow` extra.
 - 2026-10-22, ticket hamsterball-v1/08: after merging ticket 06's views, the Collector stores `state` and `goal` from `info` instead of the env's observation, and writes `views`, `view_size`, and `obs_state` into `env_spec`.
+- 2026-10-22, ticket hamsterball-v1/10: a generator pool's `env_spec` failed to serialise, so its dataset had no `env_spec` and `replay` raised; the Collector now drops `levels` and `difficulty` for a generator pool. `tests/test_generator.py::test_a_generated_episode_records_and_replays`.

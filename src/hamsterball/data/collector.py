@@ -10,6 +10,8 @@ import mujoco
 import numpy as np
 from minari.data_collector.callbacks import EpisodeMetadataCallback, StepDataCallback
 
+from ..core.generator import LevelGenerator
+
 
 class _StepData(StepDataCallback):
     """Stores `state` and `goal` (from info, so with or without views or `obs_state`) and `core_state`.
@@ -49,6 +51,11 @@ class Collector(minari.DataCollector):
     def __init__(self, env, **kw):
         u = env.unwrapped
         u.spec.kwargs.update({k: getattr(u, k) for k in SPACE_KWARGS})  # the defaults too, before Minari copies the spec
+        if isinstance(u.spec.kwargs.get("levels"), LevelGenerator):
+            # a generator object isn't JSON, and every episode stores its level in its options anyway; drop the pool
+            # and its difficulty, so the recovered env takes the default pool, which accepts the default difficulty
+            for k in ("levels", "difficulty"):
+                u.spec.kwargs.pop(k, None)
         outcomes = self._outcomes = {}  # episode id -> its last step's success and failure_reason
 
         class Metadata(EpisodeMetadataCallback):
