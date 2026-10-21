@@ -251,6 +251,7 @@ def test_levels_accepts_any_object_that_satisfies_the_protocol():
 
 
 def test_a_generated_episode_records_and_replays(tmp_path, monkeypatch):
+    pytest.importorskip("minari")
     import gymnasium as gym
 
     import hamsterball  # noqa: F401  registers the env ids
