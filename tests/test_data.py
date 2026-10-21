@@ -10,8 +10,9 @@ import pytest
 minari = pytest.importorskip("minari")
 
 import hamsterball  # noqa: F401  registers the env ids
+from hamsterball.core.level import Level
 from hamsterball.data import Collector, ReplayMismatch, replay
-from hamsterball.env import TASKS
+from hamsterball.env import LEVELS_DIR, TASKS
 
 
 @pytest.fixture(autouse=True)
@@ -136,3 +137,21 @@ def test_appended_episodes_get_the_outcome_metadata_too():
     assert (appended["id"], appended["seed"], appended["options"]["task"]) == (1, 1, "survive")
     assert (appended["success"], appended["failure_reason"]) == (False, "left_region")
     assert appended["return"] == -1.0 and appended["length"] == appended["total_steps"]
+
+
+def test_one_dataset_holds_levels_whose_core_states_differ_in_size():
+    # survive_pushers' bodies add qpos and qvel; the game's per-player dataset holds every level the player plays
+    env = Collector(gym.make("HamsterballSurvive-v0", levels=["first_survive", "survive_pushers"]))
+    sizes = set()
+    for level in ("first_survive", "survive_pushers"):
+        env.reset(seed=0, options={"level": Level.load(LEVELS_DIR / f"{level}.yaml")})
+        for _ in range(5):
+            sizes.add(env.step(np.array([0, 1], np.float32))[4]["core_state"].size)
+    ds = env.create_dataset("test/mixed-v0", algorithm_name="scripted")
+    env.reset(seed=1, options={"level": Level.load(LEVELS_DIR / "survive_pushers.yaml")})
+    env.step(np.array([0, 1], np.float32))
+    env.add_to_dataset(ds)
+    assert len(sizes) == 2
+    ds = minari.load_dataset("test/mixed-v0")
+    assert [ep.infos["core_state"].shape[1] for ep in ds.iterate_episodes()] == [110, max(sizes), max(sizes)]
+    replay(ds)

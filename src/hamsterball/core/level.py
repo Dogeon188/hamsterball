@@ -38,6 +38,10 @@ LOCKED_RGBA = (0.5, 0.5, 0.5, 0.15)  # a marker that can't trigger yet: the unlo
 PASSED_RGBA = (0.2, 0.9, 0.3, 0.2)  # a passed waypoint: the goal's green, fainter
 CONTACT = {"friction": 2, "solref": 2, "solimp": 5}  # optional per-geom contact values and their lengths
 HFIELD_BASE = 1.0  # depth (m) of the solid slab under each hfield; MuJoCo needs one
+# A kinematic body's mass and inertia: heavy, so a contact barely moves it within the one step before the core poses it
+# again (a measured carry converged by about 1000 kg, see step.md)
+BODY_MASS, BODY_INERTIA = 1000.0, 1000.0
+BODY_GEOMS = {"box", "sphere", "capsule"}  # a plane or hfield can't move
 
 
 @dataclass
@@ -49,6 +53,7 @@ class Level:
     follow_yaw_deg: float = 0.0
     version: int = 1
     generator: dict | None = None  # provenance of a generated level; hand-authored files omit it
+    bodies: list = field(default_factory=list)  # kinematic bodies; a level without them omits the key
 
     @classmethod
     def from_yaml(cls, text, base="."):
@@ -60,7 +65,7 @@ class Level:
     @classmethod
     def from_dict(cls, d, base="."):
         """`from_yaml` on an already-parsed level."""
-        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards", "generator"}, "level")
+        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards", "generator", "bodies"}, "level")
         if d.get("version", 1) != 1:
             raise ValueError(f"level version {d['version']} is not 1")
         if not d["tasks"]:
@@ -72,6 +77,7 @@ class Level:
             hazards=[_marker(h, moving=True) for h in d.get("hazards") or []],
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
             generator=_provenance(d["generator"]) if "generator" in d else None,
+            bodies=[_body(b, Path(base)) for b in d.get("bodies") or []],
         )
 
     @classmethod
@@ -88,6 +94,8 @@ class Level:
         d = asdict(self)
         if d["generator"] is None:  # hand-authored: no block, so the id is the same as before provenance existed
             del d["generator"]
+        if not d["bodies"]:  # likewise for a level without bodies
+            del d["bodies"]
         return yaml.safe_dump(d, sort_keys=True)
 
     @cached_property
@@ -104,25 +112,13 @@ class Level:
         each task's markers (translucent, no contact)."""
         assets, out = [], []
         for i, g in enumerate(self.geoms):
-            rgba = " ".join(map(repr, g.get("rgba", [0.45, 0.5, 0.45, 1.0])))
             if g["type"] == "hfield":
                 samples = np.frombuffer(base64.b64decode(g["samples"]), "<u2")
                 assets.append(
                     f'<hfield name="hfield{i}" nrow="{g["nrow"]}" ncol="{g["ncol"]}" size="{_s(g["size"])} {HFIELD_BASE!r}" '
                     f'elevation="{" ".join(map(str, samples.tolist()))}"/>'
                 )
-                shape = f'hfield="hfield{i}"'
-            else:
-                shape = f'size="{_s(g["size"])}"'
-            if CONTACT.keys() & g.keys():
-                # priority over the shell's outer sphere, so these values apply as written; condim 6 keeps rolling
-                slide, roll = g.get("friction", [1.0, ROLL])
-                shape += f' priority="1" condim="6" friction="{slide!r} {TORSION!r} {roll!r}"'
-                shape += "".join(f' {k}="{_s(g[k])}"' for k in ("solref", "solimp") if k in g)
-            out.append(
-                f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" {shape} euler="{_s(g["euler"])}" '
-                f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>'
-            )
+            out.append(_geom_mjcf(g, f'hfield="hfield{i}"' if g["type"] == "hfield" else None))
         # hazard names carry no "/", so the env's per-task marker looks pass them by
         out += [_marker_mjcf(h, f"hazard{i}", HAZARD_RGBA) for i, h in enumerate(self.hazards)]
         for name, task in self.tasks.items():
@@ -132,6 +128,36 @@ class Level:
                 else:
                     out.append(_marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
+
+    def body_mjcf(self):
+        """MJCF sections for model.build's `bodies`, after the view mocaps: each kinematic body `body<i>` (a free
+        joint, gravity compensated, heavy) with its geoms, and a contact exclude from the world and from each other
+        (the core poses them, so only the shell should touch them). "" for a level without bodies."""
+        if not self.bodies:
+            return ""
+        names = [f"body{i}" for i in range(len(self.bodies))]
+        out = [
+            f'<body name="{n}" pos="{_s(b["pos"])}" gravcomp="1"><freejoint/>'
+            f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
+            + "".join(_geom_mjcf(g) for g in b["geoms"]) + "</body>"
+            for n, b in zip(names, self.bodies)
+        ]
+        ex = [f'<exclude body1="world" body2="{n}"/>' for n in names]
+        ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(names) for b in names[i + 1:]]
+        return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
+
+
+def _geom_mjcf(g, shape=None):
+    """A level solid: group 0, contype and conaffinity 1 (the shell's outer sphere), contact values with priority."""
+    rgba = " ".join(map(repr, g.get("rgba", [0.45, 0.5, 0.45, 1.0])))
+    shape = shape or f'size="{_s(g["size"])}"'
+    if CONTACT.keys() & g.keys():
+        # priority over the shell's outer sphere, so these values apply as written; condim 6 keeps rolling
+        slide, roll = g.get("friction", [1.0, ROLL])
+        shape += f' priority="1" condim="6" friction="{slide!r} {TORSION!r} {roll!r}"'
+        shape += "".join(f' {k}="{_s(g[k])}"' for k in ("solref", "solimp") if k in g)
+    return (f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" {shape} euler="{_s(g["euler"])}" '
+            f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>')
 
 
 def _marker_mjcf(m, name, rgba):
@@ -186,6 +212,17 @@ def _geom(g, base):
         if k in g:
             out[k] = _vec(g[k], n)
     return out
+
+
+def _body(b, base):
+    """A kinematic body: `pos` (its frame's origin, which a spin turns about), `geoms` in that frame, a `motion`."""
+    _keys(b, {"geoms", "motion"}, {"pos"}, "body")
+    if not isinstance(b["geoms"], list) or not b["geoms"]:
+        raise ValueError("a body needs a non-empty list of geoms")
+    geoms = [_geom(g, base) for g in b["geoms"]]
+    if bad := {g["type"] for g in geoms} - BODY_GEOMS:
+        raise ValueError(f"body geom types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
+    return {"pos": _vec(b.get("pos", [0, 0, 0]), 3), "geoms": geoms, "motion": M.load(b["motion"])}
 
 
 def _marker(m, moving=False):

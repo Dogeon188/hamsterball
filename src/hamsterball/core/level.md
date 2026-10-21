@@ -7,9 +7,9 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 ## Interface
 
 - `Level.from_yaml(text, base=".")`, `Level.load(path)`, `Level.from_dict(d, base=".")` (an already-parsed level, as the generator builds it): validate and fill every default; a malformed level raises `ValueError`. An hfield's `file` resolves against `base`; `load` passes the level file's directory.
-- `Level` fields: `kill_plane_z`, `geoms` (list of dicts), `tasks` (task id to block), `hazards` (list of markers, default empty), `follow_yaw_deg` (default 0), `version` (1), `generator` (the provenance block, or `None`).
-- `level.canonical()`: `yaml.safe_dump(asdict(level), sort_keys=True)`, leaving out `generator` when it is `None`. `level.id`: SHA-256 hex of the canonical form. Both are computed on first read and cached, so edit a `Level` only before then.
-- `level.mjcf()`: top-level MJCF sections (an `<asset>` with the hfields, then a `<worldbody>` with the geoms and markers) for `model.build(tier, level)`, or `Core(level=...)`.
+- `Level` fields: `kill_plane_z`, `geoms` (list of dicts), `tasks` (task id to block), `hazards` (list of markers, default empty), `follow_yaw_deg` (default 0), `version` (1), `generator` (the provenance block, or `None`), `bodies` (list of kinematic bodies, default empty).
+- `level.canonical()`: `yaml.safe_dump(asdict(level), sort_keys=True)`, leaving out `generator` when it is `None` and `bodies` when it is empty. `level.id`: SHA-256 hex of the canonical form. Both are computed on first read and cached, so edit a `Level` only before then.
+- `level.mjcf()`: top-level MJCF sections (an `<asset>` with the hfields, then a `<worldbody>` with the geoms and markers) for `model.build(tier, level)`. `level.body_mjcf()`: the kinematic bodies' sections for `model.build(..., bodies=)`, or `""`. `Core(level=level)` takes the `Level` and calls both.
 
 ## How it works
 
@@ -22,6 +22,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - Hazards: a level-wide list of markers under `hazards`, shared by every task; a missing or empty list loads as `[]` (filled, so it is part of the id). Each compiles after the level geoms as `hazard<i>` in `HAZARD_RGBA` (red); the name has no `/`, so the env's per-task looks never hide it.
 - Provenance: a generated level carries `generator: {name, version, task, seed, difficulty}` (string, int, task id, int, number); the id covers it. A hand-authored level has `generator = None`, and its canonical form has no `generator` key, so ids from before the block existed stand. See [generator.md](generator.md).
 - Motion: the survive region may carry a `motion` ([motion.md](motion.md)), loaded with its defaults filled; absent stays absent, so a still level's canonical form and id are unchanged. A hazard may carry one too (ticket survive-movers/02); task markers other than the region don't yet (an unknown key raises). `level.movers()` lists `(geom name, marker)` for every marker with a motion, named as `mjcf()` names its geom; the env poses those geoms. `mjcf()` compiles a moving marker at its authored pose.
+- Kinematic bodies: a level-wide `bodies` list of `{pos, geoms, motion}`. `pos` (default origin) is the body frame's origin, which the motion offsets and a spin turns about; `geoms` (non-empty) are in that frame, validated as level geoms but only `box`, `sphere`, `capsule` (a plane or hfield can't move); `motion` is required ([motion.md](motion.md)). Body `i` compiles as `body<i>`: a free joint, `gravcomp="1"`, an explicit inertial of `BODY_MASS` 1000 kg and `BODY_INERTIA` 1000 kg·m² (geom masses unused), its geoms on contype and conaffinity 1 like level geoms, and `<contact><exclude>` from the world and from every other body. The core drives it ([step.md](step.md)).
 - A survive spawn outside its region (the marker point test of [marker.md](marker.md), with the region at its pose at time 0) raises.
 
 ## Invariants and checks
@@ -50,6 +51,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket survive-movers/01: a marker's `motion` is a key on the marker itself (offsets from its authored pose), omitted when absent, so no existing level id changes.
 
 - 2026-10-22, ticket hamsterball-v1/10: a hand-authored level's canonical form omits `generator` rather than writing `generator: null`, so the provenance block changes no existing level id.
+- 2026-10-22, ticket survive-movers/03: `bodies` is omitted from the canonical form when empty, like `generator`, so no existing level id changes. A body's geoms sit in its own frame (MuJoCo's form), so a spin or a later tilt (ticket 04) turns about `pos`.
 
 ## Tried and rejected
 
@@ -66,3 +68,4 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, user play-test request: waypoints after the next render grey; `LOCKED_GOAL_RGBA` is renamed `LOCKED_RGBA`, since it now colours locked waypoints too.
 - 2026-10-22, ticket survive-movers/02: hazards take an optional `motion`; `movers()` lists them as `hazard<i>`; bundled `survive_sweepers`.
 - 2026-10-22, ticket survive-movers/01: added the optional `motion` on the survive region, `Level.movers()`, and the bundled level `survive_drift`.
+- 2026-10-22, ticket survive-movers/03: added `bodies`, `body_mjcf()`, and the bundled level `survive_pushers`. The static-geom MJCF moved into `_geom_mjcf`, shared with body geoms (same output).
