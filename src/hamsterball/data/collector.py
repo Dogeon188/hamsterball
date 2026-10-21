@@ -12,14 +12,23 @@ from minari.data_collector.callbacks import EpisodeMetadataCallback, StepDataCal
 
 
 class _StepData(StepDataCallback):
-    """Keeps only `core_state` from info: the other keys are derived, and reset's `reset_options` goes per episode."""
+    """Stores `state` and `goal` (from info, so with or without views or `obs_state`) and `core_state`.
+
+    No pixels: re-render makes them from the core states. reset's `reset_options` goes per episode instead.
+    """
 
     def __call__(self, env, **kw):
         step = super().__call__(env, **kw)
-        step["info"] = {"core_state": step["info"]["core_state"]}
+        info = step["info"]
+        step["observation"] = {"state": info["state"], "goal": info["goal"]}
+        step["info"] = {"core_state": info["core_state"]}
         return step
 
 
+_inf = np.float32(np.inf)
+OBSERVATION = gym.spaces.Dict(  # what a dataset stores per step: spec §10's state and goal, never pixels
+    state=gym.spaces.Box(-_inf, _inf, (19,), np.float32), goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32)
+)
 # every env kwarg that shapes a space or the steps, so recover_environment() rebuilds an env with the same spaces
 SPACE_KWARGS = ("tier", "camera_action", "views", "view_size", "obs_state", "shaped", "frame_skip")
 
@@ -39,8 +48,7 @@ class Collector(minari.DataCollector):
 
     def __init__(self, env, **kw):
         u = env.unwrapped
-        # fill the spec's defaults in, before Minari copies the spec; views and obs_state arrive with ticket 06
-        u.spec.kwargs.update({k: getattr(u, k) for k in SPACE_KWARGS if hasattr(u, k)})
+        u.spec.kwargs.update({k: getattr(u, k) for k in SPACE_KWARGS})  # the defaults too, before Minari copies the spec
         outcomes = self._outcomes = {}  # episode id -> its last step's success and failure_reason
 
         class Metadata(EpisodeMetadataCallback):
@@ -54,7 +62,7 @@ class Collector(minari.DataCollector):
 
         super().__init__(
             env, step_data_callback=_StepData, episode_metadata_callback=Metadata, record_infos=True,
-            data_format="arrow", **kw,
+            data_format="arrow", observation_space=OBSERVATION, **kw,
         )
 
     def reset(self, *, seed=None, options=None):
