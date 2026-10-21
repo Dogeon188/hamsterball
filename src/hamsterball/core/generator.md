@@ -1,0 +1,61 @@
+# generator.py
+
+## Purpose
+
+The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hfield `Level` for any of the five tasks at any difficulty in [0, 1], and the same (task, seed, difficulty, version) gives the same level id on every platform.
+
+## Interface
+
+- `LevelGenerator`: a `runtime_checkable` protocol with `tasks`, `version`, and `__call__(task, seed, difficulty) -> Level`. The env's `levels=` takes any object that satisfies it (see [env.md](../env.md)).
+- `ProceduralGenerator(**overrides)`: `name = "procedural"`, `version = 1`, `tasks` = all five. Each override is a row of `TABLE` given as `(value at d = 0, value at d = 1)`, such as `ProceduralGenerator(climb_grade=(5, 10))`; an unknown name raises `TypeError`.
+- `gen(task, seed, difficulty)`: the `Level`, whose `generator` block is `{name, version, task, seed, difficulty}`. `gen.generate(...)` returns `(level, attempts)`, which the golden test uses for the resample failure rate.
+- `gen.params(difficulty)`: every table row at that difficulty.
+- `GenerationError`: raised when 32 attempts all fail.
+
+## How it works
+
+- `params`: each row is linear in d between its endpoints. `cliff_height` is 0 up to d = 0.5 and linear from 0 to its d = 1 value above. Marker counts round half up (`floor(v + 0.5)`). Grades are degrees; `hazards_per_m` is spec §8's "1 per 8 m" as 1/8.
+- One PCG64 stream per call, seeded with `seed`; a failed attempt (`_Retry`) moves on to the stream's next draws, up to 32 attempts.
+- Route tasks (`_route`), spec §8 steps 1–5:
+  1. Spine: one target per leg (reach goal 1, waypoint race `waypoints`, collect items `items`, unlock goal `keys` + 1 with the goal last), each leg `route_length / n`, split into straights of at most `STRAIGHT` = 8 m. A random start heading, then a turn at each vertex up to `MAX_TURN` = 45°, smaller when straights are short (below). Vertices round to the millimetre.
+  2. Elevation: flat landings around the spawn and each target (`LANDING` = 0.75 m) and around each bend (radius `half-width · tan(turn/2)` plus a cell, at most 30% of a straight). The rest of the spine, measured without the landings, takes alternating climbs and descents (`SEGMENT` ≈ 5 m each, at least two, a random first direction). A climb rises `U(0.5, 1) · min(hill_rise, length · tan(climb_grade))`, a descent falls the same with `descent_grade`. When `cliff_height` > 0, a descent holds a cliff with probability 1/2: a drop of `U(0.5, 0.9) · cliff_height` between two knots 1 µm apart, so across one hfield cell.
+  3. Grid and corridor: 0.25 m nodes over the spine's bounding box plus 4 m (over 256 a side retries). Each node takes the height of its nearest spine point; nodes within half the corridor width of the spine are the corridor. Then value noise (`noise_amplitude`, uniform lattice values in ±amplitude every 2 m, smoothstep between). The kill plane is 2 m below the lowest corridor node, rounded to the millimetre, and every other node sits `PIT` = 1 m below it.
+  4. Hazards: `floor(hazards_per_m · route_length + 0.5)` boxes (half-sizes 0.5, 0.5, 0.25), each at a random spine point and lateral offset within the corridor, at least 2 m from the spawn and every target, with no node of the flood fill's path within its footprint plus a cell. The box is centred 0.5 m above the ground, at shell-centre height, so the marker test catches a shell rolling through it. 20 tries per hazard, then the attempt fails.
+  5. The flood fill again with the hazard footprints blocked, then `time_limit_s = path length / 5 m/s · time_slack`.
+  - Markers: targets are 1 m spheres at the vertex, 0.5 m above the node below (shell-centre height). The spawn is at the first vertex, 0.5 m above the highest corridor node within 0.5 m, facing the first straight; `follow_yaw_deg` points from the spawn to the last target.
+- Survive (`_survive`): `rng.random() < 0.5` picks a plateau disc: a flat top of `survive_disc_radius` at z = 0, the region a vertical capsule of that radius from 0.5 to 1.5 m, which is a disc at shell-centre height. Otherwise a ridge: a flat top `survive_ridge_width` wide along a random-yaw 8 m segment through the origin, the region a horizontal capsule along it at 0.5 m. Both fall off at `survive_falloff_grade` to a grid edge 4 m past the flat top; no noise. Spawn at the region's centre, (0, 0, 0.5); the time limit is `survive_duration`.
+- Quantization (`_hfield`): node heights map to uint16 so the lowest is 0 and the highest 65535 (MuJoCo rescales samples to that range anyway); `pos` z is the lowest height and `size[2]` the span, each rounded to the millimetre. Every later step (flood fill, marker heights, kill plane for survive) reads the heights MuJoCo will see, `z0 + q / 65535 · span`. Row 0 is the +y edge (see [level.md](level.md)).
+- Solvability (`_reach`, `_astar`): A* over 8-neighbour node steps, leg by leg from the spawn's node to each target's node in spine order (for unlock goal, the keys then the goal). A step passes if it climbs at most 15° (`dh ≤ tan 15° · step length`) and drops at most `tan 30° · step length + cliff_height`. Nodes outside the corridor (below the kill plane) and hazard footprints block. The path length is the sum of the legs' lengths.
+
+## Invariants and checks
+
+- Same (task, seed, difficulty, version) → same level id, on every platform: `uv run pytest tests/test_generator.py -k golden` over 5 tasks × d ∈ {0, 0.25, 0.5, 0.75, 1} × seeds 0–7 (200 levels, about 1 s). It prints the resample failure rate and fails above 25%.
+- Any change to the output bumps `ProceduralGenerator.version` and the golden hashes.
+- Every generated level loads through `Level.from_dict`, so it passes the loader's checks (256×256 grid, 0.25 m cells).
+- `uv run pytest tests/test_generator.py`: provenance, the table rows and overrides, marker counts, cliffs only from d = 0.5, `GenerationError`, the time limit against the straight-line route, survive's 50/50 shapes, hazard counts, the hamsterball resting at a spawn, the test_tasks scripted controller finishing reach goal, waypoint race, and unlock goal at d = 0.2, and an inputless survive on a d = 0 plateau.
+
+## Known quirks
+
+- Platform-stable output rests on PCG64, IEEE arithmetic, `sqrt`, and the platform's libm for `sin`, `cos`, `tan`, and `atan`. Their results feed only values that are then rounded (millimetres, uint16), so a last-bit libm difference changes a level only if it lands exactly on a rounding boundary. The golden test on both CI platforms is the check.
+- Overrides change the output, but the provenance block carries no overrides: two generators with different tables give the same (task, seed, difficulty, version) different levels. The canonical level, which trajectories embed, is still exact.
+- Short legs bend less: at d = 0 with 3 waypoints over 5 m the turn limit is near 0, so easy routes are near straight, and reach goal at low d is one straight.
+- The corridor can still fold back near an earlier straight. When neighbouring corridor nodes map to spine points more than 1 m apart and differ in height by more than a 15° cell step, the attempt retries (`_seams`). No sweep so far has hit it.
+- Measured 2026-10-22 over the golden sweep: resample failure rate 2.0% (4 of 204 attempts), all at d = 1, all from hazard placement in the 3 m corridor; the flood fill itself never failed there. Generation takes about 0.5 ms (d = 0) to 10 ms (d = 1, reach goal) per level.
+- The scripted controller of test_tasks.py (3 m/s cap, no planning) finishes 18 of 18 levels at d = 0.2, 13 of 18 at d = 0.5, and 0 of 18 at d = 0.8 (reach goal, waypoint race, collect items, seeds 0–5): the table's upper half needs a controller that climbs and plans.
+
+## Decisions
+
+- 2026-10-22, ticket hamsterball-v1/10: `generator.py` lives in `core` beside `level.py`, since it builds a `Level` and the env imports both.
+- 2026-10-22, ticket hamsterball-v1/10: a cliff step passes the flood fill if it drops at most 30° of descent plus the cliff height, not the cliff height alone: a cliff sits on a descent, so the node pair across it carries the descent's slope too, and a cliff close to the cliff height would otherwise always fail.
+- 2026-10-22, ticket hamsterball-v1/10: hazards are centred at shell-centre height (0.5 m above the ground) rather than resting on the ground with their top at 0.5 m, where the marker test would catch a rolling shell only on the box's boundary.
+- 2026-10-22, ticket hamsterball-v1/10: "off the cells the flood fill uses" is read as off the path the first flood fill found (plus one cell), not off every reachable cell, which would leave no room for hazards in the corridor.
+- 2026-10-22, ticket hamsterball-v1/10: shape constants spec §8 leaves open are module constants, not table rows: 45° bends, 8 m straights, 5 m hill segments, 0.75 m landings, the 8 m ridge, a 1 m pit, 20 tries per hazard, 2 m hazard clearance.
+- 2026-10-22, ticket hamsterball-v1/10: `generate()` returning `(level, attempts)` is public so the golden test can report the failure rate without the generator keeping state.
+
+## Tried and rejected
+
+- 2026-10-22, ticket hamsterball-v1/10 (design, before code): heights from the nearest spine point with no landings. On the inner side of a bend, the nearest point jumps from one straight to the next, a height jump of `2 · half-width · tan(turn/2) · grade` (about 1.3 m for a 12 m corridor, a 45° bend, and a 15° climb), which would put walls and cliffs into levels below d = 0.5. Flat landings at bends remove the jump.
+
+## History
+
+- 2026-10-22, ticket hamsterball-v1/10: added, with the `generator` provenance block in [level.md](level.md).

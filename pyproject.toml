@@ -27,6 +27,7 @@ lerobot = [
 [project.scripts]
 hamsterball-play = "hamsterball.game.window:main"
 hamsterball-bench = "hamsterball.bench:main"
+hamsterball-baseline = "hamsterball.baseline:main"
 
 [dependency-groups]
 dev = ["pytest"]

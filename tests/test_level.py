@@ -366,6 +366,35 @@ def test_each_marker_compiles_to_a_named_geom():
     assert m.geom("collect_items/items/0").pos.tolist() == [3, 0, 0.5]
 
 
+PROVENANCE = {"name": "procedural", "version": 1, "task": "reach_goal", "seed": 7, "difficulty": 0.5}
+
+
+def test_a_generator_provenance_block_loads_and_counts_in_the_id():
+    d = yaml.safe_load(LEVEL)
+    plain = Level.from_yaml(LEVEL)
+    assert "generator" not in plain.canonical()  # hand-authored files omit it, so their ids don't change
+    level = Level.from_yaml(yaml.safe_dump(d | {"generator": PROVENANCE}))
+    assert level.generator == PROVENANCE
+    assert level.id != plain.id
+    assert Level.from_yaml(level.canonical()).id == level.id
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda p: p.pop("seed"),
+        lambda p: p.update(extra=1),
+        lambda p: p.update(seed="7"),
+        lambda p: p.update(difficulty="hard"),
+    ],
+)
+def test_a_malformed_provenance_block_is_rejected(edit):
+    p = dict(PROVENANCE)
+    edit(p)
+    with pytest.raises(ValueError):
+        Level.from_yaml(yaml.safe_dump(yaml.safe_load(LEVEL) | {"generator": p}))
+
+
 def test_a_large_hfield_levels_id_is_cheap_to_read_again(tmp_path):
     """The env reads the id and canonical form several times per reset; a 256x256 hfield takes ~0.1 s to serialise."""
     import time

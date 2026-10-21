@@ -10,6 +10,8 @@ import mujoco
 import numpy as np
 from minari.data_collector.callbacks import EpisodeMetadataCallback, StepDataCallback
 
+from ..core.generator import LevelGenerator
+
 
 class _StepData(StepDataCallback):
     """Stores `state` and `goal` (from info, so with or without views or `obs_state`) and `core_state`.
@@ -26,8 +28,10 @@ class _StepData(StepDataCallback):
 
 
 _inf = np.float32(np.inf)
-OBSERVATION = gym.spaces.Dict(  # what a dataset stores per step: spec §10's state and goal, never pixels
-    state=gym.spaces.Box(-_inf, _inf, (19,), np.float32), goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32)
+# what a dataset stores per step: spec §10's state and goal, never pixels. Keys in sorted order, the order Minari's
+# episode buffer writes them in, so add_to_dataset (which re-encodes in the space's order) writes the same Arrow schema
+OBSERVATION = gym.spaces.Dict(
+    goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32), state=gym.spaces.Box(-_inf, _inf, (19,), np.float32)
 )
 # every env kwarg that shapes a space or the steps, so recover_environment() rebuilds an env with the same spaces
 SPACE_KWARGS = ("tier", "camera_action", "views", "view_size", "obs_state", "shaped", "frame_skip")
@@ -49,6 +53,11 @@ class Collector(minari.DataCollector):
     def __init__(self, env, **kw):
         u = env.unwrapped
         u.spec.kwargs.update({k: getattr(u, k) for k in SPACE_KWARGS})  # the defaults too, before Minari copies the spec
+        if isinstance(u.spec.kwargs.get("levels"), LevelGenerator):
+            # a generator object isn't JSON, and every episode stores its level in its options anyway; drop the pool
+            # and its difficulty, so the recovered env takes the default pool, which accepts the default difficulty
+            for k in ("levels", "difficulty"):
+                u.spec.kwargs.pop(k, None)
         outcomes = self._outcomes = {}  # episode id -> its last step's success and failure_reason
 
         class Metadata(EpisodeMetadataCallback):
@@ -85,6 +94,21 @@ class Collector(minari.DataCollector):
         ds = super().create_dataset(dataset_id, **kw)
         ds.storage.update_metadata(provenance())
         return ds
+
+    def add_to_dataset(self, dataset):
+        """Minari's add_to_dataset, keeping each episode's metadata: Minari's copy drops the seed and options, and it
+        runs the episode metadata callback only in create_dataset."""
+        self._flush_to_storage()  # Minari internal: the episode in progress joins _storage, as add_to_dataset does
+        n = self._storage.total_episodes
+        metas = [  # read before Minari resets _storage; the id is the dataset's, not this storage's
+            {k: v for k, v in {**stored, **extra}.items() if k != "id"}
+            for stored, extra in zip(
+                self._storage.get_episode_metadata(range(n)), self._storage.apply(self._episode_metadata_callback)
+            )
+        ]
+        first = dataset.storage.total_episodes
+        super().add_to_dataset(dataset)
+        dataset.storage.update_episode_metadata(metas, range(first, first + n))
 
     def discard_episode(self):
         """Drop the episode in progress (an abandoned run): nothing of it reaches the dataset."""

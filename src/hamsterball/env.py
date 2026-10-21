@@ -12,6 +12,7 @@ import mujoco
 import numpy as np
 
 from .core.abstract_tier import AbstractTier
+from .core.generator import LevelGenerator
 from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, Level
 from .core.marker import centre, crosses
 from .core.model import DT, HAM, SHELL
@@ -22,6 +23,7 @@ TASKS = ("reach_goal", "waypoint_race", "collect_items", "unlock_goal", "survive
 LEVELS_DIR = Path(__file__).parent / "levels"
 TIME_PENALTY = -0.001  # per env step
 PHI_SCALE = -0.01  # shaping potential per metre to the current target
+DIFFICULTY = 0.5  # the default difficulty passed to a generator
 
 
 def _levels(x):
@@ -51,6 +53,7 @@ class HamsterballEnv(gym.Env):
         shaped=False,
         shaping_gamma=0.99,
         model_cache=16,
+        difficulty=DIFFICULTY,
     ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
@@ -64,14 +67,16 @@ class HamsterballEnv(gym.Env):
         self.view_size = tuple(view_size)
         self.obs_state = obs_state
         self.tasks, self.tier = list(tasks), tier
-        self.set_levels([LEVELS_DIR] if levels is None else levels)
+        self.set_levels([LEVELS_DIR] if levels is None else levels, difficulty)
         self.camera_action = camera_action
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
         self.shaped, self.shaping_gamma = shaped, shaping_gamma
         # LRU keyed by level id: [compiled core, its Renderer at view_size or None], evicted together (spec §7, §11)
         self._cores, self.model_cache = OrderedDict(), model_cache
-        self.action_space = self._core(self.levels[0]).action_space
+        # a generator pool has no level yet: the action space is the tier's, whatever the level
+        core = self._core(self.levels[0]) if self.levels else Core(AbstractTier(), camera_action=camera_action)
+        self.action_space = core.action_space
         inf = np.float32(np.inf)
         spaces = {}
         if obs_state:
@@ -96,7 +101,7 @@ class HamsterballEnv(gym.Env):
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         options = options or {}
-        self.level, self.task = self._draw(options.get("level"), options.get("task"))
+        self.level, self.task, difficulty = self._draw(*(options.get(k) for k in ("level", "task", "difficulty")))
         block = self.level.tasks[self.task]
         self.core = self._core(self.level)
         self.core.reset(block["spawn"]["pos"], math.radians(block["spawn"]["yaw_deg"]))
@@ -123,11 +128,25 @@ class HamsterballEnv(gym.Env):
         self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
         self._phi = self._potential(self._prev)
         reset_options = {"level": self.level.canonical(), "level_id": self.level.id, "task": self.task}
+        if self.level.generator is not None:  # a generated level's difficulty is in its provenance
+            difficulty = self.level.generator["difficulty"]
+        if difficulty is not None:
+            reset_options["difficulty"] = difficulty
         return obs, {"reset_options": reset_options, "core_state": self.core.state(), **vec}
 
-    def _draw(self, level, task):
-        """Spec §10's option cases: the given fields as given, the missing ones from np_random, level first."""
+    def _draw(self, level, task, difficulty):
+        """Spec §10's option cases: the given fields as given, the missing ones from np_random, level first (a pool
+        index, or a 63-bit generator seed). Returns (level, task, the difficulty the generator was called with)."""
         pick = lambda xs: xs[self.np_random.integers(len(xs))]  # noqa: E731
+        if level is None and self.generator is not None:
+            seed = int(self.np_random.integers(2**63))
+            task = task or pick(self._allowed(self.generator))
+            if task not in self.generator.tasks:
+                raise ValueError(f"the generator doesn't support task {task!r}")
+            difficulty = self.difficulty if difficulty is None else difficulty
+            return self.generator(task, seed, difficulty), task, difficulty
+        if level is None and difficulty not in (None, DIFFICULTY):
+            raise ValueError("a difficulty other than the default needs a generator pool")
         if level is None:
             pool = [lv for lv in self.levels if (task in lv.tasks if task else self._allowed(lv))]
             if not pool:
@@ -139,17 +158,29 @@ class HamsterballEnv(gym.Env):
             task = pick(self._allowed(level) or list(level.tasks))
         if task not in level.tasks:
             raise ValueError(f"level {level.id[:12]} doesn't support task {task!r}")
-        return level, task
+        return level, task, None
 
     def _allowed(self, level):
+        """The env's tasks that a level (or a generator) supports."""
         return [t for t in self.tasks if t in level.tasks]
 
-    def set_levels(self, levels):
-        """Replace the level pool from the next reset: bundled names, paths, directories, or Level objects."""
-        pool = [lv for x in levels for lv in _levels(x)]
-        if not any(self._allowed(lv) for lv in pool):
-            raise ValueError(f"no level in the pool supports any of {self.tasks}")
-        self.levels = pool
+    def set_levels(self, levels, difficulty=None):
+        """Replace the level pool from the next reset: a LevelGenerator, or a list of bundled names, paths,
+        directories, or Level objects. `difficulty` goes to a generator (None keeps the current one); a file pool
+        takes only the default."""
+        if isinstance(levels, LevelGenerator):
+            if not self._allowed(levels):
+                raise ValueError(f"the generator supports none of {self.tasks}")
+            self.generator, self.levels = levels, []
+        else:
+            if difficulty not in (None, DIFFICULTY):
+                raise ValueError("a difficulty other than the default needs a generator pool")
+            pool = [lv for x in levels for lv in _levels(x)]
+            if not any(self._allowed(lv) for lv in pool):
+                raise ValueError(f"no level in the pool supports any of {self.tasks}")
+            self.generator, self.levels, difficulty = None, pool, DIFFICULTY
+        if difficulty is not None:
+            self.difficulty = difficulty
 
     def step(self, action):
         self.core.step(np.asarray(action), n=self.frame_skip)
