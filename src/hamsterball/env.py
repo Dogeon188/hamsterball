@@ -1,5 +1,6 @@
 """The Gymnasium env over the core (spec §9, §10): level and task per episode, observations, markers, reward, info."""
 
+import glob
 import math
 import os
 import sys
@@ -7,10 +8,12 @@ from collections import OrderedDict
 from functools import partial
 from pathlib import Path
 
+import cloudpickle
 import gymnasium as gym
 import mujoco
 import numpy as np
 
+from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
 from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, Level
@@ -345,15 +348,23 @@ class DiscreteAction(gym.ActionWrapper):
         return self._table[action]
 
 
+def egl_devices():
+    """GPUs a make_vec worker can render on: Linux render nodes, when MUJOCO_GL is egl; else 0."""
+    # ponytail: assumes EGL lists these GPUs first, in render-node order; set MUJOCO_EGL_DEVICE_ID by hand otherwise
+    return len(glob.glob("/dev/dri/renderD*")) if os.environ.get("MUJOCO_GL") == "egl" else 0
+
+
 def make_vec(num_envs, backend="cpu", **kwargs):
     """The ids' vector_entry_point (spec §10, §15): a stock AsyncVectorEnv of HamsterballEnv(**kwargs) copies.
 
     spawn on macOS, forkserver on Linux; shared memory only for views; same-step autoreset, the final observation in
-    info. Each worker makes its own renderer (lazily, in the process that steps it)."""
+    info. Each worker makes its own renderer (lazily, in the process that steps it), and on a multi-GPU machine takes
+    EGL device i mod the GPU count."""
     if backend != "cpu":
         raise NotImplementedError(f"backend {backend!r}: v1 builds only the cpu backend")
+    devices, blob = egl_devices(), cloudpickle.dumps(kwargs)
     return gym.vector.AsyncVectorEnv(
-        [partial(HamsterballEnv, **kwargs)] * num_envs,
+        [partial(_worker_env, i, devices, blob) for i in range(num_envs)],
         shared_memory=bool(kwargs.get("views")),
         context="spawn" if sys.platform == "darwin" else "forkserver",
         autoreset_mode=gym.vector.AutoresetMode.SAME_STEP,

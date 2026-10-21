@@ -24,6 +24,19 @@ PRESETS = {
 }
 
 
+def _worker_env(i, devices, kwargs):
+    """make_vec's env fn for worker i (spec §11): on a multi-GPU machine, EGL device i mod devices unless
+    MUJOCO_EGL_DEVICE_ID is already set, chosen before mujoco loads in this process. It lives here, beside no mujoco
+    import, and takes the env kwargs pickled, since unpickling them (a generator, a Level) imports mujoco."""
+    if devices > 1:
+        os.environ.setdefault("MUJOCO_EGL_DEVICE_ID", str(i % devices))
+    import pickle
+
+    from .env import HamsterballEnv
+
+    return HamsterballEnv(**pickle.loads(kwargs))
+
+
 def _retired(env_id, n, **_):
     raise DeprecatedEnv(
         f"{env_id} is retired: this hamsterball registers v{ENV_VERSION}. "

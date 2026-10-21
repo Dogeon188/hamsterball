@@ -72,3 +72,37 @@ def test_views_render_in_spawned_workers():
             assert obs[v].any(axis=-1).mean() > 0.1  # drawn, not a black frame
     finally:
         venv.close()
+
+
+WORKER = """
+import os, pickle, sys
+fn = pickle.loads(sys.stdin.buffer.read())
+assert "mujoco" not in sys.modules  # unpickling a worker's env fn must leave mujoco unloaded
+fn()
+print(os.environ.get("MUJOCO_EGL_DEVICE_ID"))
+"""
+
+
+def run_worker(fn, **env):
+    import os
+    import pickle
+    import subprocess
+
+    base = {k: v for k, v in os.environ.items() if k != "MUJOCO_EGL_DEVICE_ID"}
+    out = subprocess.run(
+        [sys.executable, "-c", WORKER], input=pickle.dumps(fn), env={**base, **env}, capture_output=True, check=True
+    )
+    return out.stdout.decode().strip()
+
+
+def test_each_worker_takes_an_egl_device_round_robin_before_mujoco_loads(monkeypatch):
+    from hamsterball import env as E
+    from hamsterball.core.generator import ProceduralGenerator
+
+    monkeypatch.setattr(E, "egl_devices", lambda: 2)
+    monkeypatch.setattr(gym.vector, "AsyncVectorEnv", lambda fns, **_: fns)  # the env fns, no workers started
+    fns = E.make_vec(3, tasks=["reach_goal"], levels=ProceduralGenerator())  # kwargs that import mujoco on unpickle
+    assert [run_worker(fn) for fn in fns] == ["0", "1", "0"]
+    assert run_worker(fns[1], MUJOCO_EGL_DEVICE_ID="0") == "0"  # one set by hand wins
+    monkeypatch.setattr(E, "egl_devices", lambda: 1)  # one GPU: left to MuJoCo
+    assert run_worker(E.make_vec(1, tasks=["reach_goal"])[0]) == "None"
