@@ -23,7 +23,7 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 ## Invariants and checks
 
 - The mocaps carry no geoms, so they add no mass or contacts and never change a trajectory. They do add 21 numbers (`mocap_pos`, `mocap_quat`) to the core state, so the env poses them every env step, views or not, and `core_state` doesn't depend on the `views` kwarg.
-- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the camera yaw, follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default.
+- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the camera yaw, follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction.
 
 ## Known quirks
 

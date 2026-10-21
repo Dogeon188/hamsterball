@@ -1,6 +1,7 @@
 """Pixel views (spec §11): what each view sees, through the env's observation."""
 
 import os
+from importlib.resources import files
 import subprocess
 import sys
 import threading
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 
 from hamsterball.core import views
+from hamsterball.core.level import Level
 from test_env import level, make
 
 VIEWS = ("chase", "follow", "first_person")
@@ -97,3 +99,14 @@ def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     env = gym.make("Hamsterball-v0", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
     obs, _ = env.reset(seed=0)
     assert obs["first_person"][-1].min() > 0
+
+
+def test_views_survive_model_cache_eviction():
+    # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
+    env = gym.make("Hamsterball-v0", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
+    for name, task in [("first_goal", "reach_goal"), ("locked_goal", "unlock_goal"), ("first_goal", "reach_goal")]:
+        obs, _ = env.reset(options={"level": Level.load(files("hamsterball") / f"levels/{name}.yaml"), "task": task})
+        assert len(env.unwrapped._cores) == 1
+        if name == "first_goal":
+            assert abs(goal_x(obs["chase"]) - 0.5) < 0.05
+    env.close()

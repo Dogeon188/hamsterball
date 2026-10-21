@@ -2,6 +2,7 @@
 
 import math
 import os
+from collections import OrderedDict
 from pathlib import Path
 
 import gymnasium as gym
@@ -21,12 +22,14 @@ TIME_PENALTY = -0.001  # per env step
 PHI_SCALE = -0.01  # shaping potential per metre to the current target
 
 
-def _level(x):
-    """A Level, a bundled level's name, or a path to a level file."""
+def _levels(x):
+    """The levels one pool entry names: a Level, a bundled level's name, a level file, or a directory of them."""
     if isinstance(x, Level):
-        return x
+        return [x]
     p = Path(x)
-    return Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")
+    if p.is_dir():
+        return [Level.load(f) for f in sorted(p.glob("*.yaml"))]
+    return [Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")]
 
 
 class HamsterballEnv(gym.Env):
@@ -45,6 +48,7 @@ class HamsterballEnv(gym.Env):
         time_limit_s=None,
         shaped=False,
         shaping_gamma=0.99,
+        model_cache=16,
     ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
@@ -58,16 +62,13 @@ class HamsterballEnv(gym.Env):
         self.view_size = tuple(view_size)
         self.obs_state = obs_state
         self.tasks = list(tasks)
-        pool = [_level(x) for x in (sorted(LEVELS_DIR.glob("*.yaml")) if levels is None else levels)]
-        self.levels = [lv for lv in pool if any(t in lv.tasks for t in self.tasks)]
-        if not self.levels:
-            raise ValueError(f"no level in the pool supports any of {self.tasks}")
+        self.set_levels([LEVELS_DIR] if levels is None else levels)
         self.camera_action = camera_action
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
         self.shaped, self.shaping_gamma = shaped, shaping_gamma
-        self._cores = {}  # ponytail: unbounded, keyed by level id; spec §7's model_cache LRU when pools grow
-        self._renderers = {}  # level id -> mujoco.Renderer at view_size, made lazily on the stepping thread
+        # LRU keyed by level id: [compiled core, its Renderer at view_size or None], evicted together (spec §7, §11)
+        self._cores, self.model_cache = OrderedDict(), model_cache
         self.action_space = self._core(self.levels[0]).action_space
         inf = np.float32(np.inf)
         spaces = {}
@@ -79,15 +80,21 @@ class HamsterballEnv(gym.Env):
         self.observation_space = gym.spaces.Dict(spaces)
 
     def _core(self, level):
-        if level.id not in self._cores:
-            self._cores[level.id] = Core(AbstractTier(), level.mjcf(), self.camera_action)
-        return self._cores[level.id]
+        """The level's compiled core, from the LRU or compiled now (evicting the least recent)."""
+        if level.id in self._cores:
+            self._cores.move_to_end(level.id)
+        else:
+            self._cores[level.id] = [Core(AbstractTier(), level.mjcf(), self.camera_action), None]
+            if len(self._cores) > self.model_cache:
+                _, renderer = self._cores.popitem(last=False)[1]
+                if renderer is not None:
+                    renderer.close()
+        return self._cores[level.id][0]
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.level = self.levels[self.np_random.integers(len(self.levels))]
-        allowed = [t for t in self.tasks if t in self.level.tasks]
-        self.task = allowed[self.np_random.integers(len(allowed))]
+        options = options or {}
+        self.level, self.task = self._draw(options.get("level"), options.get("task"))
         block = self.level.tasks[self.task]
         self.core = self._core(self.level)
         self.core.reset(block["spawn"]["pos"], math.radians(block["spawn"]["yaw_deg"]))
@@ -113,7 +120,34 @@ class HamsterballEnv(gym.Env):
         obs, vec = self._observe()
         self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
         self._phi = self._potential(self._prev)
-        return obs, {"core_state": self.core.state(), **vec}
+        reset_options = {"level": self.level.canonical(), "level_id": self.level.id, "task": self.task}
+        return obs, {"reset_options": reset_options, "core_state": self.core.state(), **vec}
+
+    def _draw(self, level, task):
+        """Spec §10's option cases: the given fields as given, the missing ones from np_random, level first."""
+        pick = lambda xs: xs[self.np_random.integers(len(xs))]  # noqa: E731
+        if level is None:
+            pool = [lv for lv in self.levels if (task in lv.tasks if task else self._allowed(lv))]
+            if not pool:
+                raise ValueError(f"no pool level supports {task or self.tasks}")
+            level = pick(pool)
+        elif not isinstance(level, Level):
+            level = Level.from_yaml(level)  # a canonical YAML string
+        if task is None:
+            task = pick(self._allowed(level) or list(level.tasks))
+        if task not in level.tasks:
+            raise ValueError(f"level {level.id[:12]} doesn't support task {task!r}")
+        return level, task
+
+    def _allowed(self, level):
+        return [t for t in self.tasks if t in level.tasks]
+
+    def set_levels(self, levels):
+        """Replace the level pool from the next reset: bundled names, paths, directories, or Level objects."""
+        pool = [lv for x in levels for lv in _levels(x)]
+        if not any(self._allowed(lv) for lv in pool):
+            raise ValueError(f"no level in the pool supports any of {self.tasks}")
+        self.levels = pool
 
     def step(self, action):
         self.core.step(np.asarray(action), n=self.frame_skip)
@@ -235,13 +269,35 @@ class HamsterballEnv(gym.Env):
         return obs, vec
 
     def _renderer(self):
-        if self.level.id not in self._renderers:
-            r = mujoco.Renderer(self.core.model, *self.view_size)
-            r.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # env views: shadows off (spec §11)
-            self._renderers[self.level.id] = r
-        return self._renderers[self.level.id]
+        """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""
+        entry = self._cores[self.level.id]  # the current level's entry, most recent, so never evicted here
+        if entry[1] is None:
+            entry[1] = mujoco.Renderer(entry[0].model, *self.view_size)
+            entry[1].scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # env views: shadows off (spec §11)
+        return entry[1]
 
     def close(self):
-        for r in self._renderers.values():
-            r.close()
-        self._renderers.clear()
+        for entry in self._cores.values():
+            if entry[1] is not None:
+                entry[1].close()
+                entry[1] = None
+
+
+class DiscreteAction(gym.ActionWrapper):
+    """Spec §5: action 0 is a no-op; 1 + 8·e + k runs toward k·45° clockwise from camera forward at effort EFFORTS[e].
+
+    Under the camera flag, cam_yaw stays 0.
+    """
+
+    EFFORTS = (0.25, 0.5, 1.0)
+
+    def __init__(self, env):
+        super().__init__(env)
+        self._table = np.zeros((25, *env.action_space.shape), np.float32)
+        for j in range(24):
+            e, th = self.EFFORTS[j // 8], math.radians(45 * (j % 8))
+            self._table[1 + j, :2] = e * math.sin(th), e * math.cos(th)
+        self.action_space = gym.spaces.Discrete(25)
+
+    def action(self, action):
+        return self._table[action]
