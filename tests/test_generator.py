@@ -246,3 +246,4 @@ def test_levels_accepts_any_object_that_satisfies_the_protocol():
     assert info["reset_options"]["task"] == "reach_goal" and info["reset_options"]["difficulty"] == 0.1
     with pytest.raises(ValueError):
         HamsterballEnv(["survive"], levels=Flat())  # no task the generator supports
+

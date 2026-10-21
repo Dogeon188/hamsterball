@@ -1,9 +1,17 @@
 """Hamsterball: a hamster running inside a rolling shell, as a Gymnasium env and a game on one MuJoCo core."""
 
-from functools import partial
+import os
+import sys
 
-from gymnasium.envs.registration import register
-from gymnasium.error import DeprecatedEnv
+# Headless GL for env views, before anything imports mujoco: EGL on Linux (set MUJOCO_GL=osmesa for the CPU
+# fallback); macOS leaves it unset, which selects CGL. glfw is never used for env rendering.
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("MUJOCO_GL", "egl")
+
+from functools import partial  # noqa: E402
+
+from gymnasium.envs.registration import register  # noqa: E402
+from gymnasium.error import DeprecatedEnv  # noqa: E402
 
 ENV_VERSION = 0  # N of spec §2: bumps with every change that can alter a trajectory, as a major release
 PRESETS = {
