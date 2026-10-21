@@ -94,7 +94,7 @@ Where a task in a level starts the hamsterball, together with the initial camera
 _Avoid_: start point, respawn
 
 **Hazard**:
-A marker that ends the episode in failure when the hamsterball enters it.
+A marker that ends the episode in failure when the hamsterball enters it. It may move by a **Motion**.
 _Avoid_: trap, death zone
 
 **Cliff**:

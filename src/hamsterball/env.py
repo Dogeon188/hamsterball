@@ -157,6 +157,7 @@ class HamsterballEnv(gym.Env):
                 self._look(t, LOCKED_RGBA)
         obs, vec = self._observe()
         self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
+        self._prev_t = self.core.data.time
         self._phi = self._potential(self._prev)
         reset_options = {"level": self.level.canonical(), "level_id": self.level.id, "task": self.task}
         if self.level.generator is not None:  # a generated level's difficulty is in its provenance
@@ -224,6 +225,7 @@ class HamsterballEnv(gym.Env):
         """The env step after the physics: marker tests, outcome, reward, observation, info."""
         self._steps += 1
         pos = self.core.data.qpos[SHELL_QPOS : SHELL_QPOS + 3].copy()
+        now = self.core.data.time
         event = 0.0
         survive = self.task == "survive"
         if survive:  # a point test on the current centre: the region means "stay inside"
@@ -245,14 +247,14 @@ class HamsterballEnv(gym.Env):
                 self._look(self._todo[0], MARKER_RGBA["waypoints"])
         if not self._todo:  # success wins over failure
             self._success, event = True, event + 1.0
-        elif any(crosses(h, self._prev, pos) for h in self.level.hazards):
+        elif any(crosses(h, self._prev, pos, t=now, t0=self._prev_t) for h in self.level.hazards):
             self._failure, event = "hazard", event - 1.0
         elif pos[2] < self.level.kill_plane_z:
             self._failure, event = "kill_plane", event - 1.0
         elif survive and not inside:
             self._failure, event = "left_region", event - 1.0
         time = 0.0 if survive else TIME_PENALTY  # survive has no time penalty
-        self._prev = pos
+        self._prev, self._prev_t = pos, now
         terminated = self._success or self._failure is not None
         truncated = self.truncate and not terminated and self._steps >= self._max_steps
         obs, vec = self._observe()

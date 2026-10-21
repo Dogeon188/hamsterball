@@ -74,7 +74,7 @@ class Level:
             kill_plane_z=_num(d["kill_plane_z"]),
             geoms=[_geom(g, Path(base)) for g in d["geoms"]],
             tasks={name: _task(name, t) for name, t in d["tasks"].items()},
-            hazards=[_marker(h) for h in d.get("hazards") or []],
+            hazards=[_marker(h, moving=True) for h in d.get("hazards") or []],
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
             generator=_provenance(d["generator"]) if "generator" in d else None,
             bodies=[_body(b, Path(base)) for b in d.get("bodies") or []],
@@ -104,7 +104,7 @@ class Level:
 
     def movers(self):
         """(geom name, marker) of every marker that has a motion, named as `mjcf()` names its geom."""
-        return [(f"{name}/{k}", task[k]) for name, task in self.tasks.items() for k in TASK_MARKERS[name]
+        return [(f"hazard{i}", h) for i, h in enumerate(self.hazards) if "motion" in h] + [(f"{name}/{k}", task[k]) for name, task in self.tasks.items() for k in TASK_MARKERS[name]
                 if k not in MARKER_LISTS and "motion" in task[k]]
 
     def mjcf(self):
