@@ -36,6 +36,7 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
   | `FOVY` (vertical) | chase 60°, follow 50°, first person 75° |
   | Marker colours (`MARKER_RGBA` in [level.py](level.md)) | goal `0.2 0.9 0.3 0.4` green, waypoints `0.2 0.5 1.0 0.4` blue, items `1.0 0.85 0.1 0.4` yellow, keys `1.0 0.4 0.1 0.4` orange, survive region `0.6 0.3 0.9 0.25` purple |
   | `HAZARD_RGBA`, `LOCKED_GOAL_RGBA` | `0.9 0.1 0.1 0.5` red; `0.5 0.5 0.5 0.15` faint grey |
+  | `PASSED_RGBA` (a passed waypoint) | `0.2 0.9 0.3 0.2` dim green |
 
 - The chase and follow cameras aim at the shell centre, so at 84×84 the shell covers the near part of the goal when the goal is straight ahead.
 - Pixels can't show the `first_person` group hiding: from inside, back-face culling already drops the shell sphere and the hamster. The test checks the option itself.
@@ -56,3 +57,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, merge of tickets 03 to 05: the marker colours they added (`MARKER_RGBA`, `HAZARD_RGBA`, `LOCKED_GOAL_RGBA` in `level.py`) join the look constants above, unchanged and still needing play-test. The env sets marker looks before rendering, so a collected item or key vanishes in the same env step's frame.
 - 2026-10-22, ticket hamsterball-v1/06, agent finding from sample frames after merging tickets 03 to 05: on the 30 m `locked_goal` and `waypoint_loop` levels the first-person view's bottom rows were black, because MuJoCo's near clip plane (`znear` 0.01 × the model's extent) passed the ground in front of the eye. `model.build` now sets `znear` 0.001.
 - 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. Views now render at any `view_size` (checked at 800×1600).
+- 2026-10-22, user play-test request: passed waypoints turn dim green; `PASSED_RGBA` (in [level.py](level.md)) joins the look constants, needing play-test like the rest.

@@ -17,7 +17,7 @@ import numpy as np
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
-from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, Level
+from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
 from .core.marker import centre, crosses
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
@@ -226,6 +226,8 @@ class HamsterballEnv(gym.Env):
                 event += t[0] != "goal"  # +1 per item, key, or waypoint
                 if t[0] in ("items", "keys"):
                     self._look(t, (*MARKER_RGBA[t[0]][:3], 0))
+                elif t[0] == "waypoints":
+                    self._look(t, PASSED_RGBA)
             if self.task == "unlock_goal" and self._todo == [("goal", None)]:
                 self._look(("goal", None), MARKER_RGBA["goal"])
         if not self._todo:  # success wins over failure
