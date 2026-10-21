@@ -45,14 +45,19 @@ class Level:
     hazards: list = field(default_factory=list)
     follow_yaw_deg: float = 0.0
     version: int = 1
+    generator: dict | None = None  # provenance of a generated level; hand-authored files omit it
 
     @classmethod
     def from_yaml(cls, text, base="."):
         """Load and validate a level, filling every default; raises ValueError on a malformed level.
 
         An hfield's `file` is a 16-bit grayscale PNG, relative to `base`."""
-        d = yaml.safe_load(text)
-        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards"}, "level")
+        return cls.from_dict(yaml.safe_load(text), base)
+
+    @classmethod
+    def from_dict(cls, d, base="."):
+        """`from_yaml` on an already-parsed level."""
+        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards", "generator"}, "level")
         if d.get("version", 1) != 1:
             raise ValueError(f"level version {d['version']} is not 1")
         if not d["tasks"]:
@@ -63,6 +68,7 @@ class Level:
             tasks={name: _task(name, t) for name, t in d["tasks"].items()},
             hazards=[_marker(h) for h in d.get("hazards") or []],
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
+            generator=_provenance(d["generator"]) if "generator" in d else None,
         )
 
     @classmethod
@@ -70,7 +76,10 @@ class Level:
         return cls.from_yaml(Path(path).read_text(), Path(path).parent)
 
     def canonical(self):
-        return yaml.safe_dump(asdict(self), sort_keys=True)
+        d = asdict(self)
+        if d["generator"] is None:  # hand-authored: no block, so the id is the same as before provenance existed
+            del d["generator"]
+        return yaml.safe_dump(d, sort_keys=True)
 
     @property
     def id(self):
@@ -199,6 +208,17 @@ def _task(name, t):
     if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"]):
         raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
+
+
+def _provenance(p):
+    """`generator: {name, version, task, seed, difficulty}` of a generated level."""
+    _keys(p, {"name", "version", "task", "seed", "difficulty"}, set(), "generator")
+    if not isinstance(p["name"], str) or not all(type(p[k]) is int for k in ("version", "seed")):
+        raise ValueError("generator name must be a string, and version and seed integers")
+    if p["task"] not in TASK_MARKERS:
+        raise ValueError(f"generator task {p['task']!r} is not one of {sorted(TASK_MARKERS)}")
+    return {"name": p["name"], "version": p["version"], "task": p["task"], "seed": p["seed"],
+            "difficulty": _num(p["difficulty"])}
 
 
 def _hfield(g, base):
