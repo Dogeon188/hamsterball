@@ -17,7 +17,7 @@ import numpy as np
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
-from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
+from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
 from .core.marker import centre, crosses
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
@@ -143,7 +143,10 @@ class HamsterballEnv(gym.Env):
                 k = rest.split("/")[0]
                 m.geom_rgba[g] = MARKER_RGBA[k] if task == self.task else (*MARKER_RGBA[k][:3], 0)
         if self.task == "unlock_goal":
-            self._look(("goal", None), LOCKED_GOAL_RGBA)
+            self._look(("goal", None), LOCKED_RGBA)
+        if self.task == "waypoint_race":
+            for t in self._todo[1:]:
+                self._look(t, LOCKED_RGBA)
         obs, vec = self._observe()
         self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
         self._phi = self._potential(self._prev)
@@ -230,6 +233,8 @@ class HamsterballEnv(gym.Env):
                     self._look(t, PASSED_RGBA)
             if self.task == "unlock_goal" and self._todo == [("goal", None)]:
                 self._look(("goal", None), MARKER_RGBA["goal"])
+            if self.task == "waypoint_race" and self._todo:
+                self._look(self._todo[0], MARKER_RGBA["waypoints"])
         if not self._todo:  # success wins over failure
             self._success, event = True, event + 1.0
         elif any(crosses(h, self._prev, pos) for h in self.level.hazards):
