@@ -8,6 +8,8 @@ dependencies = [
     "gymnasium>=1.4,<2",
     "numpy",
     "pyyaml>=6.0.3",
+    "minari[arrow,create]==0.5.*",
+    "pillow>=13.0.0",
 ]
 
 [dependency-groups]

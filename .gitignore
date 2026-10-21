@@ -484,7 +484,7 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,latex
 
-data/
+/data/
 
 # Local issue tracker (nested git repo)
 .scratch/

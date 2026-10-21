@@ -8,6 +8,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 - `import hamsterball` registers spec §2's six ids at `hamsterball.ENV_VERSION` (N = 0), each with `entry_point="hamsterball.env:HamsterballEnv"`: `Hamsterball-v0` (every kwarg free) and the presets `HamsterballReachGoal`, `HamsterballWaypointRace`, `HamsterballCollectItems`, `HamsterballUnlockGoal`, `HamsterballSurvive`, each fixing `tasks` to its one task. `hamsterball.register_ids(n)` also registers every version below n as an id whose entry point raises `gymnasium.error.DeprecatedEnv` naming the release to install (`hamsterball==<old N>.*`).
 - `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, frame_skip=10, time_limit_s=None, shaped=False, shaping_gamma=0.99, model_cache=16)`. `levels` is a list of `Level` objects, bundled level names (stems in `hamsterball/levels/`), level file paths, or directories (their `*.yaml`); `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
+- `env.tasks`, `env.tier`, `env.camera_action`, `env.frame_skip`, `env.shaped`: the constructor's values; the Collector writes the space-shaping ones into the dataset's `env_spec` (see [collector.md](data/collector.md)).
 - `env.set_levels(levels)`: replaces the pool from the next reset, with the same entries and the same check; on a vector env, `venv.call("set_levels", levels)`.
 - `reset(seed=None, options=None)`: `options` may hold `level` (a `Level` or canonical YAML string) and `task`; see How it works.
 - `DiscreteAction(env)`: a wrapper with `Discrete(25)`: 0 is a no-op; `1 + 8·e + k` runs toward `k·45°` clockwise from camera forward (k = 0 forward, 2 right, 4 back) at effort `(0.25, 0.5, 1.0)[e]`. Under the camera flag `cam_yaw` stays 0.
@@ -69,3 +70,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/04: added the survive task, hazards, and the `first_survive` level.
 - 2026-10-22, ticket hamsterball-v1/05: bundled the `hill` hfield level; a run straight at the goal climbs over the hill (shell centre above 0.8 m) and succeeds.
 - 2026-10-22, ticket hamsterball-v1/07: reset options and `info['reset_options']`, directories in the pool, `set_levels`, the `model_cache` LRU, the six ids with retired versions, and `DiscreteAction`.
+- 2026-10-22, ticket hamsterball-v1/08: stores `tier` as an attribute, for the Collector's `env_spec`.

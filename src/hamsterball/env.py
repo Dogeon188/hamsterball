@@ -39,7 +39,7 @@ class HamsterballEnv(gym.Env):
     ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
-        self.tasks = list(tasks)
+        self.tasks, self.tier = list(tasks), tier
         self.set_levels([LEVELS_DIR] if levels is None else levels)
         self.camera_action = camera_action
         self.frame_skip = frame_skip
