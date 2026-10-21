@@ -5,6 +5,7 @@ import math
 import os
 import sys
 from collections import OrderedDict
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
 from .core.level import LOCKED_GOAL_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, Level
 from .core.marker import centre, crosses
-from .core.model import DT, HAM, SHELL
+from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -27,6 +28,20 @@ LEVELS_DIR = Path(__file__).parent / "levels"
 TIME_PENALTY = -0.001  # per env step
 PHI_SCALE = -0.01  # shaping potential per metre to the current target
 DIFFICULTY = 0.5  # the default difficulty passed to a generator
+
+
+def _file_pool_difficulty(difficulty):
+    """A file pool takes only the default difficulty (or None)."""
+    if difficulty not in (None, DIFFICULTY):
+        raise ValueError("a difficulty other than the default needs a generator pool")
+
+
+@dataclass
+class _Cached:
+    """A model_cache entry: a level's compiled core and its Renderer at view_size (None until the first render)."""
+
+    core: Core
+    renderer: "mujoco.Renderer | None" = None
 
 
 def _levels(x):
@@ -75,7 +90,7 @@ class HamsterballEnv(gym.Env):
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
         self.shaped, self.shaping_gamma = shaped, shaping_gamma
-        # LRU keyed by level id: [compiled core, its Renderer at view_size or None], evicted together (spec §7, §11)
+        # LRU keyed by level id: _Cached entries, a core and its renderer evicted together (spec §7, §11)
         self._cores, self.model_cache = OrderedDict(), model_cache
         # a generator pool has no level yet: the action space is the tier's, whatever the level
         core = self._core(self.levels[0]) if self.levels else Core(AbstractTier(), camera_action=camera_action)
@@ -94,12 +109,12 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            self._cores[level.id] = [Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size), None]
+            self._cores[level.id] = _Cached(Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size))
             if len(self._cores) > self.model_cache:
-                _, renderer = self._cores.popitem(last=False)[1]
-                if renderer is not None:
-                    renderer.close()
-        return self._cores[level.id][0]
+                evicted = self._cores.popitem(last=False)[1]
+                if evicted.renderer is not None:
+                    evicted.renderer.close()
+        return self._cores[level.id].core
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -148,9 +163,8 @@ class HamsterballEnv(gym.Env):
                 raise ValueError(f"the generator doesn't support task {task!r}")
             difficulty = self.difficulty if difficulty is None else difficulty
             return self.generator(task, seed, difficulty), task, difficulty
-        if level is None and difficulty not in (None, DIFFICULTY):
-            raise ValueError("a difficulty other than the default needs a generator pool")
         if level is None:
+            _file_pool_difficulty(difficulty)
             pool = [lv for lv in self.levels if (task in lv.tasks if task else self._allowed(lv))]
             if not pool:
                 raise ValueError(f"no pool level supports {task or self.tasks}")
@@ -176,8 +190,7 @@ class HamsterballEnv(gym.Env):
                 raise ValueError(f"the generator supports none of {self.tasks}")
             self.generator, self.levels = levels, []
         else:
-            if difficulty not in (None, DIFFICULTY):
-                raise ValueError("a difficulty other than the default needs a generator pool")
+            _file_pool_difficulty(difficulty)
             pool = [lv for x in levels for lv in _levels(x)]
             if not any(self._allowed(lv) for lv in pool):
                 raise ValueError(f"no level in the pool supports any of {self.tasks}")
@@ -197,7 +210,7 @@ class HamsterballEnv(gym.Env):
     def _advance(self):
         """The env step after the physics: marker tests, outcome, reward, observation, info."""
         self._steps += 1
-        pos = self.core.data.qpos[0:3].copy()
+        pos = self.core.data.qpos[SHELL_QPOS : SHELL_QPOS + 3].copy()
         event = 0.0
         survive = self.task == "survive"
         if survive:  # a point test on the current centre: the region means "stay inside"
@@ -279,8 +292,9 @@ class HamsterballEnv(gym.Env):
             return v[0] * cy + v[1] * sy, -v[0] * sy + v[1] * cy, v[2]
 
         c = d.xpos[SHELL]
-        v_shell = d.qvel[0:3]
-        w_shell = d.xmat[SHELL].reshape(3, 3) @ d.qvel[3:6]  # free-joint angular velocity is in the body frame
+        v_shell = d.qvel[SHELL_DOF : SHELL_DOF + 3]
+        # free-joint angular velocity is in the body frame
+        w_shell = d.xmat[SHELL].reshape(3, 3) @ d.qvel[SHELL_DOF + 3 : SHELL_DOF + 6]
         state = np.array(
             [
                 *c,
@@ -316,16 +330,16 @@ class HamsterballEnv(gym.Env):
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""
         entry = self._cores[self.level.id]  # the current level's entry, most recent, so never evicted here
-        if entry[1] is None:
-            entry[1] = mujoco.Renderer(entry[0].model, *self.view_size)
-            entry[1].scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # env views: shadows off (spec §11)
-        return entry[1]
+        if entry.renderer is None:
+            entry.renderer = mujoco.Renderer(entry.core.model, *self.view_size)
+            entry.renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # env views: shadows off (spec §11)
+        return entry.renderer
 
     def close(self):
         for entry in self._cores.values():
-            if entry[1] is not None:
-                entry[1].close()
-                entry[1] = None
+            if entry.renderer is not None:
+                entry.renderer.close()
+                entry.renderer = None
 
 
 class DiscreteAction(gym.ActionWrapper):

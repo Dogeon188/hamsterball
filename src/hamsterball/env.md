@@ -78,6 +78,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 ## Tried and rejected
 
 - 2026-10-22, ticket hamsterball-v1/03: a scripted controller that runs straight at the current target overshot every turn (fell off `waypoint_loop` after the first waypoint; ran out the clock on the other two). The tests use velocity tracking instead.
+- 2026-10-22, code review of hamsterball-v1: gathering the per-task `if self.task == ...` checks (reset's locked goal, `_advance`'s survive point test, goal relight, time term and `left_region`, `_live`, `_observe`'s fraction remaining) into one per-task rule table. Survive's checks change control flow rather than pick a value, and the other tasks have one check each, so a table would hold more lines than the branches it replaces; not written.
 
 ## History
 
@@ -96,3 +97,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. The env compiles each level with its `view_size`.
 - 2026-10-22, code review of hamsterball-v1: `make_vec` workers never set `MUJOCO_EGL_DEVICE_ID`, so every worker on a multi-GPU machine rendered on one GPU (spec §11). Each worker now takes device i mod the GPU count, before `mujoco` loads, unless the id is set; the env fn lives in `hamsterball/__init__.py` and takes the kwargs pickled, since unpickling a generator or a `Level` imports `mujoco`.
 - 2026-10-22, code review of hamsterball-v1: the package root's description (registration, retired ids, the `MUJOCO_GL` default) moved to [__init__.md](__init__.md); this doc points there.
+- 2026-10-22, code review of hamsterball-v1: no behaviour change (the replay tests pass bit-identical): a `model_cache` entry is a `_Cached(core, renderer)` dataclass, superseding the `[core, renderer or None]` list of the ticket 07 merge entry; one `_file_pool_difficulty` check replaces the two copies of the file-pool difficulty raise; shell slices use `SHELL_QPOS` and `SHELL_DOF`.
