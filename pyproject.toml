@@ -14,7 +14,8 @@ dependencies = [
 [project.optional-dependencies]
 # Minari 0.5's DataCollector imports jax, which only its `create` extra installs.
 data = ["minari[arrow,create]==0.5.*", "pillow>=13.0.0"]
-game = ["imgui-bundle", "glfw"]
+# the game records every finished episode (spec §13), so it needs the data extra
+game = ["hamsterball[data]", "imgui-bundle", "glfw"]
 all = ["hamsterball[data,game]"]
 
 [project.scripts]

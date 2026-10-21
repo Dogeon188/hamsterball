@@ -147,6 +147,8 @@ data = [
 game = [
     { name = "glfw" },
     { name = "imgui-bundle" },
+    { name = "minari", extra = ["arrow", "create"] },
+    { name = "pillow" },
 ]
 
 [package.dev-dependencies]
@@ -159,6 +161,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.1" },
     { name = "glfw", marker = "extra == 'game'" },
     { name = "gymnasium", specifier = ">=1.4,<2" },
+    { name = "hamsterball", extras = ["data"], marker = "extra == 'game'" },
     { name = "hamsterball", extras = ["data", "game"], marker = "extra == 'all'" },
     { name = "imgui-bundle", marker = "extra == 'game'" },
     { name = "minari", extras = ["arrow", "create"], marker = "extra == 'data'", specifier = "==0.5.*" },

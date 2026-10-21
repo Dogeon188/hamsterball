@@ -1,6 +1,7 @@
 """The game window (spec §13): one GLFW window, `mjr_render` draws the chase view, Dear ImGui draws the HUD on top.
 
-A thin shell over play.py: it reads keys and sticks, steps the env once per frame, and draws. Needs the `game` extra.
+A thin shell over play.py, menu.py, and session.py: it draws the menu, reads keys and sticks, steps the session once
+per frame, and draws. Needs the `game` extra.
 """
 
 import ctypes
@@ -13,9 +14,12 @@ from imgui_bundle import imgui  # before glfw: imgui_bundle points pyglfw at the
 import glfw  # noqa: E402
 import mujoco  # noqa: E402
 
+from .. import ENV_VERSION  # noqa: E402
 from ..core import views as V  # noqa: E402
-from ..env import TASKS, HamsterballEnv  # noqa: E402
+from ..env import LEVELS_DIR, TASKS  # noqa: E402
+from . import menu  # noqa: E402
 from .play import Flow, Pacer, action, hud, outcome, sim_time  # noqa: E402
+from .session import Session  # noqa: E402
 
 PERIOD = 1 / 60  # one env step (frame_skip 10 × 1/600 s) per frame, real time
 KEYS = {
@@ -83,8 +87,8 @@ def _centered(name):
     imgui.begin(name, None, flags)
 
 
-def run(task, level, recording=False):
-    """Play episodes of `task` on `level` until Quit, Menu, or closing the window. Returns the last command."""
+def _open():
+    """The GLFW window with imgui on its GL context."""
     if not glfw.init():
         raise RuntimeError("GLFW failed to initialise")
     window = glfw.create_window(1280, 720, "Hamsterball", None, None)
@@ -97,28 +101,97 @@ def run(task, level, recording=False):
     imgui.get_io().set_ini_filename("")  # windows are placed each frame; no imgui.ini in the working directory
     imgui.backends.glfw_init_for_opengl(ctypes.cast(window, ctypes.c_void_p).value, True)
     imgui.backends.opengl2_init()  # fixed-function, so it shares MuJoCo's compatibility context
+    return window
 
-    env = HamsterballEnv([task], levels=[level], camera_action=True)
+
+def _close(window):
+    imgui.backends.opengl2_shutdown()
+    imgui.backends.glfw_shutdown()
+    imgui.destroy_context()
+    glfw.destroy_window(window)
+    glfw.terminate()
+
+
+def _new_frame():
+    glfw.poll_events()
+    imgui.backends.opengl2_new_frame()
+    imgui.backends.glfw_new_frame()
+    imgui.new_frame()
+
+
+def _end_frame(window):
+    imgui.render()
+    imgui.backends.opengl2_render_draw_data(imgui.get_draw_data())
+    glfw.swap_buffers(window)
+
+
+def _menu(window, settings, levels_dir, record):
+    """The menu screen: returns the chosen settings on Play, or None on Quit or closing the window."""
+    s = dict(settings)
+    choices = {t: menu.level_choices(levels_dir, t) for t in TASKS}
+    seed_text = "" if s["seed"] is None else str(s["seed"])
+    while not glfw.window_should_close(window):
+        _new_frame()
+        vp = imgui.get_main_viewport()
+        imgui.set_next_window_pos(vp.pos)
+        imgui.set_next_window_size(vp.size)
+        imgui.begin("menu", None, imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.no_move)
+        imgui.text("Hamsterball")
+        imgui.separator()
+        _, s["player"] = imgui.input_text("player", s["player"])
+        _, t = imgui.combo("task", TASKS.index(s["task"]) if s["task"] in TASKS else 0, TASKS)
+        s["task"] = TASKS[t]
+        levels = choices[s["task"]]
+        if s["level"] not in levels:
+            s["level"] = levels[0]
+        _, i = imgui.combo("level", levels.index(s["level"]), levels)
+        s["level"] = levels[i]
+        problems = []
+        if s["level"] == menu.GENERATED:
+            _, s["difficulty"] = imgui.slider_float("difficulty", s["difficulty"], 0.0, 1.0, "%.2f")
+            _, seed_text = imgui.input_text("seed (blank: random)", seed_text)
+            try:
+                s["seed"] = menu.parse_seed(seed_text)
+            except ValueError:
+                problems.append("The seed is a whole number, 0 or more, or blank for a random one.")
+        if record and not menu.name_ok(s["player"]):
+            problems.append("Player names use a-z, 0-9, and _ only.")
+        imgui.text(f"recording to hamsterball/human-{s['player']}-v{ENV_VERSION}" if record else "not recording")
+        for p in problems:
+            imgui.text_colored((1, 0.3, 0.3, 1), p)
+        imgui.begin_disabled(bool(problems))
+        play = imgui.button("Play")
+        imgui.end_disabled()
+        imgui.same_line()
+        quit_ = imgui.button("Quit")
+        imgui.end()
+        _end_frame(window)
+        if quit_:
+            return None
+        if play and not problems:
+            if s["level"] != menu.GENERATED:
+                s["seed"] = None
+            return s
+        time.sleep(PERIOD)
+    return None
+
+
+def _play(window, session):
+    """Play episodes of `session` until Menu, Quit, or closing the window. Returns "menu" or "quit"."""
     chase, flow, pacer = None, Flow(), Pacer(PERIOD)
     act = action(set())
+    env = session.env
 
-    def start(options):
-        nonlocal retry
-        _, info = env.reset(options=options)
-        retry = {"level": info["reset_options"]["level"], "task": task}  # same level and seed
+    def start(retry=False):
+        session.start(retry)
         pacer.reset()
         pacer.overruns = 0
 
-    retry = None
-    start({"task": task})
+    start()
     command = None
     try:
         while command not in ("menu", "quit"):
-            glfw.poll_events()
-            imgui.backends.opengl2_new_frame()
-            imgui.backends.glfw_new_frame()
-            imgui.new_frame()
-
+            _new_frame()
             presses = [n for n, ks in PRESSES.items() if any(imgui.is_key_pressed(k, False) for k in ks)]
             if glfw.window_should_close(window):
                 presses = ["close"]
@@ -127,7 +200,7 @@ def run(task, level, recording=False):
                 left, right_x = _sticks()
                 act = action(held, left, right_x)
                 pacer.tick()
-                _, _, terminated, truncated, info = env.step(act)
+                _, _, terminated, truncated, info = session.step(act, pacer.overruns)
                 if text := outcome(terminated, truncated, info):
                     flow.end(text)
             else:
@@ -141,7 +214,7 @@ def run(task, level, recording=False):
                 chase = _Chase(core.model)
             chase.draw(core.data, *glfw.get_framebuffer_size(window))
 
-            _hud(hud(env, act, recording))
+            _hud(hud(env, act, session.recording))
             if flow.state == "paused":
                 _centered("paused")
                 imgui.text("Paused")
@@ -152,36 +225,57 @@ def run(task, level, recording=False):
                 imgui.text(flow.outcome)
                 imgui.text(f"time {sim_time(env)[0]:.2f} s")
                 imgui.text(f"overruns {pacer.overruns}")
+                imgui.text(f"saved to {session.dataset_id}" if session.recording else "not recorded")
                 imgui.text("Enter: next   R: retry   Esc: menu")
                 imgui.end()
-
-            imgui.render()
-            imgui.backends.opengl2_render_draw_data(imgui.get_draw_data())
-            glfw.swap_buffers(window)
+            _end_frame(window)
 
             for p in presses:
                 command = flow.press(p)
-                if command == "retry":
-                    start(retry)
-                elif command == "next":
-                    start({"task": task})
+                if command in ("retry", "next"):
+                    start(retry=command == "retry")  # a retry abandons a run in progress
                 elif command in ("menu", "quit"):
                     break
     finally:
-        env.close()
+        session.close()  # abandons a run in progress
         if chase:
             chase.free()
-        imgui.backends.opengl2_shutdown()
-        imgui.backends.glfw_shutdown()
-        imgui.destroy_context()
-        glfw.destroy_window(window)
-        glfw.terminate()
     return command
 
 
+def run(settings, levels_dir, record, skip_menu):
+    """The menu, then episodes with its choices, then the menu again, until Quit or closing the window."""
+    window = _open()
+    try:
+        while True:
+            if not skip_menu:
+                settings = _menu(window, settings, levels_dir, record)
+                if settings is None:
+                    break
+            skip_menu = False
+            menu.save_config(settings, menu.CONFIG)
+            level = menu.resolve(settings["level"], levels_dir)
+            session = Session(settings["task"], level, settings["difficulty"], settings["seed"], settings["player"],
+                              record)
+            if _play(window, session) == "quit":
+                break
+    finally:
+        _close(window)
+
+
 @click.command()
-@click.option("--task", required=True, type=click.Choice(TASKS), help="The episode's task.")
-@click.option("--level", required=True, help="A level YAML file, or a bundled level's name.")
-def main(task, level):
+@click.option("--levels", "levels_dir", type=click.Path(exists=True, file_okay=False), default=str(LEVELS_DIR),
+              help="The directory of level YAMLs the menu lists.")
+@click.option("--player", help="The player's name, [a-z0-9_]+; recording goes to hamsterball/human-<player>-vN.")
+@click.option("--no-record", is_flag=True, help="Practise: record nothing.")
+@click.option("--task", type=click.Choice(TASKS), help="The task; with --level, skips the menu.")
+@click.option("--level", help="A level YAML, a level in --levels by name, or 'generated'.")
+@click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
+@click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
+def main(levels_dir, player, no_record, task, level, seed, difficulty):
     """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E) or gamepad, Esc to pause."""
-    run(task, level)
+    flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
+    settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
+    record = not no_record
+    skip = task is not None and level is not None and (not record or menu.name_ok(settings["player"]))
+    run(settings, levels_dir, record, skip)

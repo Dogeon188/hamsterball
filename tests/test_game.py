@@ -194,4 +194,32 @@ def test_the_window_module_imports_and_the_cli_prints_help():
     from hamsterball.game.window import main
 
     r = CliRunner().invoke(main, ["--help"])
-    assert r.exit_code == 0 and "--task" in r.output and "--level" in r.output
+    assert r.exit_code == 0
+    for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty"):
+        assert flag in r.output
+
+
+def test_the_cli_skips_the_menu_given_a_task_and_level_and_prefills_it_otherwise(tmp_path, monkeypatch):
+    pytest.importorskip("imgui_bundle")
+    from click.testing import CliRunner
+
+    from hamsterball.game import menu, window
+
+    monkeypatch.setattr(menu, "CONFIG", tmp_path / "game.json")
+    menu.save_config({"player": "eric", "task": "survive", "level": "first_survive", "difficulty": 0.5}, menu.CONFIG)
+    calls = []
+    monkeypatch.setattr(window, "run", lambda *a: calls.append(a))
+
+    def start(*args):
+        assert CliRunner().invoke(window.main, list(args)).exit_code == 0
+        return calls.pop()
+
+    settings, levels, record, skip = start("--task", "reach_goal", "--level", "generated", "--seed", "3")
+    assert skip and record and str(levels) == str(window.LEVELS_DIR)
+    assert settings == {"player": "eric", "task": "reach_goal", "level": "generated", "difficulty": 0.5, "seed": 3}
+    settings, _, _, skip = start("--difficulty", "0.8")
+    assert not skip and settings["task"] == "survive" and settings["difficulty"] == 0.8
+    _, _, record, skip = start("--task", "survive", "--level", "first_survive", "--player", "Eric")
+    assert not skip  # recording needs a valid name: the menu asks for one
+    _, _, record, skip = start("--task", "survive", "--level", "first_survive", "--player", "Eric", "--no-record")
+    assert skip and not record
