@@ -18,11 +18,11 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 - Sticks: a radial deadzone of 0.15, effort `(m − 0.15) / 0.85` capped at 1. The left stick outside its deadzone replaces the WASD run; the right stick's x outside its deadzone replaces Q/E, right turning right. Each stick overrides only its own keys.
 - Pacer: deadlines follow an ideal 1/60 s schedule. A tick past its deadline by more than `slack` counts an overrun and restarts the schedule at now, so a slow machine slows the game and never bursts steps to catch up; an early tick sleeps.
 - Flow is a table `state → {input: (next state, command)}`. Esc toggles pause; R and Enter work only on the result card; `close` quits from anywhere. Leaving by retry, menu, quit, or close before the result is an abandoned run (ticket 12 discards it).
-- HUD progress: waypoint `passed+1 / n`, items and keys `collected / n` (then `keys n/n: reach the goal`), `reach the goal`, survive `limit − t` left. Speed is the shell's world speed (`qvel[0:3]`).
+- HUD progress: waypoint `passed+1 / n` (capped at `n/n` after a win), items and keys `collected / n` (then `keys n/n: reach the goal`), `reach the goal`, survive `limit − t` left. Speed is the shell's world speed (`qvel[0:3]`).
 
 ## Invariants and checks
 
-- `uv run --all-extras pytest tests/test_game.py`: key and stick mapping, deadzone override, pacing and overruns on a fake clock, the flow table, the HUD at reset on every bundled task level and after one second of sprinting, the outcome names, and the window module's import and `--help` (skipped without the `game` extra).
+- `uv run --all-extras pytest tests/test_game.py`: key and stick mapping, deadzone override, pacing and overruns on a fake clock, the flow table, the HUD at reset on every bundled task level and after one second of sprinting, waypoint progress capped after a win, the outcome names, and the window module's import and `--help` (skipped without the `game` extra).
 
 ## Known quirks
 
@@ -42,3 +42,4 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/11: added, test-first.
+- 2026-10-22, code review of hamsterball-v1: the waypoint HUD read `waypoint 5/4` after a win; it now caps at `n/n`.

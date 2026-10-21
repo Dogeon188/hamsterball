@@ -135,7 +135,7 @@ def progress(env):
         return f"survive: {limit - t:.1f} s left"
     if e.task == "waypoint_race":
         n = len(block["waypoints"])
-        return f"waypoint {n - len(left) + 1}/{n}"
+        return f"waypoint {min(n - len(left) + 1, n)}/{n}"  # n/n after a win
     if e.task == "collect_items":
         n = len(block["items"])
         return f"items {n - len(left)}/{n}"

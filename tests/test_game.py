@@ -170,6 +170,16 @@ def test_hud_tracks_sim_time_effort_and_the_unlock_goal_once_the_keys_are_in():
     assert hud(env, a, recording=True)[1] == "keys 2/2: reach the goal"
 
 
+def test_waypoint_progress_stops_at_the_last_waypoint_after_a_win():
+    from hamsterball.env import HamsterballEnv
+    from hamsterball.game.play import progress
+
+    env = HamsterballEnv(["waypoint_race"], levels=["waypoint_loop"], camera_action=True)
+    env.reset()
+    env.unwrapped._todo.clear()  # every waypoint passed
+    assert progress(env) == "waypoint 4/4"
+
+
 @pytest.mark.parametrize(
     "terminated, truncated, info, text",
     [
