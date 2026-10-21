@@ -1,0 +1,13 @@
+# A 30 m square platform with three items scattered around the spawn, collected in any order.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [15, 15, 0.5]}
+tasks:
+  collect_items:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    items:
+      - {type: sphere, pos: [5, 5, 0.5], radius: 0.8}
+      - {type: sphere, pos: [-6, 4, 0.5], radius: 0.8}
+      - {type: sphere, pos: [-2, -7, 0.5], radius: 0.8}
+    time_limit_s: 45
