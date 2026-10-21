@@ -6,7 +6,7 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 
 ## Interface
 
-- `build(tier, level=FLAT) -> MjModel`: `level` is worldbody MJCF (geoms only, no bodies). `FLAT` is an infinite ground plane.
+- `build(tier, level=FLAT) -> MjModel`: `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane.
 - Constants the rest of the core imports: `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`.
 
 ## How it works
@@ -36,4 +36,5 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 ## History
 
 - 2026-10-21, ticket hamsterball-v1/01: ported from `prototypes/honest_drive.py` (branch `prototype/honest-physics`) with the issue 12 and 13 verdicts fixed and the drop-lane course dropped.
+- 2026-10-22, ticket hamsterball-v1/05: `level` became top-level MJCF sections instead of worldbody content, so a level can carry hfield assets.
 - 2026-10-22, ticket hamsterball-v1/06: the three view mocap bodies follow the tier's fragment.

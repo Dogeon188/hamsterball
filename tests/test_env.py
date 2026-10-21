@@ -24,7 +24,7 @@ def level(spawn_yaw_deg=0.0, goal=None):
 
 
 def make(**kw):
-    return gym.make("Hamsterball-v0", tasks=["reach_goal"], **kw)
+    return gym.make("Hamsterball-v0", tasks=["reach_goal"], **{"levels": ["first_goal"], **kw})
 
 
 def toward_goal(obs, sign=1.0):
@@ -123,3 +123,16 @@ def test_camera_action_adds_cam_yaw_and_orbits_at_120_deg_per_s():
         obs, *_ = env.step(np.array([0, 0, 1], np.float32))
     sin, cos = obs["state"][4:6]
     assert math.degrees(math.atan2(sin, cos)) == pytest.approx(60, abs=1e-3)
+
+
+def test_the_hamsterball_rolls_over_a_bundled_hfield_hill():
+    env = make(levels=["hill"])
+    obs, _ = env.reset(seed=0)
+    top = 0.0
+    for _ in range(600):
+        obs, reward, terminated, truncated, info = env.step(toward_goal(obs))
+        top = max(top, obs["state"][2])
+        if terminated or truncated:
+            break
+    assert info["success"]
+    assert top > 0.5 + 0.3  # it went up and over the 0.4 m hill, not around it

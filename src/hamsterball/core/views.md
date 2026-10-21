@@ -34,7 +34,8 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
   | `CHASE_DIST`, `CHASE_PITCH` | 3.0 m, 15° down |
   | `FOLLOW_DIST`, `FOLLOW_PITCH` (the follow offset) | 6.0 m, 35° down |
   | `FOVY` (vertical) | chase 60°, follow 50°, first person 75° |
-  | Marker colours | goal `0.2 0.9 0.3 0.4` (`GOAL_RGBA` in [level.py](level.md)); the other markers come with their tasks |
+  | Marker colours (`MARKER_RGBA` in [level.py](level.md)) | goal `0.2 0.9 0.3 0.4` green, waypoints `0.2 0.5 1.0 0.4` blue, items `1.0 0.85 0.1 0.4` yellow, keys `1.0 0.4 0.1 0.4` orange, survive region `0.6 0.3 0.9 0.25` purple |
+  | `HAZARD_RGBA`, `LOCKED_GOAL_RGBA` | `0.9 0.1 0.1 0.5` red; `0.5 0.5 0.5 0.15` faint grey |
 
 - The chase and follow cameras aim at the shell centre, so at 84×84 the shell covers the near part of the goal when the goal is straight ahead.
 - Pixels can't show the `first_person` group hiding: from inside, back-face culling already drops the shell sphere and the hamster. The test checks the option itself.
@@ -51,3 +52,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
 - 2026-10-22, ticket hamsterball-v1/06: added. Agent finding: `mj_kinematics` alone leaves `cam_xpos` at the pose `mj_step` last saw (it's `mj_camlight` that computes cameras), so the first frame after reset rendered from the origin, all black. The env calls `mj_camlight` after posing.
 - 2026-10-22, ticket hamsterball-v1/06: first picks were chase 2.5 m at 20° and follow 6 m at 40°. In sample frames the shell filled the chase view and hid the goal, and the goal sat on the follow view's top edge, so they moved to 3.0 m at 15° and 35°.
+- 2026-10-22, merge of tickets 03 to 05: the marker colours they added (`MARKER_RGBA`, `HAZARD_RGBA`, `LOCKED_GOAL_RGBA` in `level.py`) join the look constants above, unchanged and still needing play-test. The env sets marker looks before rendering, so a collected item or key vanishes in the same env step's frame.

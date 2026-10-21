@@ -1,0 +1,14 @@
+# A 30 m square platform with four waypoints in a loop around the spawn, raced in order.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [15, 15, 0.5]}
+tasks:
+  waypoint_race:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    waypoints:
+      - {type: sphere, pos: [0, 7, 0.5], radius: 1}
+      - {type: sphere, pos: [7, 7, 0.5], radius: 1}
+      - {type: sphere, pos: [7, -3, 0.5], radius: 1}
+      - {type: sphere, pos: [-4, -6, 0.5], radius: 1}
+    time_limit_s: 45
