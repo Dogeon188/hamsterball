@@ -7,6 +7,7 @@ dependencies = [
     "mujoco==3.16.0",
     "gymnasium>=1.4,<2",
     "numpy",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
