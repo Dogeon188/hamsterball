@@ -6,8 +6,8 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 
 ## Interface
 
-- `build(tier, level=FLAT) -> MjModel`: `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane.
-- Constants the rest of the core imports: `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`.
+- `build(tier, level=FLAT, view_size=GAME_SIZE) -> MjModel`: `view_size` is `(height, width)`; the model's offscreen buffer (`<visual><global offwidth offheight>`) is the larger of it and `GAME_SIZE` (720, 1280, the game window) in each dimension, so env views and the game both fit. `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane.
+- Constants the rest of the core imports: `GAME_SIZE`, `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`.
 
 ## How it works
 
@@ -40,3 +40,4 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 - 2026-10-22, ticket hamsterball-v1/05: `level` became top-level MJCF sections instead of worldbody content, so a level can carry hfield assets.
 - 2026-10-22, ticket hamsterball-v1/06: the three view mocap bodies follow the tier's fragment.
 - 2026-10-22, ticket hamsterball-v1/06: `znear` 0.001 of the extent, after the first-person view lost the near ground on `locked_goal` (see [views.md](views.md)).
+- 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. `build` now takes `view_size` and sizes the buffer to it, never below the game's 1280×720.

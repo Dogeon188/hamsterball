@@ -13,7 +13,7 @@ import mujoco
 import numpy as np
 
 from .abstract_tier import AbstractTier
-from .model import DT, FLAT, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF, SHELL_QPOS, build
+from .model import DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF, SHELL_QPOS, build
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
@@ -119,10 +119,10 @@ def physics_step(model, data, tier, action, cam):
 class Core:
     """A compiled hamsterball and its data. Holds constants only; the state is in data."""
 
-    def __init__(self, tier: Tier | None = None, level=FLAT, camera_action=False):
+    def __init__(self, tier: Tier | None = None, level=FLAT, camera_action=False, view_size=GAME_SIZE):
         self.tier = tier or AbstractTier()
         self.camera_action = camera_action
-        self.model = build(self.tier, level)
+        self.model = build(self.tier, level, view_size)
         self.data = mujoco.MjData(self.model)
         self.reset()
 

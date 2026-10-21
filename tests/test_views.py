@@ -34,6 +34,13 @@ def test_views_are_uint8_rgb_at_view_size():
     env.close()
 
 
+def test_views_render_wider_and_taller_than_the_games_window():
+    env = make(views=("chase",), view_size=(800, 1600))  # past the 1280 x 720 offscreen buffer the game needs
+    obs, _ = env.reset(seed=0)
+    assert obs["chase"].shape == (800, 1600, 3)
+    env.close()
+
+
 def test_chase_and_first_person_face_the_camera_yaw():
     # yaw 0 faces +y, where the goal is: centred
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)

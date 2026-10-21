@@ -91,7 +91,7 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            self._cores[level.id] = [Core(AbstractTier(), level.mjcf(), self.camera_action), None]
+            self._cores[level.id] = [Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size), None]
             if len(self._cores) > self.model_cache:
                 _, renderer = self._cores.popitem(last=False)[1]
                 if renderer is not None:

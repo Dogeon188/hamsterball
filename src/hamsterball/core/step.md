@@ -6,7 +6,7 @@ The core step of spec §4: the per-physics-step code (camera yaw, shell drag, co
 
 ## Interface
 
-- `Core(tier=None, level=FLAT, camera_action=False)`: compiles the model (default tier: `AbstractTier`) and resets. `level` is MJCF as `model.build` takes it, such as `Level.mjcf()`.
+- `Core(tier=None, level=FLAT, camera_action=False, view_size=GAME_SIZE)`: compiles the model (`view_size` sizes its offscreen buffer, see [model.md](model.md)) (default tier: `AbstractTier`) and resets. `level` is MJCF as `model.build` takes it, such as `Level.mjcf()`.
 - `Core.reset(spawn=(0, 0, 0.5), yaw=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.yaw`, `Core.action_space` (the tier's, plus `cam_yaw` under the camera flag).
 - `physics_step(model, data, tier, action, cam)` and its parts `camera_yaw`, `drag`, `contain`, `wrap`.
 - `Tier`: `fragment`, `nuserdata`, `resting_radius`, `action_space()`, `reset()`, `drive()`, `obs()`. The core touches a tier only through these.
@@ -59,3 +59,4 @@ See the prototype's doc for containment by solimp, a spring-damper field, and a 
   A first run measured along +y with the chase yaw on gave 4.25 m/s² and a 4.34 m climb. The causes were the tile anisotropy and the chase yaw on the climb (Known quirks), not the drive.
 
   The sink drift has one cause: the prototype read `xpos` and `xipos` one step stale, so containment saw the hamster where it was before the last step. With the position refresh turned off, this core sinks 16 / 21 / 31 / 40 mm, the prototype's numbers. The fresh read is what makes the core state complete (Decisions, 2026-10-21), so it stays, and the sink row of spec §5 is the one to update.
+- 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. `Core` passes a `view_size` through to `build`.
