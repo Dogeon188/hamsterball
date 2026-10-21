@@ -6,10 +6,12 @@ from pathlib import Path
 
 import yaml
 
+from .marker import crosses
+
 GEOM_SIZES = {"plane": 3, "box": 3, "sphere": 1, "capsule": 2}
 MARKER_KEYS = {"sphere": {"pos", "radius"}, "box": {"pos", "size", "euler"}, "capsule": {"fromto", "radius"}}
-TASK_MARKERS = {"reach_goal": ("goal",)}
-GOAL_RGBA = "0.2 0.9 0.3 0.4"
+TASK_MARKERS = {"reach_goal": ("goal",), "survive": ("region",)}
+MARKER_RGBA = {"goal": "0.2 0.9 0.3 0.4", "region": "0.3 0.5 0.9 0.25", "hazard": "0.9 0.2 0.2 0.4"}
 
 
 @dataclass
@@ -17,6 +19,7 @@ class Level:
     kill_plane_z: float
     geoms: list
     tasks: dict
+    hazards: list = field(default_factory=list)
     follow_yaw_deg: float = 0.0
     version: int = 1
 
@@ -24,7 +27,7 @@ class Level:
     def from_yaml(cls, text):
         """Load and validate a level, filling every default; raises ValueError on a malformed level."""
         d = yaml.safe_load(text)
-        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg"}, "level")
+        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards"}, "level")
         if d.get("version", 1) != 1:
             raise ValueError(f"level version {d['version']} is not 1")
         if not d["tasks"]:
@@ -33,6 +36,7 @@ class Level:
             kill_plane_z=_num(d["kill_plane_z"]),
             geoms=[_geom(g) for g in d["geoms"]],
             tasks={name: _task(name, t) for name, t in d["tasks"].items()},
+            hazards=[_marker(h) for h in d.get("hazards") or []],
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
         )
 
@@ -56,8 +60,9 @@ class Level:
                 f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" size="{_s(g["size"])}" euler="{_s(g["euler"])}" '
                 f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>'
             )
-        for task in self.tasks.values():
-            out.append(_marker_mjcf(task["goal"], GOAL_RGBA))
+        out += [_marker_mjcf(h, MARKER_RGBA["hazard"]) for h in self.hazards]
+        for name, task in self.tasks.items():
+            out += [_marker_mjcf(task[k], MARKER_RGBA[k]) for k in TASK_MARKERS[name]]
         return "\n".join(out)
 
 
@@ -136,4 +141,6 @@ def _task(name, t):
     }
     for k in TASK_MARKERS[name]:
         out[k] = _marker(t[k])
+    if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"]):
+        raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
