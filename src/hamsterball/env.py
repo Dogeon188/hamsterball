@@ -63,7 +63,7 @@ class HamsterballEnv(gym.Env):
             raise RuntimeError("MUJOCO_GL=glfw: env views render offscreen (egl or osmesa on Linux, unset on macOS)")
         self.view_size = tuple(view_size)
         self.obs_state = obs_state
-        self.tasks = list(tasks)
+        self.tasks, self.tier = list(tasks), tier
         self.set_levels([LEVELS_DIR] if levels is None else levels)
         self.camera_action = camera_action
         self.frame_skip = frame_skip
