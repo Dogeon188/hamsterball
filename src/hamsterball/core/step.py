@@ -109,9 +109,12 @@ def contain(model, data, resting_radius):
 
 def drive_bodies(data, bodies):
     """Pose each kinematic body at its motion's pose at data.time, with the velocity that carries it to the pose one
-    step later (the secant, so friction sees the body's real motion). bodies: (qpos adr, dof adr, pos, motion)."""
+    step later (the secant, so friction sees the body's real motion). bodies: (qpos adr, dof adr, pos, motion), the
+    motion None for a seesaw, which its joint moves and this leaves alone."""
     t = data.time
     for qa, da, pos, motion in bodies:
+        if motion is None:
+            continue
         o0, o1 = pose(motion, t)[0], pose(motion, t + DT)[0]
         q0, q1 = quat(motion, t), quat(motion, t + DT)
         data.qpos[qa:qa + 3] = pos + o0
@@ -187,7 +190,7 @@ class Core:
                                    len(c["tiles"]) if c else 0)
             free = lambda b: (int(m.jnt_qposadr[m.body_jntadr[b]]), int(m.jnt_dofadr[m.body_jntadr[b]]))  # noqa: E731
             ids = [m.body(f"body{i}").id for i in range(len(level.bodies))]
-            self.bodies = [(*free(b), np.array(lb["pos"]), lb["motion"]) for b, lb in zip(ids, level.bodies)]
+            self.bodies = [(*free(b), np.array(lb["pos"]), lb.get("motion")) for b, lb in zip(ids, level.bodies)]
             self.tiles = c and (1 + self.tier.nuserdata, m.body("tile0").id, c["delay"],
                                 [(*free(m.body(f"tile{i}").id), np.array(g["pos"]),
                                   level.kill_plane_z - TILE_DROP - g["pos"][2]) for i, g in enumerate(c["tiles"])])

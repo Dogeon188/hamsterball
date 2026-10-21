@@ -85,6 +85,10 @@ _Avoid_: dynamic object, moving marker (alone)
 A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover. A survive region can **attach** to one and ride it, as on a raft.
 _Avoid_: mocap, moving platform (alone), obstacle (for any solid)
 
+**Seesaw**:
+A solid platform of a level on a passive hinge or ball joint at a pivot, which the hamsterball's weight tips against a spring back to level, up to a tilt limit. It is not a mover: nothing scripts it. A survive region can attach to it as to a kinematic body.
+_Avoid_: tilting platform (for a kinematic body's scripted tilt), passive body
+
 **Collapsing tile**:
 A floor tile of a level that starts to fall a fixed delay after the shell first touches it, and drops under the kill plane. It is a kinematic body.
 _Avoid_: trap tile, crumbling floor

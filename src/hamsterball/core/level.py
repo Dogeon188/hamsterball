@@ -42,6 +42,7 @@ HFIELD_BASE = 1.0  # depth (m) of the solid slab under each hfield; MuJoCo needs
 # again (a measured carry converged by about 1000 kg, see step.md)
 BODY_MASS, BODY_INERTIA = 1000.0, 1000.0
 BODY_GEOMS = {"box", "sphere", "capsule"}  # a plane or hfield can't move
+SEESAW_MASS = 20.0  # kg, a seesaw's default mass: light enough that the 3.2 kg ball tips it within a second
 TILE_WARN_RGBA = (0.9, 0.25, 0.1, 1.0)  # look constant: a touched tile's colour blends to this as its fall nears
 
 
@@ -150,6 +151,7 @@ class Level:
             f'<body name="{n}" pos="{_s(b["pos"])}" gravcomp="1"><freejoint/>'
             f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
             + "".join(_geom_mjcf(g) for g in b["geoms"]) + "".join(x for j, x in attached if j == i) + "</body>"
+            if "motion" in b else _seesaw_mjcf(n, b, "".join(x for j, x in attached if j == i))
             for i, (n, b) in enumerate(zip(names, self.bodies))
         ]
         ex = [f'<exclude body1="world" body2="{n}"/>' for n in names]
@@ -173,6 +175,20 @@ class Level:
               for a in ["world", *(f"body{i}" for i in range(len(self.bodies)))]]
         ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(tiles) for b in tiles[i + 1:]]
         return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
+
+
+def _seesaw_mjcf(name, b, attached):
+    """A seesaw: a passive hinge or ball joint at the body's origin (its pivot), gravity compensated so only the
+    shell's weight and the spring tip it; its mass split evenly over its geoms, which then set its inertia (its
+    attached markers weigh nothing)."""
+    j = b["joint"]
+    kind = f'type="hinge" axis="{_s(j["axis"])}" range="{-j["range"]!r} {j["range"]!r}"' if j["type"] == "hinge" \
+        else f'type="ball" range="0 {j["range"]!r}"'
+    mass = j["mass"] / len(b["geoms"])
+    return (f'<body name="{name}" pos="{_s(b["pos"])}" gravcomp="1"><joint {kind} limited="true" '
+            f'stiffness="{j["stiffness"]!r}" damping="{j["damping"]!r}"/>'
+            + "".join(_geom_mjcf(g).replace("/>", f' mass="{mass!r}"/>') for g in b["geoms"])
+            + attached.replace("/>", ' mass="0"/>') + "</body>")  # a marker has no mass
 
 
 def _geom_mjcf(g, shape=None):
@@ -243,14 +259,40 @@ def _geom(g, base):
 
 
 def _body(b, base):
-    """A kinematic body: `pos` (its frame's origin, which a spin turns about), `geoms` in that frame, a `motion`."""
-    _keys(b, {"geoms", "motion"}, {"pos"}, "body")
+    """A kinematic body: `pos` (its frame's origin, which a spin turns about), `geoms` in that frame, a `motion`; or a
+    seesaw, with a `joint` (`_joint`) at `pos`, its pivot, instead of the motion."""
+    _keys(b, {"geoms"}, {"pos", "motion", "joint"}, "body")
+    if ("motion" in b) == ("joint" in b):
+        raise ValueError("a body needs a motion (driven) or a joint (a seesaw), not both or neither")
     if not isinstance(b["geoms"], list) or not b["geoms"]:
         raise ValueError("a body needs a non-empty list of geoms")
     geoms = [_geom(g, base) for g in b["geoms"]]
     if bad := {g["type"] for g in geoms} - BODY_GEOMS:
         raise ValueError(f"body geom types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
-    return {"pos": _vec(b.get("pos", [0, 0, 0]), 3), "geoms": geoms, "motion": M.load(b["motion"], tilt=True)}
+    pos = _vec(b.get("pos", [0, 0, 0]), 3)
+    if "joint" in b:
+        return {"pos": pos, "geoms": geoms, "joint": _joint(b["joint"])}
+    return {"pos": pos, "geoms": geoms, "motion": M.load(b["motion"], tilt=True)}
+
+
+def _joint(j):
+    """A seesaw's joint: `type` hinge (about a horizontal `axis`) or ball; `stiffness` (N m/rad, a spring back to
+    level), `damping` (N m s/rad, default 0), `range` (deg, the tilt limit either way), `mass` (kg)."""
+    kind = j.get("type") if isinstance(j, dict) else None
+    if kind not in ("hinge", "ball"):
+        raise ValueError(f"seesaw joint type {kind!r} is not hinge or ball")
+    _keys(j, {"type", "stiffness", "range"} | ({"axis"} if kind == "hinge" else set()), {"damping", "mass"}, "joint")
+    out = {"type": kind}
+    if kind == "hinge":
+        axis = _vec(j["axis"], 3)
+        if axis[2] != 0 or not any(axis):
+            raise ValueError(f"hinge axis {axis} is not a horizontal direction")
+        out["axis"] = M._unit(np.array(axis))
+    out |= {"stiffness": _num(j["stiffness"]), "damping": _num(j.get("damping", 0)), "range": _num(j["range"]),
+            "mass": _num(j.get("mass", SEESAW_MASS))}
+    if out["stiffness"] < 0 or out["damping"] < 0 or out["mass"] <= 0 or not 0 < out["range"] < 90:
+        raise ValueError(f"seesaw joint {out}: stiffness and damping must be >= 0, mass > 0, range in (0, 90) deg")
+    return out
 
 
 def _collapse(c, base):
@@ -293,7 +335,10 @@ def _marker(m, moving=False, n_bodies=0):
 
 
 def body_frame(body, t):
-    """A body's world pose (pos, quat) at sim time t, from its motion: the frame its attached markers ride."""
+    """A body's world pose (pos, quat) at sim time t, from its motion: the frame its attached markers ride. A seesaw
+    starts level."""
+    if "joint" in body:
+        return np.array(body["pos"]), np.array([1.0, 0.0, 0.0, 0.0])
     return np.array(body["pos"]) + M.pose(body["motion"], t)[0], M.quat(body["motion"], t)
 
 

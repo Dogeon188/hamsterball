@@ -14,8 +14,8 @@ def test_the_level_list_holds_the_levels_supporting_the_task_then_generated(tmp_
 
     assert menu.level_choices(LEVELS_DIR, "reach_goal") == ["first_goal", "hill", "generated"]
     assert menu.level_choices(LEVELS_DIR, "survive") == [
-        "first_survive", "survive_collapse", "survive_drift", "survive_pushers", "survive_raft", "survive_sweepers",
-        "generated"
+        "first_survive", "survive_collapse", "survive_drift", "survive_pushers", "survive_raft", "survive_seesaw",
+        "survive_sweepers", "generated"
     ]
     (tmp_path / "broken.yaml").write_text("tasks: [")
     (tmp_path / "goal.yaml").write_text((LEVELS_DIR / "first_goal.yaml").read_text())

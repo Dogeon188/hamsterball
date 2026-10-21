@@ -300,11 +300,18 @@ class HamsterballEnv(gym.Env):
 
     def _frame(self, marker):
         """The world pose (pos, quat) of the body an attached marker rides, from the core state's qpos (a driven
-        body's is its motion's pose; ticket 05's passive body has only this); None for a marker that rides none."""
+        body's is its motion's pose; a seesaw's turns about its fixed pivot by its joint's angle or quaternion); None
+        for a marker that rides none."""
         if "attach" not in marker:
             return None
-        qa = self.core.bodies[marker["attach"]][0]
-        return self.core.data.qpos[qa:qa + 3], self.core.data.qpos[qa + 3:qa + 7]
+        qa, q = self.core.bodies[marker["attach"]][0], self.core.data.qpos
+        body = self.level.bodies[marker["attach"]]
+        if "joint" not in body:
+            return q[qa:qa + 3], q[qa + 3:qa + 7]
+        if body["joint"]["type"] == "ball":
+            return np.array(body["pos"]), q[qa:qa + 4]
+        half = 0.5 * q[qa]
+        return np.array(body["pos"]), np.array([math.cos(half), *(math.sin(half) * np.array(body["joint"]["axis"]))])
 
     def _potential(self, pos):
         return PHI_SCALE * float(np.linalg.norm(self._target(pos) - pos))
