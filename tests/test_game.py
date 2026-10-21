@@ -144,9 +144,8 @@ def test_hud_at_reset_shows_time_progress_recording_effort_speed(level, task, pr
 
     env = HamsterballEnv([task], levels=[level], camera_action=True)
     env.reset(options={"task": task})
-    limit = {"first_goal": 30, "first_survive": 10}.get(level, 45)
     assert hud(env, np.zeros(3), recording=False) == [
-        f"0.0 / {limit:.1f} s",
+        "0.0 / 10.0 s" if task == "survive" else "0.0 s",  # no time limit for a human player, except survive's
         progress,
         "not recording",
         "effort 0.00",
@@ -164,7 +163,7 @@ def test_hud_tracks_sim_time_effort_and_the_unlock_goal_once_the_keys_are_in():
     for _ in range(60):
         env.step(a)
     lines = hud(env, a, recording=True)
-    assert lines[0] == "1.0 / 45.0 s" and lines[2] == "REC" and lines[3] == "effort 1.00"
+    assert lines[0] == "1.0 s" and lines[2] == "REC" and lines[3] == "effort 1.00"
     assert float(lines[4].split()[1]) > 0.5  # one second of sprinting
     env.unwrapped._todo[:] = [("goal", None)]  # every key in
     assert hud(env, a, recording=True)[1] == "keys 2/2: reach the goal"

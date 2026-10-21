@@ -11,7 +11,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - `add_to_dataset(dataset)`: Minari's, but each appended episode keeps its seed and reset options and gets the episode metadata callback's fields, as in `create_dataset`.
 - `discard_episode()`: drops the episode in progress (an abandoned run). Call `reset` before stepping again.
 - `provenance()`: `{hamsterball_version, mujoco_version, platform}` of this build, `platform` as `<OS>-<arch>` from `platform.system()` and `platform.machine()`.
-- `SPACE_KWARGS`: the env kwargs written into the dataset's `env_spec`.
+- `SPACE_KWARGS`: the env kwargs written into the dataset's `env_spec`: the space-shaping ones, plus `truncate` and `time_limit_s`, which decide when an episode ends.
 - `OBSERVATION`: the stored observation space, `Dict(goal=Box(10), state=Box(19))` float32, whatever the env's.
 
 ## How it works
@@ -22,7 +22,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 ## Invariants and checks
 
-- `uv run pytest tests/test_data.py`: reset options and seeds per episode, `discard_episode`, dataset metadata and `env_spec` kwargs with `recover_environment()`, episode outcomes, a pixel env (`views`, `obs_state=False`) storing `state` and `goal` and replaying, and the replay tests of [replay.md](replay.md).
+- `uv run pytest tests/test_data.py`: reset options and seeds per episode, `discard_episode`, dataset metadata and `env_spec` kwargs (`truncate` and `time_limit_s` among them, defaults written out) with `recover_environment()`, episode outcomes, a pixel env (`views`, `obs_state=False`) storing `state` and `goal` and replaying, and the replay tests of [replay.md](replay.md).
 - `discard_episode` sets Minari's private `DataCollector._buffer` to None; `reset` and `create_dataset` flush `_buffer` and skip it when None. `test_discard_episode_drops_the_episode_in_progress` fails if that internal changes.
 - `step` reads Minari's private `DataCollector._episode_id` to key each episode's outcome; `test_episode_metadata_holds_the_outcome_return_and_length` fails if it changes.
 - `add_to_dataset` calls Minari's private `_flush_to_storage` and reads `_storage` and `_episode_metadata_callback`; `test_appended_episodes_get_the_outcome_metadata_too` fails if they change, and replays the appended episode.
@@ -52,3 +52,4 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - 2026-10-22, ticket hamsterball-v1/08: after merging ticket 06's views, the Collector stores `state` and `goal` from `info` instead of the env's observation, and writes `views`, `view_size`, and `obs_state` into `env_spec`.
 - 2026-10-22, ticket hamsterball-v1/10: a generator pool's `env_spec` failed to serialise, so its dataset had no `env_spec` and `replay` raised; the Collector now drops `levels` and `difficulty` for a generator pool. `tests/test_generator.py::test_a_generated_episode_records_and_replays`.
 - 2026-10-22, ticket hamsterball-v1/13: agent finding while building baselines over appended episodes: Minari's `add_to_dataset` dropped the seed, reset options, and callback fields, and an appended episode's observation schema clashed with the first's. The Collector now overrides `add_to_dataset`, and `OBSERVATION` lists `goal` first.
+- 2026-10-22, user play-test request (no time-up for a human player, except in survive): the Collector writes the env's `truncate` and `time_limit_s` into `env_spec`, so `recover_environment()` rebuilds an env with the same episode ending. `tests/test_data.py::test_an_episode_recorded_past_the_time_limit_with_truncate_false_replays_bit_for_bit`.

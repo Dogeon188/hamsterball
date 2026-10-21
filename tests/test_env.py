@@ -115,6 +115,15 @@ def test_standing_still_truncates_at_the_time_limit(frame_skip, time_limit_s, st
     assert reward == pytest.approx(-0.001) and info["failure_reason"] is None and not info["success"]
 
 
+def test_truncate_false_runs_past_the_time_limit_with_the_time_penalty():
+    env = make(time_limit_s=0.5, truncate=False)  # 30 env steps
+    env.reset(seed=0)
+    for _ in range(100):
+        obs, reward, terminated, truncated, info = env.step(np.zeros(2, np.float32))
+        assert not (terminated or truncated)
+    assert reward == pytest.approx(-0.001) and obs["goal"][4] == 1  # the goal's fraction remaining ignores the limit
+
+
 def test_camera_action_adds_cam_yaw_and_orbits_at_120_deg_per_s():
     env = make(camera_action=True)
     assert env.action_space.shape == (3,)

@@ -45,6 +45,12 @@ def test_surviving_to_the_time_limit_terminates_in_success():
     np.testing.assert_allclose(goals[-1], [0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 
 
+def test_survive_with_truncate_false_still_succeeds_at_its_time_limit():
+    env = gym.make("Hamsterball-v0", tasks=["survive"], truncate=False)
+    n, reward, terminated, truncated, info, _ = play(env, STILL)
+    assert (n, terminated, truncated, info["success"]) == (600, True, False, True)
+
+
 def test_leaving_the_survive_region_fails():
     env = gym.make("Hamsterball-v0", tasks=["survive"])
     n, reward, terminated, truncated, info, _ = play(env, FORWARD)

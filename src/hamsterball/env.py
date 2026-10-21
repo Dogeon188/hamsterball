@@ -68,6 +68,7 @@ class HamsterballEnv(gym.Env):
         obs_state=True,
         frame_skip=FRAME_SKIP,
         time_limit_s=None,
+        truncate=True,
         shaped=False,
         shaping_gamma=0.99,
         model_cache=16,
@@ -89,6 +90,7 @@ class HamsterballEnv(gym.Env):
         self.camera_action = camera_action
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
+        self.truncate = truncate  # False: no time-up for a non-survive task (the game's human player)
         self.shaped, self.shaping_gamma = shaped, shaping_gamma
         # LRU keyed by level id: _Cached entries, a core and its renderer evicted together (spec §7, §11)
         self._cores, self.model_cache = OrderedDict(), model_cache
@@ -237,7 +239,7 @@ class HamsterballEnv(gym.Env):
         time = 0.0 if survive else TIME_PENALTY  # survive has no time penalty
         self._prev = pos
         terminated = self._success or self._failure is not None
-        truncated = not terminated and self._steps >= self._max_steps
+        truncated = self.truncate and not terminated and self._steps >= self._max_steps
         obs, vec = self._observe()
         phi = 0.0 if terminated else self._potential(pos)  # Φ = 0 at terminal states
         shaping = self.shaping_gamma * phi - self._phi if self.shaped else 0.0

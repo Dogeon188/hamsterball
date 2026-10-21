@@ -10,7 +10,7 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 - `Pacer(period, clock=perf_counter, sleep=time.sleep, slack=0.002)`: `wait()` before each env step sleeps to the frame's deadline; `overruns` counts late frames; `reset()` starts a fresh schedule (after a pause or at an episode start).
 - `Flow`: `state` is `"play"`, `"paused"`, `"result"` (then `"menu"` or `"quit"` once left); `end(outcome)` shows the result card; `press(name)` takes `esc`, `enter`, `r`, the pause buttons `resume retry menu quit`, or `close`, and returns the shell's command (`retry`, `next`, `menu`, `quit`) or `None`.
 - `outcome(terminated, truncated, info)`: the result card's headline (`Success`, `Failed: hazard`, `Failed: fell off`, `Failed: left the region`, `Time up`) or `None`.
-- `hud(env, action, recording)`: five lines: `t / limit s`, task progress, `REC` or `not recording`, `effort e`, `speed v m/s`. `sim_time(env)` and `progress(env)` are its parts.
+- `hud(env, action, recording)`: five lines: `t s` (`t / limit s` for survive), task progress, `REC` or `not recording`, `effort e`, `speed v m/s`. `sim_time(env)` and `progress(env)` are its parts.
 
 ## How it works
 
@@ -22,7 +22,7 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 
 ## Invariants and checks
 
-- `uv run --all-extras pytest tests/test_game.py`: key and stick mapping, deadzone override, pacing and overruns on a fake clock, the flow table, the HUD at reset on every bundled task level and after one second of sprinting, waypoint progress capped after a win, the outcome names, and the window module's import and `--help` (skipped without the `game` extra).
+- `uv run --all-extras pytest tests/test_game.py`: key and stick mapping, deadzone override, pacing and overruns on a fake clock, the flow table, the HUD at reset on every bundled task level (elapsed time only, except survive) and after one second of sprinting, waypoint progress capped after a win, the outcome names, and the window module's import and `--help` (skipped without the `game` extra).
 
 ## Known quirks
 
@@ -37,6 +37,8 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 - 2026-10-22, ticket hamsterball-v1/11: each stick overrides only its own keys (left stick the run, right stick the turn), so a player can steer with the stick and turn with Q/E.
 - 2026-10-22, ticket hamsterball-v1/11: an overrun is a frame more than `slack` past its deadline, and the schedule restarts from it (no catch-up), per spec §13's "slows down rather than skipping steps".
 
+- 2026-10-22, user play-test request: no time-up for a human player except in survive (the session's env has `truncate=False`), so the HUD's time line shows elapsed sim time only for every other task; survive keeps `t / limit s` and its `s left` progress line. The result card already showed elapsed time only; its `Time up` headline can now come only from an env that truncates.
+
 ## Tried and rejected
 
 ## History
@@ -44,3 +46,4 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 - 2026-10-22, ticket hamsterball-v1/11: added, test-first.
 - 2026-10-22, code review of hamsterball-v1: the waypoint HUD read `waypoint 5/4` after a win; it now caps at `n/n`.
 - 2026-10-22, code review of hamsterball-v1: `Pacer.tick()` renamed `Pacer.wait()`, since GLOSSARY.md avoids "tick" (it means a physics step there).
+- 2026-10-22, user play-test request: no time-up for a human player, except in survive; the HUD drops the limit from the time line of every other task.

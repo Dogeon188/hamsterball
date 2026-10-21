@@ -97,3 +97,10 @@ def test_quitting_mid_episode_records_nothing_and_no_record_never_writes():
 def test_recording_needs_a_valid_player_name():
     with pytest.raises(ValueError, match="a-z0-9_"):
         Session("survive", SURVIVE, player="Eric")
+
+
+def test_a_human_player_has_no_time_up_and_the_dataset_says_so():
+    s = Session("reach_goal", str(LEVELS_DIR / "first_goal.yaml"), player="eric")
+    assert s.env.unwrapped.truncate is False
+    assert s.env.unwrapped.spec.kwargs["truncate"] is False  # what the dataset's env_spec carries to replay
+    s.close()

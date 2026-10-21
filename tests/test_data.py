@@ -61,6 +61,7 @@ def test_the_dataset_records_versions_platform_and_every_space_shaping_kwarg():
     assert meta["platform"] == f"{platform.system()}-{platform.machine()}"
     kw = ds.env_spec.kwargs
     assert kw["tier"] == "abstract" and kw["camera_action"] and kw["frame_skip"] == 5 and kw["shaped"]
+    assert kw["truncate"] is True and kw["time_limit_s"] is None  # the episode ending, defaults written out
     rebuilt = ds.recover_environment()
     assert rebuilt.action_space == env.action_space and rebuilt.unwrapped.frame_skip == 5
 
@@ -82,6 +83,14 @@ def test_episode_metadata_holds_the_outcome_return_and_length():
 def test_an_episode_of_every_task_replays_bit_for_bit(task):
     env = record("Hamsterball-v0", episodes=2, steps=60, tasks=[task], camera_action=True)
     replay(env.create_dataset(f"test/replay-{task}-v0", algorithm_name="random"))
+
+
+def test_an_episode_recorded_past_the_time_limit_with_truncate_false_replays_bit_for_bit():
+    env = record(steps=40, levels=["first_goal"], time_limit_s=0.5, truncate=False)  # 40 steps past a 30-step limit
+    ds = env.create_dataset("test/no-truncate-v0", algorithm_name="random")
+    assert ds.total_steps == 40
+    assert (ds.env_spec.kwargs["truncate"], ds.env_spec.kwargs["time_limit_s"]) == (False, 0.5)
+    replay(ds)
 
 
 def test_replay_reports_the_first_step_that_diverges(monkeypatch):

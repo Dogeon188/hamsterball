@@ -28,7 +28,7 @@ class Session:
         else:
             pool, self._first = [str(level)], None
         env = gym.make(f"Hamsterball-v{ENV_VERSION}", tasks=[task], levels=pool, difficulty=difficulty,
-                       camera_action=True)
+                       camera_action=True, truncate=False)  # no time-up for a human (survive keeps its limit)
         if record:
             from ..data import Collector  # the data extra; only recording needs it
 
