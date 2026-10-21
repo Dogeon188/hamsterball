@@ -97,3 +97,9 @@ def test_quitting_mid_episode_records_nothing_and_no_record_never_writes():
 def test_recording_needs_a_valid_player_name():
     with pytest.raises(ValueError, match="a-z0-9_"):
         Session("survive", SURVIVE, player="Eric")
+
+
+def test_a_file_level_ignores_the_menus_remembered_difficulty():
+    s = Session("collect_items", str(LEVELS_DIR / "item_scatter.yaml"), difficulty=0.59, record=False)
+    s.start()
+    s.close()

@@ -25,8 +25,8 @@ class Session:
         if level == GENERATED:
             pool = gen = ProceduralGenerator()
             self._first = {"level": gen(task, seed, difficulty), "task": task} if seed is not None else None
-        else:
-            pool, self._first = [str(level)], None
+        else:  # the menu remembers a generated level's difficulty, which a file pool refuses
+            pool, self._first, difficulty = [str(level)], None, None
         env = gym.make(f"Hamsterball-v{ENV_VERSION}", tasks=[task], levels=pool, difficulty=difficulty,
                        camera_action=True)
         if record:

@@ -6,7 +6,7 @@ The game's episodes and their recording (spec §13), without a display: each fin
 
 ## Interface
 
-- `Session(task, level, difficulty=0.5, seed=None, player=None, record=True)`: `level` is a level file path or `"generated"`. Recording needs `player` to pass `name_ok` (`ValueError` otherwise) and the `data` extra; `record=False` needs neither.
+- `Session(task, level, difficulty=0.5, seed=None, player=None, record=True)`: `level` is a level file path or `"generated"`; a file level ignores `difficulty`. Recording needs `player` to pass `name_ok` (`ValueError` otherwise) and the `data` extra; `record=False` needs neither.
 - `env`: the `Hamsterball-v<N>` env (`camera_action=True`), wrapped in a `Collector` when recording; the window reads `env.unwrapped` for drawing and the HUD.
 - `recording`, `dataset_id` (`hamsterball/human-<player>-v<N>`, N = `hamsterball.ENV_VERSION`), `running` (an episode is in progress).
 - `start(retry=False)`: abandons a run in progress, then resets. A file level resets with `{task}`; a generated level draws a fresh seed, except the first episode when `seed` is given (`{level: generator(task, seed, difficulty), task}`). `retry=True` resets with the last episode's `{level, task}`, so the same level and seed.
@@ -21,7 +21,7 @@ The game's episodes and their recording (spec §13), without a display: each fin
 
 ## Invariants and checks
 
-- `uv run --all-extras pytest tests/test_session.py`: two finished episodes append with overruns 3 and 0 and replay, the dataset naming the player in `author` and holding no `algorithm_name`; a dataset recorded from a level file replays after the file is deleted, across a file and a generated level (seed, then a retry after an abandoned run); a crash after one finished episode leaves exactly it; quitting mid-episode writes nothing and `record=False` never writes; a bad player name raises.
+- `uv run --all-extras pytest tests/test_session.py`: two finished episodes append with overruns 3 and 0 and replay, the dataset naming the player in `author` and holding no `algorithm_name`; a dataset recorded from a level file replays after the file is deleted, across a file and a generated level (seed, then a retry after an abandoned run); a crash after one finished episode leaves exactly it; a file level constructs with a non-default difficulty; quitting mid-episode writes nothing and `record=False` never writes; a bad player name raises.
 
 ## Known quirks
 
@@ -35,6 +35,8 @@ The game's episodes and their recording (spec §13), without a display: each fin
 - 2026-10-22, ticket hamsterball-v1/12: `--seed` sets only the first episode of a generated session; Enter (next) draws a fresh seed as spec §13 says, and Retry replays the current one.
 - 2026-10-22, ticket hamsterball-v1/12: the dataset's `env_spec` names no level (see How it works), so a human dataset replays on a machine without the player's level files.
 - 2026-10-22, ticket hamsterball-v1/12: the `game` extra depends on the `data` extra, rather than the game running with recording off when Minari is missing, since spec §13 records by default. The session still imports Minari only when recording.
+
+- 2026-10-22, bug fix: a file level drops `difficulty` before `gym.make`, rather than the window passing 0.5, so the menu and the `--level FILE --difficulty X` flags are both fixed. The menu hides the slider for a file level but still remembers the last generated level's difficulty, and the env raises on a non-default difficulty with a file pool.
 
 ## Tried and rejected
 
