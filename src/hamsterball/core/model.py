@@ -31,7 +31,7 @@ def _tile_normals():
 
 TILE_NORMALS = _tile_normals()  # (320, 3) in the shell frame
 
-FLAT = '<geom type="plane" size="0 0 .1" rgba=".35 .4 .35 1"/>'
+FLAT = '<worldbody><geom type="plane" size="0 0 .1" rgba=".35 .4 .35 1"/></worldbody>'
 
 
 def _shell_xml():
@@ -47,12 +47,13 @@ def _shell_xml():
 
 
 def build(tier, level=FLAT):
-    """Compile the shell, the tier's fragment, and the level's worldbody geoms (an MJCF string) into a model."""
+    """Compile the shell, the tier's fragment, and the level (top-level MJCF sections: assets, worldbody geoms)."""
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
 <size nuserdata="{1 + tier.nuserdata}"/>
 <visual><global offwidth="1280" offheight="720"/></visual>
-<worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/>
+<worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}
+<worldbody>
 {_shell_xml()}
 {tier.fragment}
 </worldbody></mujoco>"""

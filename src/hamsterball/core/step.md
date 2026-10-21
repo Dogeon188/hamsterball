@@ -6,7 +6,7 @@ The core step of spec §4: the per-physics-step code (camera yaw, shell drag, co
 
 ## Interface
 
-- `Core(tier=None, level=FLAT, camera_action=False)`: compiles the model (default tier: `AbstractTier`) and resets.
+- `Core(tier=None, level=FLAT, camera_action=False)`: compiles the model (default tier: `AbstractTier`) and resets. `level` is MJCF as `model.build` takes it, such as `Level.mjcf()`.
 - `Core.reset(spawn=(0, 0, 0.5), yaw=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.yaw`, `Core.action_space` (the tier's, plus `cam_yaw` under the camera flag).
 - `physics_step(model, data, tier, action, cam)` and its parts `camera_yaw`, `drag`, `contain`, `wrap`.
 - `Tier`: `fragment`, `nuserdata`, `resting_radius`, `action_space()`, `reset()`, `drive()`, `obs()`. The core touches a tier only through these.
