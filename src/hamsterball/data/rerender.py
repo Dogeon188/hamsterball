@@ -1,9 +1,12 @@
 """Re-render (spec §12): pixels from a dataset's stored core states, with no physics stepped, so on any platform."""
 
+from fractions import Fraction
+
 import minari
 import numpy as np
 from minari.data_collector import EpisodeBuffer
 
+from ..core.model import DT
 from .collector import provenance
 
 CARRIED = ("algorithm_name", "author", "author_email", "code_permalink", "description", "requirements")
@@ -50,3 +53,22 @@ def rerender(dataset, views, view_size, out_id):
     # the physics was recorded on the source's build and platform, not this one
     out.storage.update_metadata({k: src[k] for k in provenance() if k in src})
     return minari.load_dataset(out_id)
+
+
+def to_video(dataset, episode, view, path, view_size=None):
+    """Write episode `episode` of `dataset`, re-rendered from `view`, as an H.264 mp4 at the env-step rate.
+
+    `view_size` is (H, W), even numbers (yuv420p), by default the dataset's.
+    """
+    import av  # the data extra
+
+    view_size = view_size or dataset.env_spec.kwargs["view_size"]
+    _, _, obs = next(episodes(dataset, (view,), view_size, [episode]))
+    rate = Fraction(1 / (DT * dataset.env_spec.kwargs["frame_skip"])).limit_denominator(1000)
+    with av.open(str(path), "w") as f:
+        stream = f.add_stream("libx264", rate=rate)
+        stream.height, stream.width = view_size
+        stream.pix_fmt = "yuv420p"
+        for frame in obs[view]:
+            f.mux(stream.encode(av.VideoFrame.from_ndarray(frame, format="rgb24")))
+        f.mux(stream.encode())  # flush

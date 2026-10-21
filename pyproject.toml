@@ -13,7 +13,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # Minari 0.5's DataCollector imports jax, which only its `create` extra installs.
-data = ["minari[arrow,create]==0.5.*", "pillow>=13.0.0"]
+data = [
+    "av>=18.1.0",
+    "minari[arrow,create]==0.5.*",
+    "pillow>=13.0.0",
+]
 game = ["imgui-bundle", "glfw"]
 all = ["hamsterball[data,game]"]
 

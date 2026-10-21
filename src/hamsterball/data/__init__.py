@@ -2,6 +2,6 @@
 
 from .collector import Collector
 from .replay import ReplayMismatch, replay
-from .rerender import rerender
+from .rerender import rerender, to_video
 
-__all__ = ["Collector", "ReplayMismatch", "replay", "rerender"]
+__all__ = ["Collector", "ReplayMismatch", "replay", "rerender", "to_video"]

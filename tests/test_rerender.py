@@ -7,7 +7,7 @@ import pytest
 minari = pytest.importorskip("minari")
 
 import hamsterball  # noqa: F401  registers the env ids
-from hamsterball.data import Collector, rerender
+from hamsterball.data import Collector, rerender, to_video
 from test_tasks import toward_target
 
 
@@ -64,3 +64,15 @@ def test_rerender_recomputes_progress_and_adds_lossless_views(monkeypatch):
     assert m1 == m0 and m1["success"]
     assert out.storage.metadata["algorithm_name"] == "scripted"
     assert out.storage.metadata["platform"] == src.storage.metadata["platform"]
+
+
+def test_to_video_writes_an_mp4_at_the_env_step_rate(tmp_path):
+    av = pytest.importorskip("av")
+    src = play("reach_goal", "first_goal", frame_skip=20)  # 30 env steps per second
+    to_video(src, 0, "follow", tmp_path / "ep0.mp4", view_size=(48, 64))
+    with av.open(str(tmp_path / "ep0.mp4")) as f:
+        stream = f.streams.video[0]
+        frames = list(f.decode(stream))
+        assert stream.average_rate == 30
+    assert len(frames) == src.total_steps + 1  # the reset frame and one per step
+    assert (frames[0].height, frames[0].width) == (48, 64)
