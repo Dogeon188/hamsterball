@@ -59,7 +59,16 @@ def with_hazards(name, *hazards):
     return Level.from_yaml(yaml.safe_dump(d))
 
 
-@pytest.mark.parametrize("name, task", [("first_goal", "reach_goal"), ("first_survive", "survive")])
+@pytest.mark.parametrize(
+    "name, task",
+    [
+        ("first_goal", "reach_goal"),
+        ("waypoint_loop", "waypoint_race"),
+        ("item_scatter", "collect_items"),
+        ("locked_goal", "unlock_goal"),
+        ("first_survive", "survive"),
+    ],
+)
 def test_a_hazard_fails_every_task(name, task):
     env = gym.make("Hamsterball-v0", tasks=[task], levels=[with_hazards(name, {"type": "sphere", "pos": [0, 0, 0.5], "radius": 0.2})])
     n, reward, terminated, truncated, info, _ = play(env, STILL)

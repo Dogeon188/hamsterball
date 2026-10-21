@@ -10,8 +10,24 @@ from .marker import crosses
 
 GEOM_SIZES = {"plane": 3, "box": 3, "sphere": 1, "capsule": 2}
 MARKER_KEYS = {"sphere": {"pos", "radius"}, "box": {"pos", "size", "euler"}, "capsule": {"fromto", "radius"}}
-TASK_MARKERS = {"reach_goal": ("goal",), "survive": ("region",)}
-MARKER_RGBA = {"goal": "0.2 0.9 0.3 0.4", "region": "0.3 0.5 0.9 0.25", "hazard": "0.9 0.2 0.2 0.4"}
+TASK_MARKERS = {
+    "reach_goal": ("goal",),
+    "waypoint_race": ("waypoints",),
+    "collect_items": ("items",),
+    "unlock_goal": ("keys", "goal"),
+    "survive": ("region",),
+}
+MARKER_LISTS = {"waypoints", "items", "keys"}  # task keys holding an ordered, non-empty list of markers
+# Look constants (spec §11): colour by marker kind; the env hides collected markers and dims the locked goal
+MARKER_RGBA = {
+    "goal": (0.2, 0.9, 0.3, 0.4),
+    "waypoints": (0.2, 0.5, 1.0, 0.4),
+    "items": (1.0, 0.85, 0.1, 0.4),
+    "keys": (1.0, 0.4, 0.1, 0.4),
+    "region": (0.6, 0.3, 0.9, 0.25),
+}
+HAZARD_RGBA = (0.9, 0.1, 0.1, 0.5)  # level-wide, so the env never hides a hazard
+LOCKED_GOAL_RGBA = (0.5, 0.5, 0.5, 0.15)
 
 
 @dataclass
@@ -52,7 +68,7 @@ class Level:
         return hashlib.sha256(self.canonical().encode()).hexdigest()
 
     def mjcf(self):
-        """Worldbody geoms for model.build: the level's solids, then each task's markers (translucent, no contact)."""
+        """Worldbody geoms for model.build: the level's solids, the hazards, then each task's markers (translucent, no contact)."""
         out = []
         for g in self.geoms:
             rgba = " ".join(map(repr, g.get("rgba", [0.45, 0.5, 0.45, 1.0])))
@@ -60,20 +76,25 @@ class Level:
                 f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" size="{_s(g["size"])}" euler="{_s(g["euler"])}" '
                 f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>'
             )
-        out += [_marker_mjcf(h, MARKER_RGBA["hazard"]) for h in self.hazards]
+        # hazard names carry no "/", so the env's per-task marker looks pass them by
+        out += [_marker_mjcf(h, f"hazard{i}", HAZARD_RGBA) for i, h in enumerate(self.hazards)]
         for name, task in self.tasks.items():
-            out += [_marker_mjcf(task[k], MARKER_RGBA[k]) for k in TASK_MARKERS[name]]
+            for k in TASK_MARKERS[name]:
+                if k in MARKER_LISTS:
+                    out += [_marker_mjcf(m, f"{name}/{k}/{i}", MARKER_RGBA[k]) for i, m in enumerate(task[k])]
+                else:
+                    out.append(_marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
         return "\n".join(out)
 
 
-def _marker_mjcf(m, rgba):
+def _marker_mjcf(m, name, rgba):
     if m["type"] == "sphere":
         shape = f'pos="{_s(m["pos"])}" size="{m["radius"]!r}"'
     elif m["type"] == "box":
         shape = f'pos="{_s(m["pos"])}" size="{_s(m["size"])}" euler="{_s(m["euler"])}"'
     else:
         shape = f'fromto="{_s(m["fromto"])}" size="{m["radius"]!r}"'
-    return f'<geom type="{m["type"]}" {shape} rgba="{rgba}" contype="0" conaffinity="0" group="0"/>'
+    return f'<geom name="{name}" type="{m["type"]}" {shape} rgba="{_s(rgba)}" contype="0" conaffinity="0" group="0"/>'
 
 
 def _s(v):
@@ -140,7 +161,12 @@ def _task(name, t):
         "time_limit_s": _num(t["time_limit_s"]),
     }
     for k in TASK_MARKERS[name]:
-        out[k] = _marker(t[k])
+        if k in MARKER_LISTS:
+            if not isinstance(t[k], list) or not t[k]:
+                raise ValueError(f"{name} {k} must be a non-empty list of markers")
+            out[k] = [_marker(m) for m in t[k]]
+        else:
+            out[k] = _marker(t[k])
     if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"]):
         raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
