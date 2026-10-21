@@ -12,6 +12,12 @@ dependencies = [
     "pillow>=13.0.0",
 ]
 
+[project.optional-dependencies]
+game = ["imgui-bundle", "glfw", "click"]
+
+[project.scripts]
+hamsterball-play = "hamsterball.game.window:main"
+
 [dependency-groups]
 dev = ["pytest"]
 
