@@ -70,14 +70,15 @@ class Level:
             raise ValueError(f"level version {d['version']} is not 1")
         if not d["tasks"]:
             raise ValueError("a level needs at least one task")
+        bodies = [_body(b, Path(base)) for b in d.get("bodies") or []]
         return cls(
             kill_plane_z=_num(d["kill_plane_z"]),
             geoms=[_geom(g, Path(base)) for g in d["geoms"]],
-            tasks={name: _task(name, t) for name, t in d["tasks"].items()},
+            tasks={name: _task(name, t, bodies) for name, t in d["tasks"].items()},
             hazards=[_marker(h, moving=True) for h in d.get("hazards") or []],
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
             generator=_provenance(d["generator"]) if "generator" in d else None,
-            bodies=[_body(b, Path(base)) for b in d.get("bodies") or []],
+            bodies=bodies,
         )
 
     @classmethod
@@ -125,22 +126,26 @@ class Level:
             for k in TASK_MARKERS[name]:
                 if k in MARKER_LISTS:
                     out += [_marker_mjcf(m, f"{name}/{k}/{i}", MARKER_RGBA[k]) for i, m in enumerate(task[k])]
-                else:
+                elif "attach" not in task[k]:  # an attached marker is drawn in its body (body_mjcf)
                     out.append(_marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
 
     def body_mjcf(self):
         """MJCF sections for model.build's `bodies`, after the view mocaps: each kinematic body `body<i>` (a free
-        joint, gravity compensated, heavy) with its geoms, and a contact exclude from the world and from each other
-        (the core poses them, so only the shell should touch them). "" for a level without bodies."""
+        joint, gravity compensated, heavy) with its geoms and the markers attached to it, and a contact exclude from
+        the world and from each other (the core poses them, so only the shell should touch them). "" for a level
+        without bodies."""
         if not self.bodies:
             return ""
         names = [f"body{i}" for i in range(len(self.bodies))]
+        attached = [(task[k]["attach"], _marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
+                    for name, task in self.tasks.items() for k in TASK_MARKERS[name]
+                    if k not in MARKER_LISTS and "attach" in task[k]]
         out = [
             f'<body name="{n}" pos="{_s(b["pos"])}" gravcomp="1"><freejoint/>'
             f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
-            + "".join(_geom_mjcf(g) for g in b["geoms"]) + "</body>"
-            for n, b in zip(names, self.bodies)
+            + "".join(_geom_mjcf(g) for g in b["geoms"]) + "".join(x for j, x in attached if j == i) + "</body>"
+            for i, (n, b) in enumerate(zip(names, self.bodies))
         ]
         ex = [f'<exclude body1="world" body2="{n}"/>' for n in names]
         ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(names) for b in names[i + 1:]]
@@ -222,16 +227,17 @@ def _body(b, base):
     geoms = [_geom(g, base) for g in b["geoms"]]
     if bad := {g["type"] for g in geoms} - BODY_GEOMS:
         raise ValueError(f"body geom types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
-    return {"pos": _vec(b.get("pos", [0, 0, 0]), 3), "geoms": geoms, "motion": M.load(b["motion"])}
+    return {"pos": _vec(b.get("pos", [0, 0, 0]), 3), "geoms": geoms, "motion": M.load(b["motion"], tilt=True)}
 
 
-def _marker(m, moving=False):
-    """A marker; `moving` lets it take a `motion` (absent stays absent, so a still marker keeps its id)."""
+def _marker(m, moving=False, n_bodies=0):
+    """A marker; `moving` lets it take a `motion` or (with `n_bodies` bodies to name) an `attach`: the index of the
+    body it rides, in whose frame it is then authored. Absent stays absent, so a still marker keeps its id."""
     kind = m.get("type") if isinstance(m, dict) else None
     if kind not in MARKER_KEYS:
         raise ValueError(f"marker type {kind!r} is not one of {sorted(MARKER_KEYS)}")
     optional = {"euler"} if kind == "box" else set()
-    _keys(m, MARKER_KEYS[kind] - optional | {"type"}, optional | ({"motion"} if moving else set()), f"{kind} marker")
+    _keys(m, MARKER_KEYS[kind] - optional | {"type"}, optional | ({"motion", "attach"} if moving else set()), f"{kind} marker")
     out = {"type": kind}
     for k in MARKER_KEYS[kind]:
         if k == "radius":
@@ -240,10 +246,21 @@ def _marker(m, moving=False):
             out[k] = _vec(m.get(k, [0, 0, 0]), 6 if k == "fromto" else 3)
     if "motion" in m:
         out["motion"] = M.load(m["motion"])
+    if "attach" in m:
+        if "motion" in m:
+            raise ValueError("a marker can't both attach to a body and have its own motion")
+        if type(m["attach"]) is not int or not 0 <= m["attach"] < n_bodies:
+            raise ValueError(f"attach {m['attach']!r} is not the index of one of the level's {n_bodies} bodies")
+        out["attach"] = m["attach"]
     return out
 
 
-def _task(name, t):
+def body_frame(body, t):
+    """A body's world pose (pos, quat) at sim time t, from its motion: the frame its attached markers ride."""
+    return np.array(body["pos"]) + M.pose(body["motion"], t)[0], M.quat(body["motion"], t)
+
+
+def _task(name, t, bodies=()):
     if name not in TASK_MARKERS:
         raise ValueError(f"task {name!r} is not one of {sorted(TASK_MARKERS)}")
     _keys(t, {"spawn", "time_limit_s", *TASK_MARKERS[name]}, set(), name)
@@ -258,8 +275,9 @@ def _task(name, t):
                 raise ValueError(f"{name} {k} must be a non-empty list of markers")
             out[k] = [_marker(m) for m in t[k]]
         else:
-            out[k] = _marker(t[k], moving=k == "region")
-    if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"], t=0.0):
+            out[k] = _marker(t[k], moving=k == "region", n_bodies=len(bodies))
+    if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"], t=0.0,
+                                         frame=body_frame(bodies[out["region"]["attach"]], 0.0) if "attach" in out["region"] else None):
         raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
 

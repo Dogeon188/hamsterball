@@ -14,7 +14,7 @@ import numpy as np
 
 from .abstract_tier import AbstractTier
 from .level import Level
-from .motion import pose
+from .motion import pose, quat
 from .model import DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF, SHELL_QPOS, build
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
@@ -105,17 +105,13 @@ def contain(model, data, resting_radius):
         mujoco.mj_forward(model, data)
 
 
-def _yaw_quat(yaw):
-    return np.array([math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)])
-
-
 def drive_bodies(data, bodies):
     """Pose each kinematic body at its motion's pose at data.time, with the velocity that carries it to the pose one
     step later (the secant, so friction sees the body's real motion). bodies: (qpos adr, dof adr, pos, motion)."""
     t = data.time
     for qa, da, pos, motion in bodies:
-        (o0, y0), (o1, y1) = pose(motion, t), pose(motion, t + DT)
-        q0, q1 = _yaw_quat(y0), _yaw_quat(y1)
+        o0, o1 = pose(motion, t)[0], pose(motion, t + DT)[0]
+        q0, q1 = quat(motion, t), quat(motion, t + DT)
         data.qpos[qa:qa + 3] = pos + o0
         data.qpos[qa + 3:qa + 7] = q0
         data.qvel[da:da + 3] = (o1 - o0) / DT

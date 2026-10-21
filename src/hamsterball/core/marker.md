@@ -7,7 +7,8 @@ The marker test of spec §9: whether the segment the shell centre swept over one
 ## Interface
 
 - `crosses(marker, p0, p1, t=0.0, t0=None) -> bool`: `marker` is a canonical marker dict from [level.md](level.md); `p0 == p1` is a point test (the reset step, the survive region). `p0` is at sim time `t0` (default `t`) and `p1` at `t`. A marker with a `motion` (see [motion.md](motion.md)) is tested on the relative path: `p0` in its frame at `t0`, `p1` in its frame at `t`. With `t0 == t` it is posed at `t` and held there.
-- `centre(marker, t=0.0)`: the point a task steers toward: a sphere's or box's `pos`, a capsule's midpoint, plus the motion's offset at `t`. It is also the pivot a marker's spin turns about.
+- `centre(marker, t=0.0, frame=None)`: the point a task steers toward: a sphere's or box's `pos`, a capsule's midpoint, plus the motion's offset at `t`. It is also the pivot a marker's spin turns about.
+- `frame=(pos, quat)` on either: the marker is attached to a body (`attach`, [level.md](level.md)) and authored in its frame; `frame` is that body's world pose now. `crosses` maps both points into that one frame (a point test, which is all the attached survive region needs), and `centre` returns the world point.
 
 ## How it works
 
@@ -30,6 +31,7 @@ It reads only the marker, two shell positions, and the sim time, so re-render ca
 ## Decisions
 
 - 2026-10-22, ticket survive-movers/01: a moving marker is tested by moving the points into its authored frame rather than moving the marker dict, so a spinning box needs no euler composition.
+- 2026-10-22, ticket survive-movers/04: the caller passes an attached marker's frame, so the test stays a pure function of its arguments: the env reads it from the body's qpos, the loader from the body's motion at time 0.
 
 ## Tried and rejected
 
@@ -40,3 +42,4 @@ It reads only the marker, two shell positions, and the sim time, so re-render ca
 - 2026-10-22, ticket hamsterball-v1/02: added for the reach-goal goal; all three marker shapes, since later tasks use each.
 - 2026-10-22, ticket survive-movers/02: `crosses` takes `t0`, the time of `p0`, and tests a moving marker on the relative path. Used for hazards; the survive region is a point test and needs no `t0`.
 - 2026-10-22, ticket survive-movers/01: `crosses` and `centre` take the sim time `t` for a marker with a `motion`. The swept test still holds the marker still over the segment; ticket 02 (moving hazards) makes it relative.
+- 2026-10-22, ticket survive-movers/04: `frame` for markers attached to a body (the region of `survive_raft`).

@@ -4,23 +4,26 @@ is enough to know where every mover is.
 A motion is the canonical dict `load` returns: `path` (a closed polyline of offsets, walked at constant speed) or
 `oscillate` (a sine offset along a unit axis), each with a `period` (s), a `phase` (a fraction of the period), and a
 `spin` about z (deg/s). The pose is an offset from the mover's authored pose plus a yaw about its authored centre.
+A body's motion can also `tilt`: a sine rocking about a horizontal axis of the body's frame.
 """
 
 import math
 
+import mujoco
 import numpy as np
 
 FORMS = {"path": {"points"}, "oscillate": {"axis", "amplitude"}}
 
 
-def load(m):
-    """Validate a motion and fill its defaults; raises ValueError on a malformed one."""
+def load(m, tilt=False):
+    """Validate a motion and fill its defaults; raises ValueError on a malformed one. `tilt` lets it take a `tilt`
+    (only a body can turn off z; absent stays absent, so a motion without one keeps its id)."""
     from .level import _keys, _num, _vec  # level imports this module
 
     kind = m.get("type") if isinstance(m, dict) else None
     if kind not in FORMS:
         raise ValueError(f"motion type {kind!r} is not one of {sorted(FORMS)}")
-    _keys(m, FORMS[kind] | {"type", "period"}, {"phase", "spin"}, f"{kind} motion")
+    _keys(m, FORMS[kind] | {"type", "period"}, {"phase", "spin"} | ({"tilt"} if tilt else set()), f"{kind} motion")
     out = {"type": kind, "period": _num(m["period"]), "phase": _num(m.get("phase", 0)) % 1.0, "spin": _num(m.get("spin", 0))}
     if out["period"] <= 0:
         raise ValueError(f"motion period {out['period']} is not positive")
@@ -34,8 +37,45 @@ def load(m):
         axis = np.array(_vec(m["axis"], 3))
         if not np.linalg.norm(axis):
             raise ValueError("an oscillate axis is zero")
-        out["axis"] = (axis / np.linalg.norm(axis)).tolist()  # a direction, so [2, 0, 0] and [1, 0, 0] share an id
+        out["axis"] = _unit(axis)  # a direction, so [2, 0, 0] and [1, 0, 0] share an id
         out["amplitude"] = _num(m["amplitude"])
+    if "tilt" in m:
+        out["tilt"] = _tilt(m["tilt"], out["period"])
+    return out
+
+
+def _tilt(t, period):
+    """`{axis: [x, y, 0], amplitude (deg), period (default the motion's), phase: 0}`."""
+    from .level import _keys, _num, _vec
+
+    _keys(t, {"axis", "amplitude"}, {"period", "phase"}, "tilt")
+    axis = np.array(_vec(t["axis"], 3))
+    if axis[2] or not np.linalg.norm(axis):
+        raise ValueError(f"a tilt axis {axis.tolist()} is not a non-zero horizontal vector")
+    out = {"axis": _unit(axis), "amplitude": _num(t["amplitude"]),
+           "period": _num(t.get("period", period)), "phase": _num(t.get("phase", 0)) % 1.0}
+    if out["period"] <= 0:
+        raise ValueError(f"tilt period {out['period']} is not positive")
+    return out
+
+
+def _unit(v):
+    """v normalised, left as is when it already is one: a replay reloads the canonical level, and normalising a
+    unit vector again can move its last bits."""
+    n = np.linalg.norm(v)
+    return (v if abs(n - 1) < 1e-12 else v / n).tolist()
+
+
+def quat(motion, t):
+    """The mover's orientation at sim time t: its yaw about z, then (a body's) tilt about its own horizontal axis."""
+    yaw = math.radians(motion["spin"] * t)
+    q = np.array([math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)])
+    if "tilt" not in motion:
+        return q
+    tl = motion["tilt"]
+    a = math.radians(tl["amplitude"]) * math.sin(2 * math.pi * ((t / tl["period"] + tl["phase"]) % 1.0))
+    out = np.empty(4)
+    mujoco.mju_mulQuat(out, q, np.array([math.cos(a / 2), *(math.sin(a / 2) * np.array(tl["axis"]))]))
     return out
 
 

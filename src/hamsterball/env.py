@@ -229,7 +229,8 @@ class HamsterballEnv(gym.Env):
         event = 0.0
         survive = self.task == "survive"
         if survive:  # a point test on the current centre: the region means "stay inside"
-            inside = crosses(self._marker(("region", None)), pos, pos, t=self.core.data.time)
+            region = self._marker(("region", None))
+            inside = crosses(region, pos, pos, t=now, frame=self._frame(region))
             if inside and self._steps >= self._max_steps:
                 self._todo.clear()
         # rerun until nothing new triggers, so one step can complete several targets in task order
@@ -291,7 +292,16 @@ class HamsterballEnv(gym.Env):
     def _target(self, pos):
         """The current target's centre at the current sim time: the nearest live target (spec §9)."""
         now = self.core.data.time
-        return min((centre(self._marker(t), now) for t in self._live()), key=lambda c: np.linalg.norm(c - pos))
+        return min((centre(m, now, self._frame(m)) for m in map(self._marker, self._live())),
+                   key=lambda c: np.linalg.norm(c - pos))
+
+    def _frame(self, marker):
+        """The world pose (pos, quat) of the body an attached marker rides, from the core state's qpos (a driven
+        body's is its motion's pose; ticket 05's passive body has only this); None for a marker that rides none."""
+        if "attach" not in marker:
+            return None
+        qa = self.core.bodies[marker["attach"]][0]
+        return self.core.data.qpos[qa:qa + 3], self.core.data.qpos[qa + 3:qa + 7]
 
     def _potential(self, pos):
         return PHI_SCALE * float(np.linalg.norm(self._target(pos) - pos))

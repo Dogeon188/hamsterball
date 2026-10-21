@@ -74,7 +74,7 @@ A volume in a level that a task reacts to when the hamsterball's centre enters i
 _Avoid_: trigger, checkpoint
 
 **Motion**:
-A scripted movement of a part of a level over sim time: a closed **path** walked at constant speed or a sine **oscillation** along an axis, either with a constant spin about the vertical. A mover's pose is a function of its motion and the sim time alone.
+A scripted movement of a part of a level over sim time: a closed **path** walked at constant speed or a sine **oscillation** along an axis, either with a constant spin about the vertical, and for a kinematic body optionally a **tilt** (a rocking about a horizontal axis). A mover's pose is a function of its motion and the sim time alone.
 _Avoid_: animation, trajectory (a trajectory is a recorded episode)
 
 **Mover**:
@@ -82,7 +82,7 @@ A part of a level that has a motion, such as a drifting survive region.
 _Avoid_: dynamic object, moving marker (alone)
 
 **Kinematic body**:
-A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover.
+A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover. A survive region can **attach** to one and ride it, as on a raft.
 _Avoid_: mocap, moving platform (alone), obstacle (for any solid)
 
 **Kill plane**:

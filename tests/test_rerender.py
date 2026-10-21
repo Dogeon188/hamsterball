@@ -10,6 +10,7 @@ import hamsterball  # noqa: F401  registers the env ids
 from hamsterball.data import Collector, replay, rerender, to_lerobot, to_video
 from test_motion import drift_env, run, track
 from test_moving_hazards import dodge, sweepers_env
+from test_platforms import raft_env
 from test_tasks import toward_target
 
 
@@ -138,4 +139,18 @@ def test_a_survive_pushers_episode_replays_and_rerenders_bit_for_bit(monkeypatch
         out = rerender(src, ("chase",), (24, 32), "test/pushers-rerendered-v0")
     a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
     np.testing.assert_array_equal(b.observations["state"], a.observations["state"])
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_raft_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(raft_env())
+    assert run(env, track)["success"]
+    src = env.create_dataset("test/raft-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/raft-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.rewards, a.rewards)
     np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))

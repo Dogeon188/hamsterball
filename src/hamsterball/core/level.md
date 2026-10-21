@@ -24,6 +24,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - Motion: the survive region may carry a `motion` ([motion.md](motion.md)), loaded with its defaults filled; absent stays absent, so a still level's canonical form and id are unchanged. A hazard may carry one too (ticket survive-movers/02); task markers other than the region don't yet (an unknown key raises). `level.movers()` lists `(geom name, marker)` for every marker with a motion, named as `mjcf()` names its geom; the env poses those geoms. `mjcf()` compiles a moving marker at its authored pose.
 - Kinematic bodies: a level-wide `bodies` list of `{pos, geoms, motion}`. `pos` (default origin) is the body frame's origin, which the motion offsets and a spin turns about; `geoms` (non-empty) are in that frame, validated as level geoms but only `box`, `sphere`, `capsule` (a plane or hfield can't move); `motion` is required ([motion.md](motion.md)). Body `i` compiles as `body<i>`: a free joint, `gravcomp="1"`, an explicit inertial of `BODY_MASS` 1000 kg and `BODY_INERTIA` 1000 kg·m² (geom masses unused), its geoms on contype and conaffinity 1 like level geoms, and `<contact><exclude>` from the world and from every other body. The core drives it ([step.md](step.md)).
 - A survive spawn outside its region (the marker point test of [marker.md](marker.md), with the region at its pose at time 0) raises.
+- Attaching (ticket survive-movers/04): the survive region may set `attach: <i>`, the index (an int) of a body in `bodies`; it is then authored in that body's frame and rides it, tilt included. It can't also have a `motion`. It compiles inside `body<i>` (in `body_mjcf()`, not `mjcf()`), so MuJoCo draws it on the body in every view; its contype 0 and the body's explicit inertial keep it out of contacts and mass. `body_frame(body, t)` is the body's world `(pos, quat)` from its motion. The survive spawn check uses the attached body's frame at time 0. A body's motion may `tilt` ([motion.md](motion.md)).
 
 ## Invariants and checks
 
@@ -52,6 +53,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 
 - 2026-10-22, ticket hamsterball-v1/10: a hand-authored level's canonical form omits `generator` rather than writing `generator: null`, so the provenance block changes no existing level id.
 - 2026-10-22, ticket survive-movers/03: `bodies` is omitted from the canonical form when empty, like `generator`, so no existing level id changes. A body's geoms sit in its own frame (MuJoCo's form), so a spin or a later tilt (ticket 04) turns about `pos`.
+- 2026-10-22, ticket survive-movers/04: a region names its body by index, not by a new body `name` key: bodies compile as `body<i>` already, and an index needs no uniqueness check. Ticket 05's seesaw, if it joins the same `bodies` list, is named the same way.
 
 ## Tried and rejected
 
@@ -69,3 +71,4 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket survive-movers/02: hazards take an optional `motion`; `movers()` lists them as `hazard<i>`; bundled `survive_sweepers`.
 - 2026-10-22, ticket survive-movers/01: added the optional `motion` on the survive region, `Level.movers()`, and the bundled level `survive_drift`.
 - 2026-10-22, ticket survive-movers/03: added `bodies`, `body_mjcf()`, and the bundled level `survive_pushers`. The static-geom MJCF moved into `_geom_mjcf`, shared with body geoms (same output).
+- 2026-10-22, ticket survive-movers/04: `attach` on the survive region, `tilt` on body motions, `body_frame`; bundled `survive_raft`. Levels without either keep their ids.
