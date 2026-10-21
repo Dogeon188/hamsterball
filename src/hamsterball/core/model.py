@@ -53,7 +53,7 @@ def build(tier, level=FLAT):
 
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
 <size nuserdata="{1 + tier.nuserdata}"/>
-<visual><global offwidth="1280" offheight="720"/></visual>
+<visual><global offwidth="1280" offheight="720"/><map znear="0.001"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}
 <worldbody>

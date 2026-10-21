@@ -39,6 +39,7 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
 - The chase and follow cameras aim at the shell centre, so at 84×84 the shell covers the near part of the goal when the goal is straight ahead.
 - Pixels can't show the `first_person` group hiding: from inside, back-face culling already drops the shell sphere and the hamster. The test checks the option itself.
+- Keys (orange) and hazards (red) are close in hue, and the locked goal (faint grey) almost vanishes against the black sky; worth a look in play-test.
 - The background is the clear colour, black: a skybox needs a texture, and spec §11 rules textures out.
 
 ## Decisions
@@ -53,3 +54,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, ticket hamsterball-v1/06: added. Agent finding: `mj_kinematics` alone leaves `cam_xpos` at the pose `mj_step` last saw (it's `mj_camlight` that computes cameras), so the first frame after reset rendered from the origin, all black. The env calls `mj_camlight` after posing.
 - 2026-10-22, ticket hamsterball-v1/06: first picks were chase 2.5 m at 20° and follow 6 m at 40°. In sample frames the shell filled the chase view and hid the goal, and the goal sat on the follow view's top edge, so they moved to 3.0 m at 15° and 35°.
 - 2026-10-22, merge of tickets 03 to 05: the marker colours they added (`MARKER_RGBA`, `HAZARD_RGBA`, `LOCKED_GOAL_RGBA` in `level.py`) join the look constants above, unchanged and still needing play-test. The env sets marker looks before rendering, so a collected item or key vanishes in the same env step's frame.
+- 2026-10-22, ticket hamsterball-v1/06, agent finding from sample frames after merging tickets 03 to 05: on the 30 m `locked_goal` and `waypoint_loop` levels the first-person view's bottom rows were black, because MuJoCo's near clip plane (`znear` 0.01 × the model's extent) passed the ground in front of the eye. `model.build` now sets `znear` 0.001.

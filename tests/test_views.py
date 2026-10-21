@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 
+import gymnasium as gym
 import numpy as np
 import pytest
 
@@ -89,3 +90,10 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
     assert info["state"].shape == (19,) and info["goal"].shape == (10,)
     obs, *_, info = env.step(np.zeros(2, np.float32))
     assert set(obs) == {"chase"} and {"state", "goal"} <= info.keys()
+
+
+def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
+    # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
+    env = gym.make("Hamsterball-v0", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
+    obs, _ = env.reset(seed=0)
+    assert obs["first_person"][-1].min() > 0
