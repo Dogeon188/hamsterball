@@ -81,7 +81,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 1
+    version = 2
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -244,7 +244,8 @@ def _survive(p, rng):
     if rng.random() < 0.5:
         a = b = np.zeros(2)
         flat = p["survive_disc_radius"]
-        region = {"type": "capsule", "fromto": [0.0, 0.0, SHELL_R, 0.0, 0.0, SHELL_R + 1.0], "radius": flat}
+        # a vertical capsule centred at shell-centre height, so the goal vector to its centre lies flat
+        region = {"type": "capsule", "fromto": [0.0, 0.0, SHELL_R - 0.5, 0.0, 0.0, SHELL_R + 0.5], "radius": flat}
         yaw = 0.0
     else:
         phi = rng.uniform(0, math.pi)

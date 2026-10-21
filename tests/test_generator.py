@@ -5,6 +5,7 @@ import pytest
 
 from hamsterball.core.generator import ProceduralGenerator
 from hamsterball.core.level import Level
+from hamsterball.core.marker import centre
 from hamsterball.env import HamsterballEnv
 
 GEN = ProceduralGenerator()
@@ -133,7 +134,7 @@ def test_survive_picks_a_plateau_disc_or_a_ridge_by_seed():
         ridge = f[:2] != f[3:5]
         shapes.append(ridge)
         assert region["radius"] == (p["survive_ridge_width"] / 2 if ridge else p["survive_disc_radius"])
-        assert spawn[:2] == [(f[0] + f[3]) / 2, (f[1] + f[4]) / 2]  # the region's centre
+        assert spawn == list(centre(region))  # the region's centre, at shell-centre height (spec §9)
         assert block["time_limit_s"] == p["survive_duration"]
     assert 5 <= sum(shapes) <= 15
 
@@ -146,11 +147,11 @@ def test_hazards_appear_with_difficulty():
 # sha256 over the space-joined level ids of the sweep, per task. A change here is a change to the generator's
 # output: bump ProceduralGenerator.version and update these (spec §8 Determinism).
 GOLDEN = {
-    "reach_goal": "4b9612a079b89fc4a8332e032d1945f10dad7933986d3ca6482948d731f7d95f",
-    "waypoint_race": "e41b48e03e3e7219d282c6be5add30885004aa836a19acfd4ee586b8ccd1745d",
-    "collect_items": "d02974cabca37357e20062a3b0e184f48e20d9d35dce4006eb37644ee3bc3e67",
-    "unlock_goal": "d38e82312238c601e82a896ef9910cf649067440015262b6d5a32e57d57ce1b4",
-    "survive": "f941cf8e966ed34f2f56a5e20b6deddf5a6175e3057e853f61321cdea15ef029",
+    "reach_goal": "6e3f8fd7f4b144a91893d5997d82d7289e6bb7a8ef172d921fcdbbab681af4e2",
+    "waypoint_race": "6c493b77d593d005ba02a7cdf400f38d52c2ce0fb8e9a0b795fea66813e65d8d",
+    "collect_items": "cc7477d379d5af6bc81eefc5f1f864db9bd99214e43d844b5c9b0c27a2a7a401",
+    "unlock_goal": "a15186c1257975df29189c2262ef914883d26d1125328c7597c83b84d1b85aaf",
+    "survive": "f7f035fc97e48e32926b1ad96bbbff038d4a78a714047aac2bcff75e1c0a3539",
 }
 
 

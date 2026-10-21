@@ -7,7 +7,7 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 ## Interface
 
 - `LevelGenerator`: a `runtime_checkable` protocol with `tasks`, `version`, and `__call__(task, seed, difficulty) -> Level`. The env's `levels=` takes any object that satisfies it (see [env.md](../env.md)).
-- `ProceduralGenerator(**overrides)`: `name = "procedural"`, `version = 1`, `tasks` = all five. Each override is a row of `TABLE` given as `(value at d = 0, value at d = 1)`, such as `ProceduralGenerator(climb_grade=(5, 10))`; an unknown name raises `TypeError`.
+- `ProceduralGenerator(**overrides)`: `name = "procedural"`, `version = 2`, `tasks` = all five. Each override is a row of `TABLE` given as `(value at d = 0, value at d = 1)`, such as `ProceduralGenerator(climb_grade=(5, 10))`; an unknown name raises `TypeError`.
 - `gen(task, seed, difficulty)`: the `Level`, whose `generator` block is `{name, version, task, seed, difficulty}`. `gen.generate(...)` returns `(level, attempts)`, which the golden test uses for the resample failure rate.
 - `gen.params(difficulty)`: every table row at that difficulty.
 - `GenerationError`: raised when 32 attempts all fail.
@@ -23,7 +23,7 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
   4. Hazards: `floor(hazards_per_m · route_length + 0.5)` boxes (half-sizes 0.5, 0.5, 0.25), each at a random spine point and lateral offset within the corridor, at least 2 m from the spawn and every target, with no node of the flood fill's path within its footprint plus a cell. The box is centred 0.5 m above the ground, at shell-centre height, so the marker test catches a shell rolling through it. 20 tries per hazard, then the attempt fails.
   5. The flood fill again with the hazard footprints blocked, then `time_limit_s = path length / 5 m/s · time_slack`.
   - Markers: targets are 1 m spheres at the vertex, 0.5 m above the node below (shell-centre height). The spawn is at the first vertex, 0.5 m above the highest corridor node within 0.5 m, facing the first straight; `follow_yaw_deg` points from the spawn to the last target.
-- Survive (`_survive`): `rng.random() < 0.5` picks a plateau disc: a flat top of `survive_disc_radius` at z = 0, the region a vertical capsule of that radius from 0.5 to 1.5 m, which is a disc at shell-centre height. Otherwise a ridge: a flat top `survive_ridge_width` wide along a random-yaw 8 m segment through the origin, the region a horizontal capsule along it at 0.5 m. Both fall off at `survive_falloff_grade` to a grid edge 4 m past the flat top; no noise. Spawn at the region's centre, (0, 0, 0.5); the time limit is `survive_duration`.
+- Survive (`_survive`): `rng.random() < 0.5` picks a plateau disc: a flat top of `survive_disc_radius` at z = 0, the region a vertical capsule of that radius from 0 to 1 m, centred at shell-centre height (0.5 m), so the goal vector to the region's centre lies flat. Otherwise a ridge: a flat top `survive_ridge_width` wide along a random-yaw 8 m segment through the origin, the region a horizontal capsule along it at 0.5 m. Both fall off at `survive_falloff_grade` to a grid edge 4 m past the flat top; no noise. Spawn at the region's centre, (0, 0, 0.5); the time limit is `survive_duration`.
 - Quantization (`_hfield`): node heights map to uint16 so the lowest is 0 and the highest 65535 (MuJoCo rescales samples to that range anyway); `pos` z is the lowest height and `size[2]` the span, each rounded to the millimetre. Every later step (flood fill, marker heights, kill plane for survive) reads the heights MuJoCo will see, `z0 + q / 65535 · span`. Row 0 is the +y edge (see [level.md](level.md)).
 - Solvability (`_reach`, `_astar`): A* over 8-neighbour node steps, leg by leg from the spawn's node to each target's node in spine order (for unlock goal, the keys then the goal). A step passes if it climbs at most 15° (`dh ≤ tan 15° · step length`) and drops at most `tan 30° · step length + cliff_height`. Nodes outside the corridor (below the kill plane) and hazard footprints block. The path length is the sum of the legs' lengths.
 
@@ -32,7 +32,7 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 - Same (task, seed, difficulty, version) → same level id, on every platform: `uv run pytest tests/test_generator.py -k golden` over 5 tasks × d ∈ {0, 0.25, 0.5, 0.75, 1} × seeds 0–7 (200 levels, about 1 s). It prints the resample failure rate and fails above 25%.
 - Any change to the output bumps `ProceduralGenerator.version` and the golden hashes.
 - Every generated level loads through `Level.from_dict`, so it passes the loader's checks (256×256 grid, 0.25 m cells).
-- `uv run pytest tests/test_generator.py`: provenance, the table rows and overrides, marker counts, cliffs only from d = 0.5, `GenerationError`, the time limit against the straight-line route, survive's 50/50 shapes, hazard counts, the hamsterball resting at a spawn, the test_tasks scripted controller finishing reach goal, waypoint race, and unlock goal at d = 0.2, and an inputless survive on a d = 0 plateau.
+- `uv run pytest tests/test_generator.py`: provenance, the table rows and overrides, marker counts, cliffs only from d = 0.5, `GenerationError`, the time limit against the straight-line route, survive's 50/50 shapes with the spawn at the region's centre, hazard counts, the hamsterball resting at a spawn, the test_tasks scripted controller finishing reach goal, waypoint race, and unlock goal at d = 0.2, and an inputless survive on a d = 0 plateau.
 
 ## Known quirks
 
@@ -59,3 +59,4 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/10: added, with the `generator` provenance block in [level.md](level.md).
+- 2026-10-22, code review of hamsterball-v1: the plateau disc's region (capsule from 0.5 to 1.5 m) had its centre 0.5 m above the shell centre, so the goal vector and shaping pointed upward; spec §9 makes the region centre the current target. The capsule now runs 0 to 1 m. Version 1 → 2; golden hashes regenerated.
