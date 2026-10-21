@@ -47,15 +47,19 @@ def _shell_xml():
 
 
 def build(tier, level=FLAT):
-    """Compile the shell, the tier's fragment, and the level (top-level MJCF sections: assets, worldbody geoms)."""
+    """Compile the shell, the tier's fragment, the view mocaps, and the level (top-level MJCF sections: assets,
+    worldbody geoms)."""
+    from .views import FRAGMENT as VIEWS  # views imports this module's ids
+
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
 <size nuserdata="{1 + tier.nuserdata}"/>
-<visual><global offwidth="1280" offheight="720"/></visual>
+<visual><global offwidth="1280" offheight="720"/><map znear="0.001"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}
 <worldbody>
 {_shell_xml()}
 {tier.fragment}
+{VIEWS}
 </worldbody></mujoco>"""
     m = mujoco.MjModel.from_xml_string(xml)
     assert m.body("shell").id == SHELL and m.body("hamster").id == HAM

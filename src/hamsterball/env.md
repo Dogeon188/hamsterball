@@ -7,13 +7,15 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 ## Interface
 
 - `import hamsterball` registers spec §2's six ids at `hamsterball.ENV_VERSION` (N = 0), each with `entry_point="hamsterball.env:HamsterballEnv"`: `Hamsterball-v0` (every kwarg free) and the presets `HamsterballReachGoal`, `HamsterballWaypointRace`, `HamsterballCollectItems`, `HamsterballUnlockGoal`, `HamsterballSurvive`, each fixing `tasks` to its one task. `hamsterball.register_ids(n)` also registers every version below n as an id whose entry point raises `gymnasium.error.DeprecatedEnv` naming the release to install (`hamsterball==<old N>.*`).
-- `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, frame_skip=10, time_limit_s=None, shaped=False, shaping_gamma=0.99, model_cache=16)`. `levels` is a list of `Level` objects, bundled level names (stems in `hamsterball/levels/`), level file paths, or directories (their `*.yaml`); `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
-- `env.tasks`, `env.tier`, `env.camera_action`, `env.frame_skip`, `env.shaped`: the constructor's values; the Collector writes the space-shaping ones into the dataset's `env_spec` (see [collector.md](data/collector.md)).
+- `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, views=(), view_size=(84, 84), obs_state=True, frame_skip=10, time_limit_s=None, shaped=False, shaping_gamma=0.99, model_cache=16)`. `levels` is a list of `Level` objects, bundled level names (stems in `hamsterball/levels/`), level file paths, or directories (their `*.yaml`); `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
+- `env.tasks`, `env.tier`, `env.camera_action`, `env.frame_skip`, `env.shaped`, `env.views`, `env.view_size`, `env.obs_state`: the constructor's values; the Collector writes the space-shaping ones into the dataset's `env_spec` (see [collector.md](data/collector.md)).
 - `env.set_levels(levels)`: replaces the pool from the next reset, with the same entries and the same check; on a vector env, `venv.call("set_levels", levels)`.
 - `reset(seed=None, options=None)`: `options` may hold `level` (a `Level` or canonical YAML string) and `task`; see How it works.
 - `DiscreteAction(env)`: a wrapper with `Discrete(25)`: 0 is a no-op; `1 + 8·e + k` runs toward `k·45°` clockwise from camera forward (k = 0 forward, 2 right, 4 back) at effort `(0.25, 0.5, 1.0)[e]`. Under the camera flag `cam_yaw` stays 0.
 - Action: the core's (`[run_x, run_y]`, plus `cam_yaw` under `camera_action`).
-- Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables.
+- Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables, plus one `Box(0, 255, (H, W, 3), uint8)` per entry of `views` (see [core/views.md](core/views.md)). `obs_state=False` drops `state` and `goal`, and then needs at least one view.
+- `close()` frees the renderers; the LRU keeps each level's compiled model and its renderer in one entry, so they evict together.
+- Importing `hamsterball` sets `MUJOCO_GL=egl` on Linux unless it's already set (`osmesa` is the CPU fallback, set by hand); macOS leaves it unset (CGL). An env with views raises under `MUJOCO_GL=glfw`.
 - `info` on every step: `core_state`, `state`, `goal`, `success`, `failure_reason` (`None`, `"hazard"`, `"kill_plane"`, or `"left_region"`), `reward_terms` (`event`, `time`, `shaping`). On reset: `reset_options` (`{level: canonical YAML, level_id, task}`), `core_state`, `state`, `goal`.
 - Bundled levels, at least one per task, each a box platform over a kill plane at −5 m:
   - `first_goal` (reach goal): 20 m square, goal sphere (1 m) 8 m along +y, 30 s.
@@ -32,6 +34,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - Survive never truncates: at its step limit the shell is either inside (success) or outside (`left_region`), and both terminate.
 - Shaping (`shaped=True`): Φ = −0.01 × the distance from the shell centre to the current target (its centre), and Φ = 0 at a terminated state (success or failure; truncation isn't terminal). The step's term is `γ·Φ(s′) − Φ(s)`, where Φ(s) is the value stored at the previous step, so a target switch within the step shows as a jump.
 - Marker looks: marker geoms are named `<task>/<key>` or `<task>/<key>/<i>` (see [level.md](core/level.md)). Reset sets every marker geom's `rgba`: the episode task's markers take their kind's colour, other tasks' markers alpha 0, and the unlock goal `LOCKED_GOAL_RGBA` (grey, fainter). A collected item or key goes to alpha 0, and the unlock goal takes the goal colour when the last key is in. Episodes on a level share its cached model, so reset restores every look.
+- Views: every env step, `views.pose` places the view mocaps (whether or not `views` is set, since the core state holds their poses). With views, `mj_kinematics` and `mj_camlight` carry the poses to the cameras, then one `mujoco.Renderer` per level, at `view_size`, held in that level's `model_cache` LRU entry beside its compiled core (an evicted entry closes its renderer) and with shadows off, draws each view with its `MjvOption`. The renderer is made lazily on the first render, so on the thread and in the process that steps the env.
 - Observation: after stepping, the env recomputes derived quantities (`mj_kinematics`, `mj_comPos`, `mj_comVel`, `mj_subtreeVel`), which leaves the core state untouched. Vectors rotate into the camera yaw frame by −yaw about z; the shell's angular velocity first goes from the free joint's body frame to the world. Lean and relative velocity use the hamster subtree's centre of mass and its velocity, so an articulated tier reads the same.
 
 ## Invariants and checks
@@ -46,8 +49,9 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - The step-limit conversion subtracts 1e-9 before `ceil`, so a whole number of env steps doesn't round up through float error.
 - Waypoints stay visible once passed; spec §7 hides only collected items and keys.
 - A marker test runs on the whole step's segment, not the part after the previous target, so a step that crosses waypoint i + 1 before i (in space) still counts both when it also crosses i.
-- Not yet: views, `obs_state`, `make_vec` and the ids' `vector_entry_point`, and the generator's `difficulty` (kwarg, reset option, and `set_levels(..., difficulty=)`). Those are tickets 06 and 14 and the generator ticket.
+- Not yet: `make_vec` and the ids' `vector_entry_point`, and the generator's `difficulty` (kwarg, reset option, and `set_levels(..., difficulty=)`). Those are ticket 14 and the generator ticket.
 - `action_space` comes from compiling the pool's first level, which takes one LRU slot.
+- The `MUJOCO_GL` default only takes effect if `hamsterball` is imported before `mujoco`.
 
 ## Decisions
 
@@ -69,5 +73,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/03: waypoint race, collect items, unlock goal, marker looks, and `shaped`/`shaping_gamma`, with a bundled level per task.
 - 2026-10-22, ticket hamsterball-v1/04: added the survive task, hazards, and the `first_survive` level.
 - 2026-10-22, ticket hamsterball-v1/05: bundled the `hill` hfield level; a run straight at the goal climbs over the hill (shell centre above 0.8 m) and succeeds.
+- 2026-10-22, ticket hamsterball-v1/06: added `views`, `view_size`, `obs_state`, and `close()`; `info` now takes `state` and `goal` from the vectors, not the observation.
 - 2026-10-22, ticket hamsterball-v1/07: reset options and `info['reset_options']`, directories in the pool, `set_levels`, the `model_cache` LRU, the six ids with retired versions, and `DiscreteAction`.
+- 2026-10-22, merge of ticket 07 into ticket 06: each `model_cache` entry is `[core, renderer or None]`, so a renderer evicts with its model (spec §7, §11), replacing ticket 06's separate unbounded renderer cache.
 - 2026-10-22, ticket hamsterball-v1/08: stores `tier` as an attribute, for the Collector's `env_spec`.
