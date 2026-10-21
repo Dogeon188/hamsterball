@@ -8,9 +8,31 @@ import gymnasium as gym
 import minari
 import mujoco
 import numpy as np
+import pyarrow as pa
 from minari.data_collector.callbacks import EpisodeMetadataCallback, StepDataCallback
+from minari.dataset._storages import arrow_storage
 
 from ..core.generator import LevelGenerator
+
+_encode_info = arrow_storage._encode_info
+
+
+def _encode_core_state(info):
+    """Minari's info encoder, but `core_state` as a variable-length list: its size depends on the level (kinematic
+    bodies add qpos and qvel), and Minari's fixed-size list per episode can't be read back across sizes. Decoding
+    needs no change: each episode's rows have one size, so Minari's np.stack gives a (steps, size) array as before."""
+    if "core_state" not in info:
+        return _encode_info(info)
+    rows = list(np.stack(info["core_state"]))
+    arrays, fields = [pa.array(rows, pa.list_(pa.float64()))], [pa.field("core_state", pa.list_(pa.float64()))]
+    if rest := {k: v for k, v in info.items() if k != "core_state"}:
+        other = _encode_info(rest)
+        arrays += other.flatten()
+        fields += list(other.type)
+    return pa.StructArray.from_arrays(arrays, fields=fields)
+
+
+arrow_storage._encode_info = _encode_core_state  # Minari internal: every arrow write in this process goes through it
 
 
 class _StepData(StepDataCallback):

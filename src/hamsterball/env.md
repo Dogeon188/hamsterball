@@ -27,6 +27,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
   - `hill` (reach goal): `first_goal` with a 0.4 m round hfield hill (`hill.png`, 11×11, 5 m square) centred 4 m along +y, on the way to the goal.
   - `first_survive` (survive): 20 m square, a capsule region (radius 2 m, axis x = −1 to 1 m) around the spawn, 10 s.
   - `survive_drift` (survive): 20 m square, a 3 m square box region that walks a closed 24 m path (period 20 s, so 1.2 m/s) while spinning at 18°/s, 20 s. An inputless hamsterball leaves it at env step 83; the velocity-tracking controller of `tests/test_motion.py` survives the 1200 steps.
+  - `survive_pushers` (survive): 16 m square, a sphere region (3.5 m) round the spawn, and two 3 m kinematic bars (orange) sweeping across it, one along x (amplitude 5 m, period 6 s) and one along y (5 m, 9 s), 20 s. An inputless hamsterball is shoved out at env step 123 (`left_region`). Play-test pending: whether stepping aside dodges the bars often enough.
 
 ## How it works
 
@@ -78,6 +79,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, ticket hamsterball-v1/10: with a generator the env draws the seed before the task, as spec §10 orders level before task, though the generator needs the task to build the level.
 - 2026-10-22, ticket hamsterball-v1/14: `make_vec` lives in `env.py` beside the env; the project owns no vector env (issue 23). Each worker builds its env from a `functools.partial(HamsterballEnv, **kwargs)`, which pickles under `spawn`; the renderer is already lazy, so it's made in the worker. `vectorization_mode="sync"` keeps Gymnasium's own path and next-step autoreset default rather than being forced to same-step, since Gymnasium never calls the entry point in that mode.
 - 2026-10-22, ticket hamsterball-v1/09: `step` is the physics then `_advance()`; `step_to` swaps the physics for a stored core state, so re-render reuses the marker tests, marker looks, and view posing instead of copying them.
+- 2026-10-22, ticket survive-movers/03: the env builds each `Core` from the `Level` itself (not its MJCF), so the core gets the level's kinematic bodies and their motions; the env does nothing else for bodies, which move in the core state and so in every view, the game, replay, and re-render.
 
 ## Tried and rejected
 
@@ -106,3 +108,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 - 2026-10-22, user play-test request: passed waypoints turn dim green (`PASSED_RGBA` in [level.py](core/level.md)) so the next one stands out; reset restores the waypoint colour. Pixels only, so N stays.
 - 2026-10-22, user play-test request: waypoints are locked in order, so every waypoint after the next renders in the locked grey (`LOCKED_RGBA`, renamed from `LOCKED_GOAL_RGBA`) and turns blue when it becomes next. Pixels only, so N stays.
 - 2026-10-22, ticket survive-movers/01: movers read at the current sim time; moving marker geoms posed per observation; bundled `survive_drift`. Tests that relied on `first_survive` being the only survive level in the default pool now pin `levels=["first_survive"]`.
+- 2026-10-22, ticket survive-movers/03: bundled `survive_pushers`; `tests/test_menu.py`'s survive list gains it. `_core` passes the `Level` to `Core`. Fingerprint of every other bundled level × task (id, model sizes, 200 seeded env steps of core states and goals) byte-identical before and after, so N stays 0.

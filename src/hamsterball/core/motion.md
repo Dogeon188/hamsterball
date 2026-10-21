@@ -35,3 +35,4 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 ## History
 
 - 2026-10-22, ticket survive-movers/01: added, for the drifting survive region of `survive_drift`.
+- 2026-10-22, ticket survive-movers/03: kinematic bodies reuse `pose`. Their velocity is the secant over one physics step (in `step.drive_bodies`), not an analytic derivative beside `pose`, which the Known quirks entry anticipated: it lands the integrator exactly on the next pose and needs no second set of formulas.

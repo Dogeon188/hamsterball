@@ -81,6 +81,10 @@ _Avoid_: animation, trajectory (a trajectory is a recorded episode)
 A part of a level that has a motion, such as a drifting survive region.
 _Avoid_: dynamic object, moving marker (alone)
 
+**Kinematic body**:
+A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover.
+_Avoid_: mocap, moving platform (alone), obstacle (for any solid)
+
 **Kill plane**:
 A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height

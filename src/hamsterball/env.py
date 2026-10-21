@@ -113,7 +113,7 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            core = Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size)
+            core = Core(AbstractTier(), level, self.camera_action, self.view_size)
             m = core.model
             movers = [(g, mk["motion"], m.geom_pos[g].copy(), m.geom_quat[g].copy())
                       for g, mk in ((m.geom(name).id, mk) for name, mk in level.movers())]

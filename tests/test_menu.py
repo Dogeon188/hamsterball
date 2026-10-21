@@ -13,7 +13,7 @@ def test_the_level_list_holds_the_levels_supporting_the_task_then_generated(tmp_
     from hamsterball.env import LEVELS_DIR
 
     assert menu.level_choices(LEVELS_DIR, "reach_goal") == ["first_goal", "hill", "generated"]
-    assert menu.level_choices(LEVELS_DIR, "survive") == ["first_survive", "survive_drift", "generated"]
+    assert menu.level_choices(LEVELS_DIR, "survive") == ["first_survive", "survive_drift", "survive_pushers", "generated"]
     (tmp_path / "broken.yaml").write_text("tasks: [")
     (tmp_path / "goal.yaml").write_text((LEVELS_DIR / "first_goal.yaml").read_text())
     assert menu.level_choices(tmp_path, "reach_goal") == ["goal", "generated"]  # a malformed file is left out

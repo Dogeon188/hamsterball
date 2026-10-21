@@ -1,8 +1,8 @@
 """The core step (spec §4): camera yaw, shell drag, containment, then the tier's drive, once per physics step.
 
-Every per-step function is a pure function of model and data fields plus the action. All state lives in qpos,
-qvel and userdata (slot 0 the camera yaw, the tier's slots after it), so one mj_getState(mjSTATE_INTEGRATION)
-vector is the core state.
+Every per-step function is a pure function of model and data fields plus the action (and a level's constant body
+motions). All state lives in time, qpos, qvel and userdata (slot 0 the camera yaw, the tier's slots after it), so one
+mj_getState(mjSTATE_INTEGRATION) vector is the core state.
 """
 
 import math
@@ -13,6 +13,8 @@ import mujoco
 import numpy as np
 
 from .abstract_tier import AbstractTier
+from .level import Level
+from .motion import pose
 from .model import DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF, SHELL_QPOS, build
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
@@ -103,9 +105,29 @@ def contain(model, data, resting_radius):
         mujoco.mj_forward(model, data)
 
 
-def physics_step(model, data, tier, action, cam):
-    """One physics step. action is the tier's part; cam is the orbit input in [-1, 1]."""
+def _yaw_quat(yaw):
+    return np.array([math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2)])
+
+
+def drive_bodies(data, bodies):
+    """Pose each kinematic body at its motion's pose at data.time, with the velocity that carries it to the pose one
+    step later (the secant, so friction sees the body's real motion). bodies: (qpos adr, dof adr, pos, motion)."""
+    t = data.time
+    for qa, da, pos, motion in bodies:
+        (o0, y0), (o1, y1) = pose(motion, t), pose(motion, t + DT)
+        q0, q1 = _yaw_quat(y0), _yaw_quat(y1)
+        data.qpos[qa:qa + 3] = pos + o0
+        data.qpos[qa + 3:qa + 7] = q0
+        data.qvel[da:da + 3] = (o1 - o0) / DT
+        w = np.empty(3)
+        mujoco.mju_subQuat(w, q1, q0)  # q0 * quat(w) = q1: the turn in the body frame, as a free joint's qvel is
+        data.qvel[da + 3:da + 6] = w / DT
+
+
+def physics_step(model, data, tier, action, cam, bodies=()):
+    """One physics step. action is the tier's part; cam is the orbit input in [-1, 1]; bodies as `drive_bodies`."""
     data.xfrc_applied.fill(0)
+    drive_bodies(data, bodies)
     # mj_step leaves positions computed for the state before it, so refresh them: the step then reads only the state
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
@@ -117,12 +139,20 @@ def physics_step(model, data, tier, action, cam):
 
 
 class Core:
-    """A compiled hamsterball and its data. Holds constants only; the state is in data."""
+    """A compiled hamsterball and its data. Holds constants only (the level's body motions among them); the state is
+    in data."""
 
     def __init__(self, tier: Tier | None = None, level=FLAT, camera_action=False, view_size=GAME_SIZE):
+        """`level` is a Level, or MJCF sections as `model.build` takes them (no kinematic bodies)."""
         self.tier = tier or AbstractTier()
         self.camera_action = camera_action
-        self.model = build(self.tier, level, view_size)
+        if isinstance(level, Level):
+            self.model = m = build(self.tier, level.mjcf(), view_size, level.body_mjcf())
+            ids = [m.body(f"body{i}").id for i in range(len(level.bodies))]
+            self.bodies = [(int(m.jnt_qposadr[m.body_jntadr[b]]), int(m.jnt_dofadr[m.body_jntadr[b]]),
+                            np.array(lb["pos"]), lb["motion"]) for b, lb in zip(ids, level.bodies)]
+        else:
+            self.model, self.bodies = build(self.tier, level, view_size), []
         self.data = mujoco.MjData(self.model)
         self.reset()
 
@@ -143,6 +173,7 @@ class Core:
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
         self.tier.reset(m, d, spawn)
         d.userdata[0] = yaw
+        drive_bodies(d, self.bodies)
         mujoco.mj_forward(m, d)
 
     def step(self, action, n=FRAME_SKIP):
@@ -152,7 +183,7 @@ class Core:
         if self.camera_action:
             action, cam = action[:-1], float(action[-1])
         for _ in range(n):
-            physics_step(m, d, tier, action, cam)
+            physics_step(m, d, tier, action, cam, self.bodies)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))
