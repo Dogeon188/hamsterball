@@ -1,6 +1,7 @@
 """The Gymnasium env over the core (spec §9, §10): level and task per episode, observations, markers, reward, info."""
 
 import math
+from collections import OrderedDict
 from pathlib import Path
 
 import gymnasium as gym
@@ -19,12 +20,14 @@ TIME_PENALTY = -0.001  # per env step
 PHI_SCALE = -0.01  # shaping potential per metre to the current target
 
 
-def _level(x):
-    """A Level, a bundled level's name, or a path to a level file."""
+def _levels(x):
+    """The levels one pool entry names: a Level, a bundled level's name, a level file, or a directory of them."""
     if isinstance(x, Level):
-        return x
+        return [x]
     p = Path(x)
-    return Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")
+    if p.is_dir():
+        return [Level.load(f) for f in sorted(p.glob("*.yaml"))]
+    return [Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")]
 
 
 class HamsterballEnv(gym.Env):
@@ -32,20 +35,17 @@ class HamsterballEnv(gym.Env):
 
     def __init__(
         self, tasks, levels=None, tier="abstract", camera_action=False, frame_skip=FRAME_SKIP, time_limit_s=None,
-        shaped=False, shaping_gamma=0.99,
+        shaped=False, shaping_gamma=0.99, model_cache=16,
     ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
         self.tasks = list(tasks)
-        pool = [_level(x) for x in (sorted(LEVELS_DIR.glob("*.yaml")) if levels is None else levels)]
-        self.levels = [lv for lv in pool if any(t in lv.tasks for t in self.tasks)]
-        if not self.levels:
-            raise ValueError(f"no level in the pool supports any of {self.tasks}")
+        self.set_levels([LEVELS_DIR] if levels is None else levels)
         self.camera_action = camera_action
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
         self.shaped, self.shaping_gamma = shaped, shaping_gamma
-        self._cores = {}  # ponytail: unbounded, keyed by level id; spec §7's model_cache LRU when pools grow
+        self._cores, self.model_cache = OrderedDict(), model_cache  # LRU of compiled cores, keyed by level id
         self.action_space = self._core(self.levels[0]).action_space
         inf = np.float32(np.inf)
         self.observation_space = gym.spaces.Dict(
@@ -54,15 +54,19 @@ class HamsterballEnv(gym.Env):
         )
 
     def _core(self, level):
-        if level.id not in self._cores:
+        """The level's compiled core, from the LRU or compiled now (evicting the least recent)."""
+        if level.id in self._cores:
+            self._cores.move_to_end(level.id)
+        else:
             self._cores[level.id] = Core(AbstractTier(), level.mjcf(), self.camera_action)
+            if len(self._cores) > self.model_cache:
+                self._cores.popitem(last=False)
         return self._cores[level.id]
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.level = self.levels[self.np_random.integers(len(self.levels))]
-        allowed = [t for t in self.tasks if t in self.level.tasks]
-        self.task = allowed[self.np_random.integers(len(allowed))]
+        options = options or {}
+        self.level, self.task = self._draw(options.get("level"), options.get("task"))
         block = self.level.tasks[self.task]
         self.core = self._core(self.level)
         self.core.reset(block["spawn"]["pos"], math.radians(block["spawn"]["yaw_deg"]))
@@ -88,7 +92,34 @@ class HamsterballEnv(gym.Env):
         obs = self._observe()
         self._prev = obs["state"][:3].astype(float)  # at reset the swept segment is a point
         self._phi = self._potential(self._prev)
-        return obs, {"core_state": self.core.state(), **obs}
+        reset_options = {"level": self.level.canonical(), "level_id": self.level.id, "task": self.task}
+        return obs, {"reset_options": reset_options, "core_state": self.core.state(), **obs}
+
+    def _draw(self, level, task):
+        """Spec §10's option cases: the given fields as given, the missing ones from np_random, level first."""
+        pick = lambda xs: xs[self.np_random.integers(len(xs))]  # noqa: E731
+        if level is None:
+            pool = [lv for lv in self.levels if (task in lv.tasks if task else self._allowed(lv))]
+            if not pool:
+                raise ValueError(f"no pool level supports {task or self.tasks}")
+            level = pick(pool)
+        elif not isinstance(level, Level):
+            level = Level.from_yaml(level)  # a canonical YAML string
+        if task is None:
+            task = pick(self._allowed(level) or list(level.tasks))
+        if task not in level.tasks:
+            raise ValueError(f"level {level.id[:12]} doesn't support task {task!r}")
+        return level, task
+
+    def _allowed(self, level):
+        return [t for t in self.tasks if t in level.tasks]
+
+    def set_levels(self, levels):
+        """Replace the level pool from the next reset: bundled names, paths, directories, or Level objects."""
+        pool = [lv for x in levels for lv in _levels(x)]
+        if not any(self._allowed(lv) for lv in pool):
+            raise ValueError(f"no level in the pool supports any of {self.tasks}")
+        self.levels = pool
 
     def step(self, action):
         self.core.step(np.asarray(action), n=self.frame_skip)
@@ -197,3 +228,23 @@ class HamsterballEnv(gym.Env):
             # fraction remaining; survive's is time left over the time limit, in env steps
             goal[4] = 1 - self._steps / self._max_steps if self.task == "survive" else len(self._todo) / self._n_targets
         return {"state": state, "goal": goal}
+
+
+class DiscreteAction(gym.ActionWrapper):
+    """Spec §5: action 0 is a no-op; 1 + 8·e + k runs toward k·45° clockwise from camera forward at effort EFFORTS[e].
+
+    Under the camera flag, cam_yaw stays 0.
+    """
+
+    EFFORTS = (0.25, 0.5, 1.0)
+
+    def __init__(self, env):
+        super().__init__(env)
+        self._table = np.zeros((25, *env.action_space.shape), np.float32)
+        for j in range(24):
+            e, th = self.EFFORTS[j // 8], math.radians(45 * (j % 8))
+            self._table[1 + j, :2] = e * math.sin(th), e * math.cos(th)
+        self.action_space = gym.spaces.Discrete(25)
+
+    def action(self, action):
+        return self._table[action]
