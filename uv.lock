@@ -125,18 +125,26 @@ name = "hamsterball"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "gymnasium" },
-    { name = "minari", extra = ["arrow", "create"] },
     { name = "mujoco" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "pillow" },
     { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
+all = [
+    { name = "glfw" },
+    { name = "imgui-bundle" },
+    { name = "minari", extra = ["arrow", "create"] },
+    { name = "pillow" },
+]
+data = [
+    { name = "minari", extra = ["arrow", "create"] },
+    { name = "pillow" },
+]
 game = [
-    { name = "click" },
     { name = "glfw" },
     { name = "imgui-bundle" },
 ]
@@ -148,17 +156,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", marker = "extra == 'game'" },
+    { name = "click", specifier = ">=8.1" },
     { name = "glfw", marker = "extra == 'game'" },
     { name = "gymnasium", specifier = ">=1.4,<2" },
+    { name = "hamsterball", extras = ["data", "game"], marker = "extra == 'all'" },
     { name = "imgui-bundle", marker = "extra == 'game'" },
-    { name = "minari", extras = ["arrow", "create"], specifier = "==0.5.*" },
+    { name = "minari", extras = ["arrow", "create"], marker = "extra == 'data'", specifier = "==0.5.*" },
     { name = "mujoco", specifier = "==3.16.0" },
     { name = "numpy" },
-    { name = "pillow", specifier = ">=13.0.0" },
+    { name = "pillow", marker = "extra == 'data'", specifier = ">=13.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
-provides-extras = ["game"]
+provides-extras = ["data", "game", "all"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]

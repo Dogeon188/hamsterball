@@ -30,7 +30,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 ## Known quirks
 
-- Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the core dependencies are `minari[arrow,create]==0.5.*` and `pillow`, beyond spec §2's `minari[arrow]`.
+- Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the `data` extra holds `minari[arrow,create]==0.5.*` and `pillow`. Install `hamsterball[data]` to record or replay.
 - Minari 0.5.4 runs the episode metadata callback only in `create_dataset`, and its `add_to_dataset` copies episodes through `MinariStorage.update_from_storage`, which rebuilds each from its steps and drops the seed and options. The Collector's `add_to_dataset` writes them back with the callback's fields.
 - Minari's episode buffer stores a `Dict` observation in sorted key order (jax's `tree_map`), but `update_from_storage` re-encodes in the space's key order. With any other order an appended episode gets a different Arrow schema and reading the dataset fails with `ArrowTypeError`, so `OBSERVATION` lists `goal` before `state`.
 - `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`.
@@ -43,6 +43,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - 2026-10-22, ticket hamsterball-v1/08: the Collector casts actions to the action space dtype, since Minari stores them as float32 and a float64 action would replay differently.
 
 - 2026-10-22, ticket hamsterball-v1/08: the stored observation is always `state` and `goal` from `info`, never pixels (spec §12), so a pixel env's dataset has a different observation space from the env that `recover_environment()` rebuilds.
+- 2026-10-22, user ruling: Minari and pillow move out of the core dependencies into a `data` extra, so the env installs without jax (~58 MB). Spec §2 updated. `tests/test_data.py` skips without the extra.
 
 ## Tried and rejected
 

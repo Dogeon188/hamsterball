@@ -5,6 +5,7 @@ import hashlib
 import struct
 import zlib
 from dataclasses import asdict, dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -70,9 +71,15 @@ class Level:
         return cls.from_yaml(Path(path).read_text(), Path(path).parent)
 
     def canonical(self):
+        return self._canonical
+
+    # Cached on first read: a 256x256 hfield takes ~0.1 s to serialise, and the env reads both on every reset.
+    # So edit a Level only before its first canonical() or id.
+    @cached_property
+    def _canonical(self):
         return yaml.safe_dump(asdict(self), sort_keys=True)
 
-    @property
+    @cached_property
     def id(self):
         return hashlib.sha256(self.canonical().encode()).hexdigest()
 

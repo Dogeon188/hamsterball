@@ -4,9 +4,10 @@ import importlib.metadata
 import platform
 
 import gymnasium as gym
-import minari
 import numpy as np
 import pytest
+
+minari = pytest.importorskip("minari")
 
 import hamsterball  # noqa: F401  registers the env ids
 from hamsterball.data import Collector, ReplayMismatch, replay
