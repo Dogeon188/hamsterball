@@ -1,0 +1,10 @@
+# A 20 m square platform with the goal 8 m ahead of the spawn; past its edges the hamsterball falls to the kill plane.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [10, 10, 0.5]}
+tasks:
+  reach_goal:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    goal: {type: sphere, pos: [0, 8, 0.5], radius: 1}
+    time_limit_s: 30
