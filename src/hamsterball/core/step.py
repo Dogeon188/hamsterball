@@ -26,6 +26,8 @@ FIELD_START, FIELD_HARD = 0.005, 0.020  # m past the resting radius: containment
 MU = M_HAM * M_SHELL / (M_HAM + M_SHELL)  # the pair's reduced mass
 STATE = mujoco.mjtState.mjSTATE_INTEGRATION
 TAU = 2 * math.pi
+G = 9.81  # m/s^2, a fallen tile's acceleration (MuJoCo's default gravity)
+TILE_DROP = 1.0  # m under the kill plane where a fallen tile stays
 
 
 class Tier(Protocol):
@@ -124,10 +126,46 @@ def drive_bodies(data, bodies):
         data.qvel[da + 3:da + 6] = w / DT
 
 
-def physics_step(model, data, tier, action, cam, bodies=()):
-    """One physics step. action is the tier's part; cam is the orbit input in [-1, 1]; bodies as `drive_bodies`."""
+def _fall(s, bottom):
+    """A tile's z offset s seconds into its fall: free fall at g, held at `bottom` (under the kill plane)."""
+    return 0.0 if s <= 0 else max(-0.5 * G * s * s, bottom)
+
+
+def drive_tiles(data, tiles):
+    """Pose each collapsing tile from data.time and its trigger time (its userdata slot, +inf until the shell touches
+    it): at rest until `delay` after the trigger, then falling, with the secant velocity as `drive_bodies`.
+    tiles: (first slot, first body id, delay, [(qpos adr, dof adr, pos, bottom)]), or None."""
+    if tiles is None:
+        return
+    slot, _, delay, adrs = tiles
+    t = data.time
+    for i, (qa, da, pos, bottom) in enumerate(adrs):
+        start = data.userdata[slot + i] + delay
+        z0, z1 = _fall(t - start, bottom), _fall(t + DT - start, bottom)
+        data.qpos[qa:qa + 3] = pos
+        data.qpos[qa + 2] += z0
+        data.qpos[qa + 3:qa + 7] = (1.0, 0.0, 0.0, 0.0)
+        data.qvel[da:da + 6] = (0.0, 0.0, (z1 - z0) / DT, 0.0, 0.0, 0.0)
+
+
+def touch_tiles(model, data, tiles):
+    """Store data.time in the slot of every untouched tile the shell touches. Call right after mj_step: its contacts
+    come from the state the step started from, so this reads only the core state."""
+    if tiles is None or not data.ncon:
+        return
+    slot, b0, _, adrs = tiles
+    for b1, b2 in model.geom_bodyid[data.contact.geom[:data.ncon]].tolist():
+        i = (b2 if b1 == SHELL else b1 if b2 == SHELL else -1) - b0
+        if 0 <= i < len(adrs) and data.userdata[slot + i] == math.inf:
+            data.userdata[slot + i] = data.time
+
+
+def physics_step(model, data, tier, action, cam, bodies=(), tiles=None):
+    """One physics step. action is the tier's part; cam is the orbit input in [-1, 1]; bodies as `drive_bodies`,
+    tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
+    drive_tiles(data, tiles)
     # mj_step leaves positions computed for the state before it, so refresh them: the step then reads only the state
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
@@ -136,6 +174,7 @@ def physics_step(model, data, tier, action, cam, bodies=()):
     contain(model, data, tier.resting_radius)
     tier.drive(model, data, action, yaw)
     mujoco.mj_step(model, data)
+    touch_tiles(model, data, tiles)
 
 
 class Core:
@@ -147,12 +186,17 @@ class Core:
         self.tier = tier or AbstractTier()
         self.camera_action = camera_action
         if isinstance(level, Level):
-            self.model = m = build(self.tier, level.mjcf(), view_size, level.body_mjcf())
+            c = level.collapse
+            self.model = m = build(self.tier, level.mjcf(), view_size, level.body_mjcf() + level.tile_mjcf(),
+                                   len(c["tiles"]) if c else 0)
+            free = lambda b: (int(m.jnt_qposadr[m.body_jntadr[b]]), int(m.jnt_dofadr[m.body_jntadr[b]]))  # noqa: E731
             ids = [m.body(f"body{i}").id for i in range(len(level.bodies))]
-            self.bodies = [(int(m.jnt_qposadr[m.body_jntadr[b]]), int(m.jnt_dofadr[m.body_jntadr[b]]),
-                            np.array(lb["pos"]), lb["motion"]) for b, lb in zip(ids, level.bodies)]
+            self.bodies = [(*free(b), np.array(lb["pos"]), lb["motion"]) for b, lb in zip(ids, level.bodies)]
+            self.tiles = c and (1 + self.tier.nuserdata, m.body("tile0").id, c["delay"],
+                                [(*free(m.body(f"tile{i}").id), np.array(g["pos"]),
+                                  level.kill_plane_z - TILE_DROP - g["pos"][2]) for i, g in enumerate(c["tiles"])])
         else:
-            self.model, self.bodies = build(self.tier, level, view_size), []
+            self.model, self.bodies, self.tiles = build(self.tier, level, view_size), [], None
         self.data = mujoco.MjData(self.model)
         self.reset()
 
@@ -173,7 +217,10 @@ class Core:
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
         self.tier.reset(m, d, spawn)
         d.userdata[0] = yaw
+        if self.tiles:
+            d.userdata[self.tiles[0]:] = math.inf  # untouched
         drive_bodies(d, self.bodies)
+        drive_tiles(d, self.tiles)
         mujoco.mj_forward(m, d)
 
     def step(self, action, n=FRAME_SKIP):
@@ -183,7 +230,7 @@ class Core:
         if self.camera_action:
             action, cam = action[:-1], float(action[-1])
         for _ in range(n):
-            physics_step(m, d, tier, action, cam, self.bodies)
+            physics_step(m, d, tier, action, cam, self.bodies, self.tiles)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))

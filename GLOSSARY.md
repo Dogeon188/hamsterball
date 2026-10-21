@@ -85,6 +85,10 @@ _Avoid_: dynamic object, moving marker (alone)
 A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover.
 _Avoid_: mocap, moving platform (alone), obstacle (for any solid)
 
+**Collapsing tile**:
+A floor tile of a level that starts to fall a fixed delay after the shell first touches it, and drops under the kill plane. It is a kinematic body.
+_Avoid_: trap tile, crumbling floor
+
 **Kill plane**:
 A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height

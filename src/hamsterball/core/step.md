@@ -6,18 +6,20 @@ The core step of spec §4: the per-physics-step code (camera yaw, shell drag, co
 
 ## Interface
 
-- `Core(tier=None, level=FLAT, camera_action=False, view_size=GAME_SIZE)`: compiles the model (`view_size` sizes its offscreen buffer, see [model.md](model.md)) (default tier: `AbstractTier`) and resets. `level` is a `Level` (its kinematic bodies compiled and driven) or MJCF as `model.build` takes it, such as `Level.mjcf()` (no bodies). `Core.bodies` holds `(qpos adr, dof adr, pos, motion)` per body, constants.
+- `Core(tier=None, level=FLAT, camera_action=False, view_size=GAME_SIZE)`: compiles the model (`view_size` sizes its offscreen buffer, see [model.md](model.md)) (default tier: `AbstractTier`) and resets. `level` is a `Level` (its kinematic bodies compiled and driven) or MJCF as `model.build` takes it, such as `Level.mjcf()` (no bodies). `Core.bodies` holds `(qpos adr, dof adr, pos, motion)` per body, constants. `Core.tiles` is `None`, or `(first slot, first tile body id, delay, [(qpos adr, dof adr, pos, bottom)])` for a level's collapsing tiles, constants.
 - `Core.reset(spawn=(0, 0, 0.5), yaw=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.yaw`, `Core.action_space` (the tier's, plus `cam_yaw` under the camera flag).
-- `physics_step(model, data, tier, action, cam, bodies=())` and its parts `drive_bodies`, `camera_yaw`, `drag`, `contain`, `wrap`.
+- `physics_step(model, data, tier, action, cam, bodies=(), tiles=None)` and its parts `drive_bodies`, `drive_tiles`, `touch_tiles`, `camera_yaw`, `drag`, `contain`, `wrap`.
 - `Tier`: `fragment`, `nuserdata`, `resting_radius`, `action_space()`, `reset()`, `drive()`, `obs()`. The core touches a tier only through these.
 
 ## How it works
 
-Each physics step: clear `xfrc_applied`; pose the kinematic bodies (`drive_bodies`); refresh positions (`mj_kinematics`, `mj_comPos`); camera yaw into `userdata[0]`; drag `−k|v|v` on the shell; containment on the hamster root's free joint (an inelastic impulse from 5 mm past the resting radius, a position stop and `mj_forward` past 20 mm); `tier.drive()`; `mj_step`.
+Each physics step: clear `xfrc_applied`; pose the kinematic bodies (`drive_bodies`) and the collapsing tiles (`drive_tiles`); refresh positions (`mj_kinematics`, `mj_comPos`); camera yaw into `userdata[0]`; drag `−k|v|v` on the shell; containment on the hamster root's free joint (an inelastic impulse from 5 mm past the resting radius, a position stop and `mj_forward` past 20 mm); `tier.drive()`; `mj_step`; record the tiles the shell touched (`touch_tiles`).
 
 The position refresh is what makes the core state complete. `mj_step` leaves `xpos` and friends computed for the state before it, so code that read them directly would depend on the previous step, and a restored state would step differently. Refreshing costs two cheap kinematics passes and means every step reads only `qpos`, `qvel`, `userdata`, and `time`.
 
 Kinematic bodies: `drive_bodies` writes each body's free joint from `data.time` alone: qpos = `pos` + the motion's offset and the yaw quaternion at `t`, qvel = the secant to the pose at `t + DT` (linear part `(p1 − p0)/DT`, angular part `mju_subQuat(q1, q0)/DT`, which is in the body frame as a free joint's is). The velocity is what makes friction see the motion; `mj_step` then integrates the body to the next pose plus a tiny contact perturbation, which the next step's write discards. `Core.reset` drives them too, so a body is posed at time 0. The write is a pure function of time, which is in the core state, so the core state stays complete. It does change the core state's size per level: each body adds 7 qpos and 6 qvel (and their warmstart), so `survive_pushers` has 172 numbers to the 110 of a level without bodies.
+
+Collapsing tiles: tile `i`'s userdata slot (`1 + tier.nuserdata + i`) holds the sim time the shell first touched it, `+inf` until then (`Core.reset` sets it, since `mj_resetData` zeroes userdata). `drive_tiles` writes each tile's free joint like `drive_bodies`: at its authored pose until `delay` after the trigger, then falling at `G` = 9.81 m/s² (MuJoCo's gravity, so a resting hamsterball falls with it and loses contact), held from `TILE_DROP` = 1 m under the kill plane on, with the secant velocity. `touch_tiles` runs right after `mj_step` and reads `data.contact`: `mj_step` collides on the state the step started from and nothing recomputes contacts after the integration, so the contacts are a pure function of the core state (and the trigger, `data.time` after the step, too). A tile pair with the shell is matched by `geom_bodyid`, since tile bodies are contiguous after the kinematic bodies. Reading the contacts anywhere else would break restoring: after `Core.set_state` (which runs `mj_forward`) they belong to the current state, after a live `mj_step` to the previous one. A fallen tile leaves no debris: it is kinematic and excluded from everything but the shell, and it sits under the kill plane. Each tile adds 7 qpos, 6 qvel and their warmstart, and one userdata slot, to the core state.
 
 Kernel shape: ids and constants are module constants, small-vector maths is written out in Python floats, and no function keeps Python-side state. `Core` holds only the model, the data, the tier, and the camera flag.
 
@@ -25,6 +27,7 @@ Kernel shape: ids and constants are module constants, small-vector maths is writ
 
 - `uv run pytest tests/test_core_state.py`: setting a stored core state and stepping reproduces the run bit for bit.
 - `uv run pytest tests/test_bodies.py`: bodies compile after the view mocaps and touch only the shell, follow their motion, restore bit for bit from a stored core state, shove a resting hamsterball, and carry one by friction.
+- `uv run pytest tests/test_collapse.py`: a touched tile falls after its delay with the hamsterball on it and an untouched one never does, tiles touch only the shell, and a stored core state on a 49-tile level restores bit for bit with tiles triggering before and after the restore.
 - `uv run pytest tests/test_feel.py`: the spec §5 feel reference.
 
 ## Known quirks
@@ -38,12 +41,14 @@ Kernel shape: ids and constants are module constants, small-vector maths is writ
 - 2026-10-21, issue 13 verdict (play-tested 2026-10-20), recorded in `prototypes/honest_drive.md` on `prototype/honest-physics`: drag `k = 0.059` on the shell, not gated on ground contact; `field` containment with a 5 mm start and a 20 mm hard stop.
 - 2026-10-21, ticket hamsterball-v1/01: the per-step code refreshes positions with `mj_kinematics` and `mj_comPos` before reading them, so the core state alone determines the next step.
 - 2026-10-22, ticket survive-movers/03: a kinematic body is a free-jointed body whose qpos and qvel the core writes every physics step from sim time, gravity compensated (`gravcomp=1`) and heavy (1000 kg), excluded from the world's contacts. Spec §4's "levels add no joints, so it has one shape for every level of a tier" no longer holds; the Collector stores the core state as a variable-length list (see [collector.md](../data/collector.md)).
+- 2026-10-22, ticket survive-movers/06: a collapsing tile is a kinematic body (as ticket 03's) whose pose is a function of time and its trigger time in userdata, and touch detection reads `data.contact` right after `mj_step` (exploration agent: the post-step contact set from a run and from `mj_setState` of the stored pre-step state matched over 300 steps).
 
 ## Tried and rejected
 
 See the prototype's doc for containment by solimp, a spring-damper field, and a contact-gated drag.
 
 - 2026-10-22, ticket survive-movers/03 (exploration agent's measurements, MuJoCo 3.16.0, a 3×3×0.2 m platform moving +x at 1 m/s under a resting inputless hamsterball, shell x after 2 s): a **mocap** body with `mocap_pos` written every step reached −0.134 m and the ball fell off (a mocap body has no dofs, so its contact velocity is 0 and friction never sees the motion); a jointed body with **qpos only** written gave −0.13 m, the same; qpos **and** qvel at 1000 kg with gravcomp gave 1.353 m (1.351 at 1e6 kg, 1.460 at 10 kg, where the contact pushes a light body within the step; 1.483 without gravcomp, the body free-falling g·dt each step and the shell sinking 4 mm). Also rejected without a run: **position/velocity actuators** on the joints (the body lags and overshoots by an amount that depends on load and gains, so its pose stops being a function of time) and a **weld to a mocap target** (soft, lags, and the velocity still comes only from dofs).
+- 2026-10-22, ticket survive-movers/06 (exploration agent, not built): releasing a passive tile by turning off a weld (`eq_active`, in the core state) sags under the ball (the weld is soft) and leaves dynamic debris; writing `geom_contype` per step from userdata mutates a model the env LRU and a batched backend share; `mjcb_contactfilter` is process-global and slow; a second `mj_collision` pass after the position refresh would be pure too but costs a collision pass per step.
 
 ## History
 

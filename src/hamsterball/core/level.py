@@ -42,6 +42,7 @@ HFIELD_BASE = 1.0  # depth (m) of the solid slab under each hfield; MuJoCo needs
 # again (a measured carry converged by about 1000 kg, see step.md)
 BODY_MASS, BODY_INERTIA = 1000.0, 1000.0
 BODY_GEOMS = {"box", "sphere", "capsule"}  # a plane or hfield can't move
+TILE_WARN_RGBA = (0.9, 0.25, 0.1, 1.0)  # look constant: a touched tile's colour blends to this as its fall nears
 
 
 @dataclass
@@ -54,6 +55,7 @@ class Level:
     version: int = 1
     generator: dict | None = None  # provenance of a generated level; hand-authored files omit it
     bodies: list = field(default_factory=list)  # kinematic bodies; a level without them omits the key
+    collapse: dict | None = None  # collapsing tiles {delay, tiles}; a level without them omits the key
 
     @classmethod
     def from_yaml(cls, text, base="."):
@@ -65,7 +67,7 @@ class Level:
     @classmethod
     def from_dict(cls, d, base="."):
         """`from_yaml` on an already-parsed level."""
-        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards", "generator", "bodies"}, "level")
+        _keys(d, {"kill_plane_z", "geoms", "tasks"}, {"version", "follow_yaw_deg", "hazards", "generator", "bodies", "collapse"}, "level")
         if d.get("version", 1) != 1:
             raise ValueError(f"level version {d['version']} is not 1")
         if not d["tasks"]:
@@ -78,6 +80,7 @@ class Level:
             follow_yaw_deg=_num(d.get("follow_yaw_deg", 0)),
             generator=_provenance(d["generator"]) if "generator" in d else None,
             bodies=[_body(b, Path(base)) for b in d.get("bodies") or []],
+            collapse=_collapse(d["collapse"], Path(base)) if "collapse" in d else None,
         )
 
     @classmethod
@@ -96,6 +99,8 @@ class Level:
             del d["generator"]
         if not d["bodies"]:  # likewise for a level without bodies
             del d["bodies"]
+        if d["collapse"] is None:  # and without tiles
+            del d["collapse"]
         return yaml.safe_dump(d, sort_keys=True)
 
     @cached_property
@@ -144,6 +149,24 @@ class Level:
         ]
         ex = [f'<exclude body1="world" body2="{n}"/>' for n in names]
         ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(names) for b in names[i + 1:]]
+        return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
+
+    def tile_mjcf(self):
+        """MJCF sections for model.build's `bodies`, after `body_mjcf()`'s: each collapsing tile `tile<i>`, a kinematic
+        body (as a kinematic body is) at its geom's pos, excluded from the world, the bodies, and each other. "" for a
+        level without tiles."""
+        if self.collapse is None:
+            return ""
+        tiles = [f"tile{i}" for i in range(len(self.collapse["tiles"]))]
+        out = [
+            f'<body name="{n}" pos="{_s(g["pos"])}" gravcomp="1"><freejoint/>'
+            f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
+            + _geom_mjcf({**g, "pos": [0.0, 0.0, 0.0]}) + "</body>"
+            for n, g in zip(tiles, self.collapse["tiles"])
+        ]
+        ex = [f'<exclude body1="{a}" body2="{t}"/>' for t in tiles
+              for a in ["world", *(f"body{i}" for i in range(len(self.bodies)))]]
+        ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(tiles) for b in tiles[i + 1:]]
         return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
 
 
@@ -223,6 +246,20 @@ def _body(b, base):
     if bad := {g["type"] for g in geoms} - BODY_GEOMS:
         raise ValueError(f"body geom types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
     return {"pos": _vec(b.get("pos", [0, 0, 0]), 3), "geoms": geoms, "motion": M.load(b["motion"])}
+
+
+def _collapse(c, base):
+    """Collapsing tiles: `tiles` (box, sphere or capsule geoms in world coordinates), each falling `delay` s after the
+    shell first touches it."""
+    _keys(c, {"delay", "tiles"}, set(), "collapse")
+    if not isinstance(c["tiles"], list) or not c["tiles"]:
+        raise ValueError("collapse needs a non-empty list of tiles")
+    tiles = [_geom(g, base) for g in c["tiles"]]
+    if bad := {g["type"] for g in tiles} - BODY_GEOMS:
+        raise ValueError(f"tile types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
+    if (delay := _num(c["delay"])) < 0:
+        raise ValueError(f"collapse delay {delay} is negative")
+    return {"delay": delay, "tiles": tiles}
 
 
 def _marker(m, moving=False):

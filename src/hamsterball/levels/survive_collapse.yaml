@@ -1,0 +1,94 @@
+# Stay on a 9x9 floor of 1.5 m tiles for 15 s. Each tile falls 1 s after the hamsterball first touches it, so
+# standing still loses: keep rolling onto tiles that are still up.
+version: 1
+kill_plane_z: -5
+geoms: []
+collapse:
+  delay: 1
+  tiles:
+    - {type: box, pos: [-6, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-6, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-4.5, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-3, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [-1.5, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [0, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [1.5, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [3, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [4.5, 6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, -6, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, -4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, -3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, -1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, 0, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, 1.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, 3, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, 4.5, -0.1], size: [0.74, 0.74, 0.1]}
+    - {type: box, pos: [6, 6, -0.1], size: [0.74, 0.74, 0.1]}
+tasks:
+  survive:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    region: {type: box, pos: [0, 0, 0.5], size: [6.75, 6.75, 2]}
+    time_limit_s: 15
