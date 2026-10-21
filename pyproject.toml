@@ -19,7 +19,7 @@ data = [
     "pillow",
 ]
 # the game records every finished episode (spec §13), so it needs the data extra
-game = ["hamsterball[data]", "imgui-bundle", "glfw"]
+game = ["hamsterball[data]", "imgui-bundle", "glfw", "pyopengl"]
 all = ["hamsterball[data,game]"]
 lerobot = [
     "lerobot[dataset]>=0.6 ; python_full_version >= '3.12' and python_full_version < '3.14'",

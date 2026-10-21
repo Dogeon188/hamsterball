@@ -911,6 +911,7 @@ all = [
     { name = "minari", extra = ["arrow", "create"] },
     { name = "pillow", version = "12.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and python_full_version < '3.14'" },
     { name = "pillow", version = "13.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or python_full_version >= '3.14'" },
+    { name = "pyopengl" },
 ]
 data = [
     { name = "av", version = "15.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.14'" },
@@ -927,6 +928,7 @@ game = [
     { name = "minari", extra = ["arrow", "create"] },
     { name = "pillow", version = "12.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' and python_full_version < '3.14'" },
     { name = "pillow", version = "13.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or python_full_version >= '3.14'" },
+    { name = "pyopengl" },
 ]
 lerobot = [
     { name = "lerobot", extra = ["dataset"], marker = "python_full_version >= '3.12' and python_full_version < '3.14'" },
@@ -951,6 +953,7 @@ requires-dist = [
     { name = "mujoco", specifier = "==3.16.0" },
     { name = "numpy" },
     { name = "pillow", marker = "extra == 'data'" },
+    { name = "pyopengl", marker = "extra == 'game'" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 provides-extras = ["data", "game", "all", "lerobot"]

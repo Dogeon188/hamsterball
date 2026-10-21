@@ -233,3 +233,39 @@ def test_the_cli_skips_the_menu_given_a_task_and_level_and_prefills_it_otherwise
     assert not skip  # recording needs a valid name: the menu asks for one
     _, _, record, skip = start("--task", "survive", "--level", "first_survive", "--player", "Eric", "--no-record")
     assert skip and not record
+
+
+def test_the_result_card_text_draws_white_over_the_chase_view(monkeypatch):
+    """Regression: mjr_render left texture unit 1 active, so imgui drew every glyph as a dim solid block."""
+    pytest.importorskip("imgui_bundle")
+    from OpenGL import GL
+
+    from hamsterball.game import window
+
+    try:
+        win = window._open()
+    except RuntimeError as e:
+        pytest.skip(f"no window: {e}")
+    frames, shot = [], []
+    monkeypatch.setattr(window, "outcome", lambda *a: "Failed: hazard")  # the first step ends the episode
+
+    def end_frame(w):
+        window.imgui.render()
+        window.imgui.backends.opengl2_render_draw_data(window.imgui.get_draw_data())
+        frames.append(1)
+        if len(frames) == 3:  # the result card is up
+            fw, fh = window.glfw.get_framebuffer_size(w)
+            px = GL.glReadPixels(0, 0, fw, fh, GL.GL_RGB, GL.GL_UNSIGNED_BYTE)
+            shot.append(np.frombuffer(px, np.uint8).reshape(fh, fw, 3))
+            window.glfw.set_window_should_close(w, True)
+        window.glfw.swap_buffers(w)
+
+    monkeypatch.setattr(window, "_end_frame", end_frame)
+    try:
+        window._play(win, window.Session("reach_goal", str(window.LEVELS_DIR / "first_goal.yaml"), record=False))
+    finally:
+        window._close(win)
+    img = shot[0]
+    h, w = img.shape[:2]
+    card = img[int(h * 0.42):int(h * 0.58), int(w * 0.4):int(w * 0.6)]  # the card is centred on the window
+    assert (card.min(axis=-1) > 220).sum() > 500  # white text; the broken draw left nothing above ~150

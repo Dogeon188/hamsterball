@@ -13,6 +13,7 @@ from imgui_bundle import imgui  # before glfw: imgui_bundle points pyglfw at the
 
 import glfw  # noqa: E402
 import mujoco  # noqa: E402
+from OpenGL import GL  # noqa: E402
 
 from .. import ENV_VERSION  # noqa: E402
 from ..core import views as V  # noqa: E402
@@ -63,6 +64,9 @@ class _Chase:
         mujoco.mj_camlight(self.model, data)
         mujoco.mjv_updateScene(self.model, data, self.opt, None, self.cam, mujoco.mjtCatBit.mjCAT_ALL, self.scene)
         mujoco.mjr_render(mujoco.MjrRect(0, 0, width, height), self.scene, self.ctx)
+        # mjr_render leaves texture unit 1 active; imgui would bind its font there with no texcoords, drawing each
+        # glyph as a dim solid block
+        GL.glActiveTexture(GL.GL_TEXTURE0)
 
     def free(self):
         self.ctx.free()
