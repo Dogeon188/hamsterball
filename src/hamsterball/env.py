@@ -41,7 +41,7 @@ class HamsterballEnv(gym.Env):
 
     def __init__(
         self,
-        tasks,
+        tasks=TASKS,
         levels=None,
         tier="abstract",
         camera_action=False,

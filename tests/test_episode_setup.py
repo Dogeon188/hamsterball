@@ -149,18 +149,19 @@ def test_the_model_cache_is_an_lru_keyed_by_level_id(monkeypatch):
 
 
 PRESETS = {
-    "HamsterballReachGoal-v0": "reach_goal",
-    "HamsterballWaypointRace-v0": "waypoint_race",
-    "HamsterballCollectItems-v0": "collect_items",
-    "HamsterballUnlockGoal-v0": "unlock_goal",
-    "HamsterballSurvive-v0": "survive",
+    "Hamsterball-v0": set(TASKS),  # the bare id: `tasks` defaults to every task id
+    "HamsterballReachGoal-v0": {"reach_goal"},
+    "HamsterballWaypointRace-v0": {"waypoint_race"},
+    "HamsterballCollectItems-v0": {"collect_items"},
+    "HamsterballUnlockGoal-v0": {"unlock_goal"},
+    "HamsterballSurvive-v0": {"survive"},
 }
 
 
 @pytest.mark.parametrize("env_id", PRESETS)
-def test_each_preset_constructs_with_its_default_pool(env_id):
+def test_each_id_constructs_with_no_kwargs_and_its_default_pool(env_id):
     env = gym.make(env_id)
-    assert {drawn(env, s)[1] for s in range(5)} == {PRESETS[env_id]}
+    assert {drawn(env, s)[1] for s in range(40)} == PRESETS[env_id]
 
 
 def test_the_general_id_takes_every_task():
