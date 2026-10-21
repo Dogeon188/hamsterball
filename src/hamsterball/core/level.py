@@ -8,8 +8,21 @@ import yaml
 
 GEOM_SIZES = {"plane": 3, "box": 3, "sphere": 1, "capsule": 2}
 MARKER_KEYS = {"sphere": {"pos", "radius"}, "box": {"pos", "size", "euler"}, "capsule": {"fromto", "radius"}}
-TASK_MARKERS = {"reach_goal": ("goal",)}
-GOAL_RGBA = "0.2 0.9 0.3 0.4"
+TASK_MARKERS = {
+    "reach_goal": ("goal",),
+    "waypoint_race": ("waypoints",),
+    "collect_items": ("items",),
+    "unlock_goal": ("keys", "goal"),
+}
+MARKER_LISTS = {"waypoints", "items", "keys"}  # task keys holding an ordered, non-empty list of markers
+# Look constants (spec §11): colour by marker kind; the env hides collected markers and dims the locked goal
+MARKER_RGBA = {
+    "goal": (0.2, 0.9, 0.3, 0.4),
+    "waypoints": (0.2, 0.5, 1.0, 0.4),
+    "items": (1.0, 0.85, 0.1, 0.4),
+    "keys": (1.0, 0.4, 0.1, 0.4),
+}
+LOCKED_GOAL_RGBA = (0.5, 0.5, 0.5, 0.15)
 
 
 @dataclass
@@ -56,19 +69,23 @@ class Level:
                 f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" size="{_s(g["size"])}" euler="{_s(g["euler"])}" '
                 f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>'
             )
-        for task in self.tasks.values():
-            out.append(_marker_mjcf(task["goal"], GOAL_RGBA))
+        for name, task in self.tasks.items():
+            for k in TASK_MARKERS[name]:
+                if k in MARKER_LISTS:
+                    out += [_marker_mjcf(m, f"{name}/{k}/{i}", MARKER_RGBA[k]) for i, m in enumerate(task[k])]
+                else:
+                    out.append(_marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
         return "\n".join(out)
 
 
-def _marker_mjcf(m, rgba):
+def _marker_mjcf(m, name, rgba):
     if m["type"] == "sphere":
         shape = f'pos="{_s(m["pos"])}" size="{m["radius"]!r}"'
     elif m["type"] == "box":
         shape = f'pos="{_s(m["pos"])}" size="{_s(m["size"])}" euler="{_s(m["euler"])}"'
     else:
         shape = f'fromto="{_s(m["fromto"])}" size="{m["radius"]!r}"'
-    return f'<geom type="{m["type"]}" {shape} rgba="{rgba}" contype="0" conaffinity="0" group="0"/>'
+    return f'<geom name="{name}" type="{m["type"]}" {shape} rgba="{_s(rgba)}" contype="0" conaffinity="0" group="0"/>'
 
 
 def _s(v):
@@ -135,5 +152,10 @@ def _task(name, t):
         "time_limit_s": _num(t["time_limit_s"]),
     }
     for k in TASK_MARKERS[name]:
-        out[k] = _marker(t[k])
+        if k in MARKER_LISTS:
+            if not isinstance(t[k], list) or not t[k]:
+                raise ValueError(f"{name} {k} must be a non-empty list of markers")
+            out[k] = [_marker(m) for m in t[k]]
+        else:
+            out[k] = _marker(t[k])
     return out
