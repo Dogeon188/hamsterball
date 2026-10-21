@@ -2,7 +2,9 @@
 
 import math
 import os
+import sys
 from collections import OrderedDict
+from functools import partial
 from pathlib import Path
 
 import gymnasium as gym
@@ -332,3 +334,18 @@ class DiscreteAction(gym.ActionWrapper):
 
     def action(self, action):
         return self._table[action]
+
+
+def make_vec(num_envs, backend="cpu", **kwargs):
+    """The ids' vector_entry_point (spec §10, §15): a stock AsyncVectorEnv of HamsterballEnv(**kwargs) copies.
+
+    spawn on macOS, forkserver on Linux; shared memory only for views; same-step autoreset, the final observation in
+    info. Each worker makes its own renderer (lazily, in the process that steps it)."""
+    if backend != "cpu":
+        raise NotImplementedError(f"backend {backend!r}: v1 builds only the cpu backend")
+    return gym.vector.AsyncVectorEnv(
+        [partial(HamsterballEnv, **kwargs)] * num_envs,
+        shared_memory=bool(kwargs.get("views")),
+        context="spawn" if sys.platform == "darwin" else "forkserver",
+        autoreset_mode=gym.vector.AutoresetMode.SAME_STEP,
+    )

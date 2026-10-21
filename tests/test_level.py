@@ -393,3 +393,19 @@ def test_a_malformed_provenance_block_is_rejected(edit):
     edit(p)
     with pytest.raises(ValueError):
         Level.from_yaml(yaml.safe_dump(yaml.safe_load(LEVEL) | {"generator": p}))
+
+
+def test_a_large_hfield_levels_id_is_cheap_to_read_again(tmp_path):
+    """The env reads the id and canonical form several times per reset; a 256x256 hfield takes ~0.1 s to serialise."""
+    import time
+
+    rng = np.random.default_rng(0)
+    png16(tmp_path / "hills.png", rng.integers(0, 65535, (256, 256)).tolist())
+    d = yaml.safe_load(HFIELD_LEVEL)
+    d["geoms"] = [{"type": "hfield", "size": [60, 60, 1], "file": "hills.png"}]
+    level = Level.from_yaml(yaml.safe_dump(d), tmp_path)
+    first = level.id
+    t = time.perf_counter()
+    for _ in range(50):
+        assert level.id == first and level.canonical()
+    assert time.perf_counter() - t < 0.5

@@ -8,7 +8,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 
 - `Level.from_yaml(text, base=".")`, `Level.load(path)`, `Level.from_dict(d, base=".")` (an already-parsed level, as the generator builds it): validate and fill every default; a malformed level raises `ValueError`. An hfield's `file` resolves against `base`; `load` passes the level file's directory.
 - `Level` fields: `kill_plane_z`, `geoms` (list of dicts), `tasks` (task id to block), `hazards` (list of markers, default empty), `follow_yaw_deg` (default 0), `version` (1), `generator` (the provenance block, or `None`).
-- `level.canonical()`: `yaml.safe_dump(asdict(level), sort_keys=True)`, leaving out `generator` when it is `None`. `level.id`: SHA-256 hex of the canonical form.
+- `level.canonical()`: `yaml.safe_dump(asdict(level), sort_keys=True)`, leaving out `generator` when it is `None`. `level.id`: SHA-256 hex of the canonical form. Both are computed on first read and cached, so edit a `Level` only before then.
 - `level.mjcf()`: top-level MJCF sections (an `<asset>` with the hfields, then a `<worldbody>` with the geoms and markers) for `model.build(tier, level)`, or `Core(level=...)`.
 
 ## How it works
@@ -38,6 +38,8 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - MuJoCo scales hfield samples so the lowest is 0 and the highest is the max height: only relative heights in the PNG matter, and a constant PNG is flat at `pos` z. An hfield sits on a solid slab `HFIELD_BASE` = 1 m deep (MuJoCo needs a positive base; spec §7's `size` has three numbers).
 - The torsional friction of a contact-tuned geom is the shell's 0.05: spec §7 lets authors set only sliding and rolling.
 
+- `canonical()` and `id` are cached on the instance: a 256×256 hfield takes about 0.13 s to serialise on the M2 (PyYAML's pure-Python emitter), and the env read them five times per reset. A `Level` edited after its first read keeps its old id.
+
 ## Decisions
 
 - 2026-10-22, ticket hamsterball-v1/02: `Level` is a dataclass over plain dicts and lists, the canonical tree itself, in place of a typed class per geom and marker.
@@ -55,4 +57,5 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket hamsterball-v1/04: added `hazards` and the `survive` block with its spawn-inside-region check. Filling `hazards: []` changed the canonical form, so every level id from ticket 02 changed.
 - 2026-10-22, coordinator relaying the user, during the ticket 03/04 merge: spec §7's `plane` geom stays allowed; the doc states that a plane floor collides infinitely, so a level whose edge should reach the kill plane needs a box floor.
 - 2026-10-22, ticket hamsterball-v1/05: added hfields (PNG beside the file, samples inlined in the canonical form) and per-geom `friction`, `solref`, `solimp` with priority over the shell.
+- 2026-10-22, ticket hamsterball-v1/14, agent finding while profiling the throughput gate: on a 256×256 hfield level each env reset spent about 0.63 s in `yaml.safe_dump` (five `id`/`canonical()` reads at 0.126 s each), which cut a reset-every-470-steps run from about 2,000 to 870 env steps/s. `canonical()` and `id` are now cached; `tests/test_level.py::test_a_large_hfield_levels_id_is_cheap_to_read_again`.
 - 2026-10-22, ticket hamsterball-v1/10: added the optional `generator` provenance block and `Level.from_dict`.
