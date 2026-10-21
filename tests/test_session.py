@@ -38,6 +38,8 @@ def test_each_finished_episode_appends_to_the_players_dataset_with_its_overrun_c
     assert ds.total_episodes == 2
     assert (first["overruns"], second["overruns"]) == (3, 0)
     assert first["failure_reason"] == second["failure_reason"] == "left_region"
+    assert "algorithm_name" not in ds.storage.metadata  # a human controller is named in `author` only (spec §12)
+    assert "eric" in str(ds.storage.metadata["author"])
     replay(ds)
     s.close()
 

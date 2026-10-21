@@ -65,7 +65,7 @@ class Session:
             ds = minari.load_dataset(self.dataset_id)
         except FileNotFoundError:
             ds = self.env.create_dataset(
-                self.dataset_id, algorithm_name="human", author=self.player,
+                self.dataset_id, author=self.player,  # a human: `author` only, no algorithm_name (spec §12)
                 description=f"Hamsterball games played by {self.player} (hamsterball-play).",
             )
         else:
