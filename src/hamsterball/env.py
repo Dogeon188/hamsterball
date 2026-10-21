@@ -1,6 +1,7 @@
 """The Gymnasium env over the core (spec §9, §10): level and task per episode, observations, markers, reward, info."""
 
 import math
+import os
 from pathlib import Path
 
 import gymnasium as gym
@@ -12,6 +13,7 @@ from .core.level import Level
 from .core.marker import centre, crosses
 from .core.model import DT, HAM, SHELL
 from .core.step import FRAME_SKIP, Core
+from .core import views as V
 
 TASKS = ("reach_goal", "waypoint_race", "collect_items", "unlock_goal", "survive")  # the goal one-hot's order
 LEVELS_DIR = Path(__file__).parent / "levels"
@@ -29,9 +31,29 @@ def _level(x):
 class HamsterballEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, tasks, levels=None, tier="abstract", camera_action=False, frame_skip=FRAME_SKIP, time_limit_s=None):
+    def __init__(
+        self,
+        tasks,
+        levels=None,
+        tier="abstract",
+        camera_action=False,
+        views=(),
+        view_size=(84, 84),
+        obs_state=True,
+        frame_skip=FRAME_SKIP,
+        time_limit_s=None,
+    ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
+        self.views = tuple(views)
+        if unknown := set(self.views) - set(V.VIEWS):
+            raise ValueError(f"unknown views {sorted(unknown)}; choose from {V.VIEWS}")
+        if not self.views and not obs_state:
+            raise ValueError("obs_state=False needs at least one view")
+        if self.views and os.environ.get("MUJOCO_GL") == "glfw":
+            raise RuntimeError("MUJOCO_GL=glfw: env views render offscreen (egl or osmesa on Linux, unset on macOS)")
+        self.view_size = tuple(view_size)
+        self.obs_state = obs_state
         self.tasks = list(tasks)
         pool = [_level(x) for x in (sorted(LEVELS_DIR.glob("*.yaml")) if levels is None else levels)]
         self.levels = [lv for lv in pool if any(t in lv.tasks for t in self.tasks)]
@@ -41,12 +63,16 @@ class HamsterballEnv(gym.Env):
         self.frame_skip = frame_skip
         self.time_limit_s = time_limit_s
         self._cores = {}  # ponytail: unbounded, keyed by level id; spec §7's model_cache LRU when pools grow
+        self._renderers = {}  # level id -> mujoco.Renderer at view_size, made lazily on the stepping thread
         self.action_space = self._core(self.levels[0]).action_space
         inf = np.float32(np.inf)
-        self.observation_space = gym.spaces.Dict(
-            state=gym.spaces.Box(-inf, inf, (19,), np.float32),
-            goal=gym.spaces.Box(-inf, inf, (10,), np.float32),
-        )
+        spaces = {}
+        if obs_state:
+            spaces["state"] = gym.spaces.Box(-inf, inf, (19,), np.float32)
+            spaces["goal"] = gym.spaces.Box(-inf, inf, (10,), np.float32)
+        for v in self.views:
+            spaces[v] = gym.spaces.Box(0, 255, (*self.view_size, 3), np.uint8)
+        self.observation_space = gym.spaces.Dict(spaces)
 
     def _core(self, level):
         if level.id not in self._cores:
@@ -66,9 +92,9 @@ class HamsterballEnv(gym.Env):
         self._max_steps = math.ceil(limit / (self.frame_skip * DT) - 1e-9)
         self._steps = 0
         self._success, self._failure = False, None
-        obs = self._observe()
-        self._prev = obs["state"][:3].astype(float)  # at reset the swept segment is a point
-        return obs, {"core_state": self.core.state(), **obs}
+        obs, vec = self._observe()
+        self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
+        return obs, {"core_state": self.core.state(), **vec}
 
     def step(self, action):
         self.core.step(np.asarray(action), n=self.frame_skip)
@@ -82,10 +108,10 @@ class HamsterballEnv(gym.Env):
         self._prev = pos
         terminated = self._success or self._failure is not None
         truncated = not terminated and self._steps >= self._max_steps
-        obs = self._observe()
+        obs, vec = self._observe()
         info = {
             "core_state": self.core.state(),
-            **obs,
+            **vec,
             "success": self._success,
             "failure_reason": self._failure,
             "reward_terms": {"event": event, "time": TIME_PENALTY, "shaping": 0.0},
@@ -99,6 +125,8 @@ class HamsterballEnv(gym.Env):
         mujoco.mj_comPos(m, d)
         mujoco.mj_comVel(m, d)
         mujoco.mj_subtreeVel(m, d)
+        # posed even without views, so core_state (which holds the mocap poses) doesn't depend on the views kwarg
+        V.pose(m, d, math.radians(self.level.follow_yaw_deg))
         yaw = float(d.userdata[0])
         cy, sy = math.cos(yaw), math.sin(yaw)
 
@@ -127,4 +155,25 @@ class HamsterballEnv(gym.Env):
         if not self._success:
             goal[:3] = cam(centre(self.level.tasks[self.task]["goal"]) - c)
             goal[3:5] = 1  # active target; fraction remaining
-        return {"state": state, "goal": goal}
+        vec = {"state": state, "goal": goal}
+        obs = dict(vec) if self.obs_state else {}
+        if self.views:
+            mujoco.mj_kinematics(m, d)  # carry the new mocap poses to their bodies,
+            mujoco.mj_camlight(m, d)  # then to the cameras: mj_step left them at the previous env step's poses
+            r = self._renderer()
+            for v in self.views:
+                r.update_scene(d, camera=v, scene_option=V.option(v))
+                obs[v] = r.render(out=np.empty((*self.view_size, 3), np.uint8))
+        return obs, vec
+
+    def _renderer(self):
+        if self.level.id not in self._renderers:
+            r = mujoco.Renderer(self.core.model, *self.view_size)
+            r.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 0  # env views: shadows off (spec §11)
+            self._renderers[self.level.id] = r
+        return self._renderers[self.level.id]
+
+    def close(self):
+        for r in self._renderers.values():
+            r.close()
+        self._renderers.clear()

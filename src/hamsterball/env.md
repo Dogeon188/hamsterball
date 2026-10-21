@@ -7,9 +7,11 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 ## Interface
 
 - `import hamsterball` registers `Hamsterball-v0` with `entry_point="hamsterball.env:HamsterballEnv"`.
-- `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, frame_skip=10, time_limit_s=None)`. `levels` holds `Level` objects, bundled level names (stems in `hamsterball/levels/`), or paths; `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
+- `HamsterballEnv(tasks, levels=None, tier="abstract", camera_action=False, views=(), view_size=(84, 84), obs_state=True, frame_skip=10, time_limit_s=None)`. `levels` holds `Level` objects, bundled level names (stems in `hamsterball/levels/`), or paths; `None` is every bundled level. Construction raises if no pool level supports any of `tasks`.
 - Action: the core's (`[run_x, run_y]`, plus `cam_yaw` under `camera_action`).
-- Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables.
+- Observation: `Dict(state=Box(19), goal=Box(10))`, float32, laid out as spec §10's tables, plus one `Box(0, 255, (H, W, 3), uint8)` per entry of `views` (see [core/views.md](core/views.md)). `obs_state=False` drops `state` and `goal`, and then needs at least one view.
+- `close()` frees the renderers.
+- Importing `hamsterball` sets `MUJOCO_GL=egl` on Linux unless it's already set (`osmesa` is the CPU fallback, set by hand); macOS leaves it unset (CGL). An env with views raises under `MUJOCO_GL=glfw`.
 - `info` on every step: `core_state`, `state`, `goal`, `success`, `failure_reason` (`None` or `"kill_plane"`), `reward_terms` (`event`, `time`, `shaping`). On reset: `core_state`, `state`, `goal`.
 - Bundled level `first_goal`: a 20 m square box platform, goal sphere (1 m) 8 m along +y, kill plane at −5 m, 30 s.
 
@@ -17,6 +19,7 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 - Reset: draw a pool level (among those supporting a requested task), then a task it supports, from `np_random`. One `Core` per level id compiles on first use; `Core.reset` places the shell at the spawn with the spawn yaw. The step limit is `ceil(time_limit_s / (frame_skip·dt))`.
 - Step: `Core.step(action, n=frame_skip)`, then the swept goal test from the previous env step's shell centre (a point at reset), then the kill plane; success wins over failure in one step. Reward is the event (+1 or −1) plus −0.001.
+- Views: every env step, `views.pose` places the view mocaps (whether or not `views` is set, since the core state holds their poses). With views, `mj_kinematics` and `mj_camlight` carry the poses to the cameras, then one `mujoco.Renderer` per level id, at `view_size` and with shadows off, draws each view with its `MjvOption`. The renderer is made lazily on the first render, so on the thread and in the process that steps the env.
 - Observation: after stepping, the env recomputes derived quantities (`mj_kinematics`, `mj_comPos`, `mj_comVel`, `mj_subtreeVel`), which leaves the core state untouched. Vectors rotate into the camera yaw frame by −yaw about z; the shell's angular velocity first goes from the free joint's body frame to the world. Lean and relative velocity use the hamster subtree's centre of mass and its velocity, so an articulated tier reads the same.
 
 ## Invariants and checks
@@ -27,7 +30,9 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 
 - The step-limit conversion subtracts 1e-9 before `ceil`, so a whole number of env steps doesn't round up through float error.
 - Compiled models are cached without bound (one per level id); spec §7's `model_cache` LRU is for later.
-- Not yet: `reset` options and `info['reset_options']`, the other tasks, hazards, shaping, views, `obs_state`, the five preset ids, and `make_vec`. Those are tickets 03 to 07 and 14.
+- Not yet: `reset` options and `info['reset_options']`, the other tasks, hazards, shaping, the five preset ids, and `make_vec`.
+- Renderers, like compiled models, are cached per level id without bound; spec §11 puts them in the model LRU, for later.
+- The `MUJOCO_GL` default only takes effect if `hamsterball` is imported before `mujoco`. Those are tickets 03 to 07 and 14.
 
 ## Decisions
 
@@ -38,3 +43,4 @@ The Gymnasium env of spec §10 over the core: it picks a level and task per epis
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/02: added as the reach-goal tracer.
+- 2026-10-22, ticket hamsterball-v1/06: added `views`, `view_size`, `obs_state`, and `close()`; `info` now takes `state` and `goal` from the vectors, not the observation.

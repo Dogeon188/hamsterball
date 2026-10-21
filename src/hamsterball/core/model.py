@@ -47,7 +47,9 @@ def _shell_xml():
 
 
 def build(tier, level=FLAT):
-    """Compile the shell, the tier's fragment, and the level's worldbody geoms (an MJCF string) into a model."""
+    """Compile the shell, the tier's fragment, the view mocaps, and the level's worldbody geoms (an MJCF string)."""
+    from .views import FRAGMENT as VIEWS  # views imports this module's ids
+
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
 <size nuserdata="{1 + tier.nuserdata}"/>
 <visual><global offwidth="1280" offheight="720"/></visual>
@@ -55,6 +57,7 @@ def build(tier, level=FLAT):
 {level}
 {_shell_xml()}
 {tier.fragment}
+{VIEWS}
 </worldbody></mujoco>"""
     m = mujoco.MjModel.from_xml_string(xml)
     assert m.body("shell").id == SHELL and m.body("hamster").id == HAM
