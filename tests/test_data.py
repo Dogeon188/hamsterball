@@ -109,3 +109,21 @@ def test_a_pixel_env_records_state_and_goal_and_its_view_kwargs():
     kw = ds.env_spec.kwargs
     assert (list(kw["views"]), list(kw["view_size"]), kw["obs_state"]) == (["chase"], [16, 24], False)
     replay(ds)
+
+
+def test_appended_episodes_get_the_outcome_metadata_too():
+    # Minari's add_to_dataset skips the episode metadata callback; the game appends after every episode
+    env = Collector(gym.make("HamsterballSurvive-v0"))
+    env.reset(seed=0)
+    env.step(np.array([0, 0], np.float32))
+    ds = env.create_dataset("test/append-v0", author="tester")
+    env.reset(seed=1)
+    while not any(env.step(np.array([0, 1], np.float32))[2:4]):
+        pass
+    env.add_to_dataset(ds)
+    ds = minari.load_dataset("test/append-v0")
+    replay(ds)
+    appended = list(ds.storage.get_episode_metadata([1]))[0]
+    assert (appended["id"], appended["seed"], appended["options"]["task"]) == (1, 1, "survive")
+    assert (appended["success"], appended["failure_reason"]) == (False, "left_region")
+    assert appended["return"] == -1.0 and appended["length"] == appended["total_steps"]
