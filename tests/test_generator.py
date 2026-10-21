@@ -110,7 +110,7 @@ def test_a_level_with_no_solvable_layout_raises_after_32_attempts():
     gen = ProceduralGenerator(climb_grade=(60, 60))  # every climb steeper than the flood fill's 15 degrees
     with pytest.raises(GenerationError):
         gen("reach_goal", 0, 1.0)
-    assert gen.generate("survive", 0, 1.0)[1] == 1  # survive builds no route
+    assert gen.generate("survive", 0, 0.0)[1] == 1  # survive builds no route, and nothing moves at d = 0
 
 
 def test_the_time_limit_covers_the_route_at_5_m_s_times_the_slack():
@@ -139,6 +139,59 @@ def test_survive_picks_a_plateau_disc_or_a_ridge_by_seed():
     assert 5 <= sum(shapes) <= 15
 
 
+def survive_levels(d, seeds=range(8)):
+    return [GEN("survive", s, d) for s in seeds]
+
+
+def test_easy_survive_levels_hold_still():
+    for level in survive_levels(0.0):
+        assert "motion" not in level.tasks["survive"]["region"] and level.hazards == []
+
+
+def test_the_region_drifts_faster_with_difficulty_and_its_centre_stays_on_the_flat_top():
+    from hamsterball.core.motion import pose
+
+    for d in (0.25, 0.5, 1.0):
+        for level in survive_levels(d):
+            region = level.tasks["survive"]["region"]
+            m = region["motion"]
+            assert m["type"] == "oscillate"
+            peak = m["amplitude"] * 2 * np.pi / m["period"]
+            assert abs(peak - GEN.params(d)["survive_drift_speed"]) < 0.01
+            h, g = heights(level), level.geoms[0]
+            for t in np.linspace(0, m["period"], 17):
+                c = np.array(centre(region)) + pose(m, t)[0]
+                col = round((c[0] - g["pos"][0] + g["size"][0]) / 0.25)
+                row = round((g["pos"][1] + g["size"][1] - c[1]) / 0.25)
+                assert abs(h[row, col]) < 1e-3  # the flat top sits at z = 0
+
+
+@pytest.mark.parametrize("d, count", [(0.25, 1), (0.5, 2), (1.0, 3)])
+def test_survive_hazards_move_more_and_faster_with_difficulty_and_start_clear_of_the_spawn(d, count):
+    from hamsterball.core.marker import crosses
+
+    for level in survive_levels(d):
+        block = level.tasks["survive"]
+        assert len(level.hazards) == count
+        for hz in level.hazards:
+            m = hz["motion"]
+            assert abs(m["amplitude"] * 2 * np.pi / m["period"] - GEN.params(d)["hazard_speed"]) < 0.01
+            spawn = block["spawn"]["pos"]
+            assert not crosses(hz, spawn, spawn, 0.0)
+
+
+@pytest.mark.parametrize("d", [0.5, 0.75, 1.0])
+def test_survive_from_mid_difficulty_fails_with_no_input(d):
+    for seed in range(4):
+        env = HamsterballEnv(["survive"], levels=[GEN("survive", seed, d)])
+        env.reset(seed=0)
+        while True:
+            _, _, terminated, truncated, info = env.step(np.zeros(2, np.float32))
+            if terminated or truncated:
+                break
+        assert not info["success"], (seed, d)
+
+
 def test_hazards_appear_with_difficulty():
     assert GEN("reach_goal", 0, 0.0).hazards == []
     assert len(GEN("reach_goal", 0, 1.0).hazards) == 5  # 1 per 8 m of a 40 m route
@@ -147,11 +200,11 @@ def test_hazards_appear_with_difficulty():
 # sha256 over the space-joined level ids of the sweep, per task. A change here is a change to the generator's
 # output: bump ProceduralGenerator.version and update these (spec §8 Determinism).
 GOLDEN = {
-    "reach_goal": "6e3f8fd7f4b144a91893d5997d82d7289e6bb7a8ef172d921fcdbbab681af4e2",
-    "waypoint_race": "6c493b77d593d005ba02a7cdf400f38d52c2ce0fb8e9a0b795fea66813e65d8d",
-    "collect_items": "cc7477d379d5af6bc81eefc5f1f864db9bd99214e43d844b5c9b0c27a2a7a401",
-    "unlock_goal": "a15186c1257975df29189c2262ef914883d26d1125328c7597c83b84d1b85aaf",
-    "survive": "f7f035fc97e48e32926b1ad96bbbff038d4a78a714047aac2bcff75e1c0a3539",
+    "reach_goal": "c9aea83e946be0d48f1a20c51b871310ad5a16129e5fadee081a29789df4337f",
+    "waypoint_race": "86cbe3377440abbca2539b7aad2b1a1200854ce32996637da4564d5e620b631b",
+    "collect_items": "6b5c27b24b355ba4c251d21a8d35b7e4c9f6cc5cba4f66f4fe1efda3e1d2297f",
+    "unlock_goal": "670ec8bbe8553fe4918d328d96ee198ee885bd962d2b5789c0913ca2bce5cc08",
+    "survive": "7a61d6e2572477aec5b5cce0d3709ba29382eb3b2853289d055b913aefd8a9ff",
 }
 
 
