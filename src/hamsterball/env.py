@@ -74,11 +74,22 @@ class HamsterballEnv(gym.Env):
         self.core.step(np.asarray(action), n=self.frame_skip)
         self._steps += 1
         pos = self.core.data.qpos[0:3].copy()
-        event = 0.0
-        if crosses(self.level.tasks[self.task]["goal"], self._prev, pos):  # success wins over failure
-            self._success, event = True, 1.0
+        block, survive = self.level.tasks[self.task], self.task == "survive"
+        if survive:  # a point test: the region means "stay inside"
+            inside = crosses(block["region"], pos, pos)
+            self._success = inside and self._steps >= self._max_steps
+        else:
+            self._success = crosses(block["goal"], self._prev, pos)
+        if self._success:  # success wins over failure
+            self._failure = None
+        elif any(crosses(h, self._prev, pos) for h in self.level.hazards):
+            self._failure = "hazard"
         elif pos[2] < self.level.kill_plane_z:
-            self._failure, event = "kill_plane", -1.0
+            self._failure = "kill_plane"
+        elif survive and not inside:
+            self._failure = "left_region"
+        event = 1.0 if self._success else -1.0 if self._failure else 0.0
+        time = 0.0 if survive else TIME_PENALTY
         self._prev = pos
         terminated = self._success or self._failure is not None
         truncated = not terminated and self._steps >= self._max_steps
@@ -88,9 +99,9 @@ class HamsterballEnv(gym.Env):
             **obs,
             "success": self._success,
             "failure_reason": self._failure,
-            "reward_terms": {"event": event, "time": TIME_PENALTY, "shaping": 0.0},
+            "reward_terms": {"event": event, "time": time, "shaping": 0.0},
         }
-        return obs, event + TIME_PENALTY, terminated, truncated, info
+        return obs, event + time, terminated, truncated, info
 
     def _observe(self):
         m, d = self.core.model, self.core.data
@@ -125,6 +136,10 @@ class HamsterballEnv(gym.Env):
         goal = np.zeros(10, np.float32)
         goal[5 + TASKS.index(self.task)] = 1
         if not self._success:
-            goal[:3] = cam(centre(self.level.tasks[self.task]["goal"]) - c)
-            goal[3:5] = 1  # active target; fraction remaining
+            block = self.level.tasks[self.task]
+            target = block["region" if self.task == "survive" else "goal"]
+            goal[:3] = cam(centre(target) - c)
+            goal[3] = 1  # active target
+            # fraction remaining: survive's is time left over the time limit, reach goal's is 1 until success
+            goal[4] = 1 - self._steps / self._max_steps if self.task == "survive" else 1
         return {"state": state, "goal": goal}

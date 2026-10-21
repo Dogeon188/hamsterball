@@ -1,0 +1,10 @@
+# Stay inside a capsule region (6 m by 4 m) around the spawn on a 20 m square platform for 10 s.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [10, 10, 0.5]}
+tasks:
+  survive:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    region: {type: capsule, fromto: [-1, 0, 0.5, 1, 0, 0.5], radius: 2}
+    time_limit_s: 10
