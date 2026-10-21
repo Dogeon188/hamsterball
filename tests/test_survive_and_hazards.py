@@ -34,7 +34,7 @@ def play(env, policy, max_steps=5000):
 
 
 def test_surviving_to_the_time_limit_terminates_in_success():
-    env = gym.make("Hamsterball-v0", tasks=["survive"])
+    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"])
     n, reward, terminated, truncated, info, goals = play(env, STILL)
     assert (n, terminated, truncated) == (600, True, False)  # 10 s at 60 Hz
     assert info["success"] and info["failure_reason"] is None
@@ -46,13 +46,13 @@ def test_surviving_to_the_time_limit_terminates_in_success():
 
 
 def test_survive_with_truncate_false_still_succeeds_at_its_time_limit():
-    env = gym.make("Hamsterball-v0", tasks=["survive"], truncate=False)
+    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"], truncate=False)
     n, reward, terminated, truncated, info, _ = play(env, STILL)
     assert (n, terminated, truncated, info["success"]) == (600, True, False, True)
 
 
 def test_leaving_the_survive_region_fails():
-    env = gym.make("Hamsterball-v0", tasks=["survive"])
+    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"])
     n, reward, terminated, truncated, info, _ = play(env, FORWARD)
     assert terminated and not info["success"] and info["failure_reason"] == "left_region"
     assert reward == -1.0 and info["state"][1] > 2  # out past the 2 m radius

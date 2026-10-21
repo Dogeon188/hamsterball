@@ -5,7 +5,7 @@ import math
 import os
 import sys
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
 from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
 from .core.marker import centre, crosses
+from .core.motion import pose
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
@@ -42,6 +43,7 @@ class _Cached:
 
     core: Core
     renderer: "mujoco.Renderer | None" = None
+    movers: list = field(default_factory=list)  # (geom id, motion, authored geom_pos, authored geom_quat) per moving marker
 
 
 def _levels(x):
@@ -111,7 +113,13 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            self._cores[level.id] = _Cached(Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size))
+            core = Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size)
+            m = core.model
+            movers = [(g, mk["motion"], m.geom_pos[g].copy(), m.geom_quat[g].copy())
+                      for g, mk in ((m.geom(name).id, mk) for name, mk in level.movers())]
+            for g, *_ in movers:  # the compiler marks a geom whose frame matches its body's, and kinematics then
+                m.geom_sameframe[g] = mujoco.mjtSameFrame.mjSAMEFRAME_NONE  # skips its geom_quat: posing needs both
+            self._cores[level.id] = _Cached(core, movers=movers)
             if len(self._cores) > self.model_cache:
                 evicted = self._cores.popitem(last=False)[1]
                 if evicted.renderer is not None:
@@ -219,7 +227,7 @@ class HamsterballEnv(gym.Env):
         event = 0.0
         survive = self.task == "survive"
         if survive:  # a point test on the current centre: the region means "stay inside"
-            inside = crosses(self._marker(("region", None)), pos, pos)
+            inside = crosses(self._marker(("region", None)), pos, pos, t=self.core.data.time)
             if inside and self._steps >= self._max_steps:
                 self._todo.clear()
         # rerun until nothing new triggers, so one step can complete several targets in task order
@@ -279,14 +287,16 @@ class HamsterballEnv(gym.Env):
         return self._todo
 
     def _target(self, pos):
-        """The current target's centre: the nearest live target (spec §9)."""
-        return min((centre(self._marker(t)) for t in self._live()), key=lambda c: np.linalg.norm(c - pos))
+        """The current target's centre at the current sim time: the nearest live target (spec §9)."""
+        now = self.core.data.time
+        return min((centre(self._marker(t), now) for t in self._live()), key=lambda c: np.linalg.norm(c - pos))
 
     def _potential(self, pos):
         return PHI_SCALE * float(np.linalg.norm(self._target(pos) - pos))
 
     def _observe(self):
         m, d = self.core.model, self.core.data
+        self._pose_movers()
         # mj_step leaves derived quantities at the state before it; recompute them (derived only: the state is untouched)
         mujoco.mj_kinematics(m, d)
         mujoco.mj_comPos(m, d)
@@ -335,6 +345,15 @@ class HamsterballEnv(gym.Env):
                 r.update_scene(d, camera=v, scene_option=V.option(v))
                 obs[v] = r.render(out=np.empty((*self.view_size, 3), np.uint8))
         return obs, vec
+
+    def _pose_movers(self):
+        """Place each moving marker's geom at its pose at the current sim time: the model is the look, not the state
+        (the geoms have no contact), so every view and the game window draw it there."""
+        m = self.core.model
+        for g, motion, pos0, quat0 in self._cores[self.level.id].movers:
+            offset, yaw = pose(motion, self.core.data.time)
+            m.geom_pos[g] = pos0 + offset
+            mujoco.mju_mulQuat(m.geom_quat[g], np.array([math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]), quat0)
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""

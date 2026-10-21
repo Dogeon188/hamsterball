@@ -3,20 +3,33 @@
 Markers are the canonical dicts of level.py. A segment of zero length is a point test.
 """
 
+import math
+
 import mujoco
 import numpy as np
 
+from .motion import pose
 
-def centre(marker):
-    """The point a task steers toward: a sphere's or box's position, a capsule's midpoint."""
+
+def centre(marker, t=0.0):
+    """The point a task steers toward at sim time t: a sphere's or box's position, a capsule's midpoint, plus the
+    marker's motion offset. It is also the pivot the marker's spin turns about."""
     if marker["type"] == "capsule":
         f = marker["fromto"]
-        return np.array([(f[0] + f[3]) / 2, (f[1] + f[4]) / 2, (f[2] + f[5]) / 2])
-    return np.array(marker["pos"])
+        c = np.array([(f[0] + f[3]) / 2, (f[1] + f[4]) / 2, (f[2] + f[5]) / 2])
+    else:
+        c = np.array(marker["pos"])
+    return c + pose(marker["motion"], t)[0] if "motion" in marker else c
 
 
-def crosses(marker, p0, p1):
+def crosses(marker, p0, p1, t=0.0):
+    """The swept test against the marker posed at sim time t (a moving marker holds still over the segment)."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    if "motion" in marker:  # test in the marker's authored frame: undo its offset, then its spin about its centre
+        offset, yaw = pose(marker["motion"], t)
+        c, cy, sy = centre(marker, 0.0), math.cos(yaw), math.sin(yaw)
+        rot = np.array([[cy, sy, 0], [-sy, cy, 0], [0, 0, 1]])  # Rz(-yaw)
+        p0, p1 = (c + (p - c - offset) @ rot.T for p in (p0, p1))
     kind = marker["type"]
     if kind == "sphere":
         return _seg_seg_dist(p0, p1, np.array(marker["pos"]), np.array(marker["pos"])) <= marker["radius"]

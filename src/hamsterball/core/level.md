@@ -21,7 +21,8 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - Task blocks: `spawn {pos, yaw_deg}`, the task's markers, `time_limit_s`. `TASK_MARKERS` lists each task's marker keys in task order: `reach_goal` `goal`; `waypoint_race` `waypoints`; `collect_items` `items`; `unlock_goal` `keys`, `goal`; `survive` `region`. The keys in `MARKER_LISTS` (`waypoints`, `items`, `keys`) hold a non-empty list of markers, in order.
 - Hazards: a level-wide list of markers under `hazards`, shared by every task; a missing or empty list loads as `[]` (filled, so it is part of the id). Each compiles after the level geoms as `hazard<i>` in `HAZARD_RGBA` (red); the name has no `/`, so the env's per-task looks never hide it.
 - Provenance: a generated level carries `generator: {name, version, task, seed, difficulty}` (string, int, task id, int, number); the id covers it. A hand-authored level has `generator = None`, and its canonical form has no `generator` key, so ids from before the block existed stand. See [generator.md](generator.md).
-- A survive spawn outside its region (the marker point test of [marker.md](marker.md)) raises.
+- Motion: the survive region may carry a `motion` ([motion.md](motion.md)), loaded with its defaults filled; absent stays absent, so a still level's canonical form and id are unchanged. No other marker takes one yet (an unknown key raises). `level.movers()` lists `(geom name, marker)` for every marker with a motion, named as `mjcf()` names its geom; the env poses those geoms. `mjcf()` compiles a moving marker at its authored pose.
+- A survive spawn outside its region (the marker point test of [marker.md](marker.md), with the region at its pose at time 0) raises.
 
 ## Invariants and checks
 
@@ -46,6 +47,8 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket hamsterball-v1/05: a 16-bit PNG is decoded by a stdlib reader (zlib and the five PNG filters) rather than Pillow, to add no dependency; MuJoCo's own PNG loader is not used, as the canonical form needs the raw uint16 samples.
 - 2026-10-22, ticket hamsterball-v1/05: `mjcf()` returns top-level MJCF sections rather than bare worldbody geoms, so hfield assets can ride along; `model.build` places them between two worldbody sections.
 
+- 2026-10-22, ticket survive-movers/01: a marker's `motion` is a key on the marker itself (offsets from its authored pose), omitted when absent, so no existing level id changes.
+
 - 2026-10-22, ticket hamsterball-v1/10: a hand-authored level's canonical form omits `generator` rather than writing `generator: null`, so the provenance block changes no existing level id.
 
 ## Tried and rejected
@@ -61,3 +64,4 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket hamsterball-v1/10: added the optional `generator` provenance block and `Level.from_dict`.
 - 2026-10-22, user play-test request: passed waypoints turn dim green; added the look constant `PASSED_RGBA` (the goal's green at alpha 0.2), which the env sets.
 - 2026-10-22, user play-test request: waypoints after the next render grey; `LOCKED_GOAL_RGBA` is renamed `LOCKED_RGBA`, since it now colours locked waypoints too.
+- 2026-10-22, ticket survive-movers/01: added the optional `motion` on the survive region, `Level.movers()`, and the bundled level `survive_drift`.

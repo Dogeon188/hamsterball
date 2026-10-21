@@ -67,7 +67,7 @@ def test_the_dataset_records_versions_platform_and_every_space_shaping_kwarg():
 
 
 def test_episode_metadata_holds_the_outcome_return_and_length():
-    env = Collector(gym.make("HamsterballSurvive-v0"))
+    env = Collector(gym.make("HamsterballSurvive-v0", levels=["first_survive"]))
     for action in ([0, 1], [0, 0]):  # run out of the region, then stand still to the time limit
         env.reset(seed=0)
         while not any(env.step(np.array(action, np.float32))[2:4]):
@@ -122,7 +122,7 @@ def test_a_pixel_env_records_state_and_goal_and_its_view_kwargs():
 
 def test_appended_episodes_get_the_outcome_metadata_too():
     # Minari's add_to_dataset skips the episode metadata callback; the game appends after every episode
-    env = Collector(gym.make("HamsterballSurvive-v0"))
+    env = Collector(gym.make("HamsterballSurvive-v0", levels=["first_survive"]))
     env.reset(seed=0)
     env.step(np.array([0, 0], np.float32))
     ds = env.create_dataset("test/append-v0", author="tester")

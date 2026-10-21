@@ -73,6 +73,14 @@ _Avoid_: level (as a difficulty grade), tier
 A volume in a level that a task reacts to when the hamsterball's centre enters it: a goal, waypoint, item, key, survive region, or hazard.
 _Avoid_: trigger, checkpoint
 
+**Motion**:
+A scripted movement of a part of a level over sim time: a closed **path** walked at constant speed or a sine **oscillation** along an axis, either with a constant spin about the vertical. A mover's pose is a function of its motion and the sim time alone.
+_Avoid_: animation, trajectory (a trajectory is a recorded episode)
+
+**Mover**:
+A part of a level that has a motion, such as a drifting survive region.
+_Avoid_: dynamic object, moving marker (alone)
+
 **Kill plane**:
 A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height

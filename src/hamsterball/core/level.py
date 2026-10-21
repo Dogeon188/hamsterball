@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from . import motion as M
 from .marker import crosses
 from .model import ROLL, TORSION
 
@@ -92,6 +93,11 @@ class Level:
     @cached_property
     def id(self):
         return hashlib.sha256(self.canonical().encode()).hexdigest()
+
+    def movers(self):
+        """(geom name, marker) of every marker that has a motion, named as `mjcf()` names its geom."""
+        return [(f"{name}/{k}", task[k]) for name, task in self.tasks.items() for k in TASK_MARKERS[name]
+                if k not in MARKER_LISTS and "motion" in task[k]]
 
     def mjcf(self):
         """MJCF sections for model.build: hfield assets, then worldbody geoms: the level's solids, the hazards, then
@@ -182,18 +188,21 @@ def _geom(g, base):
     return out
 
 
-def _marker(m):
+def _marker(m, moving=False):
+    """A marker; `moving` lets it take a `motion` (absent stays absent, so a still marker keeps its id)."""
     kind = m.get("type") if isinstance(m, dict) else None
     if kind not in MARKER_KEYS:
         raise ValueError(f"marker type {kind!r} is not one of {sorted(MARKER_KEYS)}")
     optional = {"euler"} if kind == "box" else set()
-    _keys(m, MARKER_KEYS[kind] - optional | {"type"}, optional, f"{kind} marker")
+    _keys(m, MARKER_KEYS[kind] - optional | {"type"}, optional | ({"motion"} if moving else set()), f"{kind} marker")
     out = {"type": kind}
     for k in MARKER_KEYS[kind]:
         if k == "radius":
             out[k] = _num(m[k])
         else:
             out[k] = _vec(m.get(k, [0, 0, 0]), 6 if k == "fromto" else 3)
+    if "motion" in m:
+        out["motion"] = M.load(m["motion"])
     return out
 
 
@@ -212,8 +221,8 @@ def _task(name, t):
                 raise ValueError(f"{name} {k} must be a non-empty list of markers")
             out[k] = [_marker(m) for m in t[k]]
         else:
-            out[k] = _marker(t[k])
-    if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"]):
+            out[k] = _marker(t[k], moving=k == "region")
+    if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"], t=0.0):
         raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
 
