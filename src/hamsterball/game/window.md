@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The game's window (spec §13): one resizable GLFW window on the main thread, the chase view drawn by `mjr_render` with shadows on, and the Dear ImGui HUD, pause menu, and result card on top. It's a thin shell over [play.py](play.md), which holds the logic. Ships in the `game` extra (`imgui-bundle`, `glfw`, `click`).
+The game's window (spec §13): one resizable GLFW window on the main thread, the chase view drawn by `mjr_render` with shadows on, and the Dear ImGui HUD, pause menu, and result card on top. It's a thin shell over [play.py](play.md), which holds the logic. Ships in the `game` extra (`imgui-bundle`, `glfw`); `click` is a core dependency.
 
 ## Interface
 
@@ -32,6 +32,7 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 - 2026-10-22, spec §13 and issue 18: one GLFW window and GL context on the main thread, `mjr_render` into the framebuffer, imgui-bundle's GLFW backend on top; the env's headless renderer stays separate.
 - 2026-10-22, ticket hamsterball-v1/11: imgui's OpenGL 2 renderer, not OpenGL 3, since MuJoCo needs a compatibility context and macOS gives OpenGL 3 only as a core profile.
 - 2026-10-22, ticket hamsterball-v1/11: the CLI uses click (in the `game` extra), the project's choice for new CLIs.
+- 2026-10-22, user ruling: keep Click for every CLI; it moves to the core dependencies, so the `game` extra drops it.
 
 ## Tried and rejected
 

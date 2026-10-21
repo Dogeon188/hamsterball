@@ -8,13 +8,14 @@ dependencies = [
     "gymnasium>=1.4,<2",
     "numpy",
     "pyyaml>=6.0.3",
-    "minari[arrow,create]==0.5.*",
-    "pillow>=13.0.0",
     "click>=8.1",
 ]
 
 [project.optional-dependencies]
-game = ["imgui-bundle", "glfw", "click"]
+# Minari 0.5's DataCollector imports jax, which only its `create` extra installs.
+data = ["minari[arrow,create]==0.5.*", "pillow>=13.0.0"]
+game = ["imgui-bundle", "glfw"]
+all = ["hamsterball[data,game]"]
 
 [project.scripts]
 hamsterball-play = "hamsterball.game.window:main"

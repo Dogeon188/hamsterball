@@ -15,6 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv run --locked --python ${{ matrix.python }} pytest --ignore=tests/test_data.py
+      - run: uv run --locked --all-extras --python ${{ matrix.python }} pytest --ignore=tests/test_data.py
       - name: Record and replay an episode of every task (spec §17 determinism)
-        run: uv run --locked --python ${{ matrix.python }} pytest tests/test_data.py
+        run: uv run --locked --all-extras --python ${{ matrix.python }} pytest tests/test_data.py

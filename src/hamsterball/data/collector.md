@@ -27,7 +27,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 
 ## Known quirks
 
-- Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the core dependencies are `minari[arrow,create]==0.5.*` and `pillow`, beyond spec §2's `minari[arrow]`.
+- Minari's `DataCollector` needs `jax` (`minari[create]`), and its Arrow storage imports `PIL` without declaring it, so the `data` extra holds `minari[arrow,create]==0.5.*` and `pillow`. Install `hamsterball[data]` to record or replay.
 - The episode metadata callback runs only in `create_dataset`. Minari's `add_to_dataset` copies episodes without running it, so appended episodes lack `success`, `failure_reason`, `return`, and `length`.
 - `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`.
 - `views` and `view_size` come back from `env_spec` as JSON lists; the env turns them into tuples.
@@ -39,6 +39,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - 2026-10-22, ticket hamsterball-v1/08: the Collector casts actions to the action space dtype, since Minari stores them as float32 and a float64 action would replay differently.
 
 - 2026-10-22, ticket hamsterball-v1/08: the stored observation is always `state` and `goal` from `info`, never pixels (spec §12), so a pixel env's dataset has a different observation space from the env that `recover_environment()` rebuilds.
+- 2026-10-22, user ruling: Minari and pillow move out of the core dependencies into a `data` extra, so the env installs without jax (~58 MB). Spec §2 updated. `tests/test_data.py` skips without the extra.
 
 ## Tried and rejected
 
