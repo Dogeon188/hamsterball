@@ -6,7 +6,7 @@ mj_getState(mjSTATE_INTEGRATION) vector is the core state.
 """
 
 import math
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import gymnasium as gym
 import mujoco
@@ -28,6 +28,33 @@ STATE = mujoco.mjtState.mjSTATE_INTEGRATION
 TAU = 2 * math.pi
 G = 9.81  # m/s^2, a fallen tile's acceleration (MuJoCo's default gravity)
 TILE_DROP = 1.0  # m under the kill plane where a fallen tile stays
+
+
+class Body(NamedTuple):
+    """A level body's addresses in the compiled model, its authored pos, and its motion (None for a seesaw)."""
+
+    qpos: int
+    dof: int
+    pos: np.ndarray
+    motion: dict | None
+
+
+class Tile(NamedTuple):
+    """A collapsing tile's addresses, authored pos, and the z offset it stops falling at (under the kill plane)."""
+
+    qpos: int
+    dof: int
+    pos: np.ndarray
+    bottom: float
+
+
+class Tiles(NamedTuple):
+    """A level's collapsing tiles: the first trigger-time userdata slot, the first tile's body id, the delay."""
+
+    slot: int
+    body: int
+    delay: float
+    tiles: list
 
 
 class Tier(Protocol):
@@ -109,8 +136,8 @@ def contain(model, data, resting_radius):
 
 def drive_bodies(data, bodies):
     """Pose each kinematic body at its motion's pose at data.time, with the velocity that carries it to the pose one
-    step later (the secant, so friction sees the body's real motion). bodies: (qpos adr, dof adr, pos, motion), the
-    motion None for a seesaw, which its joint moves and this leaves alone."""
+    step later (the secant, so friction sees the body's real motion). bodies: `Body`s; a seesaw (motion None) its
+    joint moves, and this leaves it alone."""
     t = data.time
     for qa, da, pos, motion in bodies:
         if motion is None:
@@ -133,7 +160,7 @@ def _fall(s, bottom):
 def drive_tiles(data, tiles):
     """Pose each collapsing tile from data.time and its trigger time (its userdata slot, +inf until the shell touches
     it): at rest until `delay` after the trigger, then falling, with the secant velocity as `drive_bodies`.
-    tiles: (first slot, first body id, delay, [(qpos adr, dof adr, pos, bottom)]), or None."""
+    tiles: `Tiles`, or None."""
     if tiles is None:
         return
     slot, _, delay, adrs = tiles
@@ -188,12 +215,18 @@ class Core:
             c = level.collapse
             self.model = m = build(self.tier, level.mjcf(), view_size, level.body_mjcf() + level.tile_mjcf(),
                                    len(c["tiles"]) if c else 0)
-            free = lambda b: (int(m.jnt_qposadr[m.body_jntadr[b]]), int(m.jnt_dofadr[m.body_jntadr[b]]))  # noqa: E731
-            ids = [m.body(f"body{i}").id for i in range(len(level.bodies))]
-            self.bodies = [(*free(b), np.array(lb["pos"]), lb.get("motion")) for b, lb in zip(ids, level.bodies)]
-            self.tiles = c and (1 + self.tier.nuserdata, m.body("tile0").id, c["delay"],
-                                [(*free(m.body(f"tile{i}").id), np.array(g["pos"]),
-                                  level.kill_plane_z - TILE_DROP - g["pos"][2]) for i, g in enumerate(c["tiles"])])
+
+            def adr(name):  # the body's first joint's qpos and dof addresses
+                j = m.body_jntadr[m.body(name).id]
+                return int(m.jnt_qposadr[j]), int(m.jnt_dofadr[j])
+
+            self.bodies = [Body(*adr(f"body{i}"), np.array(b["pos"]), b.get("motion"))
+                           for i, b in enumerate(level.bodies)]
+            self.tiles = None
+            if c:
+                self.tiles = Tiles(1 + self.tier.nuserdata, m.body("tile0").id, c["delay"],
+                                   [Tile(*adr(f"tile{i}"), np.array(g["pos"]),
+                                         level.kill_plane_z - TILE_DROP - g["pos"][2]) for i, g in enumerate(c["tiles"])])
         else:
             self.model, self.bodies, self.tiles = build(self.tier, level, view_size), [], None
         self.data = mujoco.MjData(self.model)
@@ -217,7 +250,7 @@ class Core:
         self.tier.reset(m, d, spawn)
         d.userdata[0] = yaw
         if self.tiles:
-            d.userdata[self.tiles[0]:] = math.inf  # untouched
+            d.userdata[self.tiles.slot:] = math.inf  # untouched
         drive_bodies(d, self.bodies)
         drive_tiles(d, self.tiles)
         mujoco.mj_forward(m, d)

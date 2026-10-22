@@ -17,9 +17,10 @@ import numpy as np
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
-from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, TILE_WARN_RGBA, Level
+from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, TILE_WARN_RGBA, Level,
+                         body_frame)
 from .core.marker import centre, crosses
-from .core.motion import pose
+from .core.motion import pose, quat
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
@@ -121,7 +122,7 @@ class HamsterballEnv(gym.Env):
             for g, *_ in movers:  # the compiler marks a geom whose frame matches its body's, and kinematics then
                 m.geom_sameframe[g] = mujoco.mjtSameFrame.mjSAMEFRAME_NONE  # skips its geom_quat: posing needs both
             tiles = core.tiles
-            tile_rgba = [m.geom_rgba[m.body_geomadr[tiles[1] + i]].copy() for i in range(len(tiles[3]))] if tiles else []
+            tile_rgba = [m.geom_rgba[m.body_geomadr[tiles.body + i]].copy() for i in range(len(tiles.tiles))] if tiles else []
             self._cores[level.id] = _Cached(core, movers=movers, tile_rgba=tile_rgba)
             if len(self._cores) > self.model_cache:
                 evicted = self._cores.popitem(last=False)[1]
@@ -304,14 +305,8 @@ class HamsterballEnv(gym.Env):
         for a marker that rides none."""
         if "attach" not in marker:
             return None
-        qa, q = self.core.bodies[marker["attach"]][0], self.core.data.qpos
-        body = self.level.bodies[marker["attach"]]
-        if "joint" not in body:
-            return q[qa:qa + 3], q[qa + 3:qa + 7]
-        if body["joint"]["type"] == "ball":
-            return np.array(body["pos"]), q[qa:qa + 4]
-        half = 0.5 * q[qa]
-        return np.array(body["pos"]), np.array([math.cos(half), *(math.sin(half) * np.array(body["joint"]["axis"]))])
+        i = marker["attach"]
+        return body_frame(self.level.bodies[i], self.core.data.qpos[self.core.bodies[i].qpos:])
 
     def _potential(self, pos):
         return PHI_SCALE * float(np.linalg.norm(self._target(pos) - pos))
@@ -374,9 +369,9 @@ class HamsterballEnv(gym.Env):
         (the geoms have no contact), so every view and the game window draw it there."""
         m = self.core.model
         for g, motion, pos0, quat0 in self._cores[self.level.id].movers:
-            offset, yaw = pose(motion, self.core.data.time)
-            m.geom_pos[g] = pos0 + offset
-            mujoco.mju_mulQuat(m.geom_quat[g], np.array([math.cos(yaw / 2), 0, 0, math.sin(yaw / 2)]), quat0)
+            t = self.core.data.time
+            m.geom_pos[g] = pos0 + pose(motion, t)[0]
+            mujoco.mju_mulQuat(m.geom_quat[g], quat(motion, t), quat0)
 
     def _look_tiles(self):
         """Blend each touched tile's colour toward TILE_WARN_RGBA over its delay: a look derived from the core state
@@ -385,7 +380,7 @@ class HamsterballEnv(gym.Env):
         if tiles is None:
             return
         m, d = self.core.model, self.core.data
-        slot, b0, delay, adrs = tiles
+        slot, b0, delay, _ = tiles
         for i, rgba in enumerate(self._cores[self.level.id].tile_rgba):
             f = min(1.0, (d.time - d.userdata[slot + i]) / delay) if delay else 1.0
             m.geom_rgba[m.body_geomadr[b0 + i]] = rgba + max(0.0, f) * (np.array(TILE_WARN_RGBA) - rgba)

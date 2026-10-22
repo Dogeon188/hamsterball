@@ -15,11 +15,30 @@ import numpy as np
 FORMS = {"path": {"points"}, "oscillate": {"axis", "amplitude"}}
 
 
+# Validators, shared with level (which imports this module)
+def _keys(d, required, optional, what):
+    if not isinstance(d, dict):
+        raise ValueError(f"{what} must be a mapping")
+    missing, unknown = required - d.keys(), d.keys() - required - optional
+    if missing or unknown:
+        raise ValueError(f"{what}: missing {sorted(missing)}, unknown {sorted(unknown)}")
+
+
+def _num(x):
+    if isinstance(x, bool) or not isinstance(x, (int, float)):
+        raise ValueError(f"{x!r} is not a number")
+    return float(x)
+
+
+def _vec(v, n):
+    if not isinstance(v, list) or len(v) != n:
+        raise ValueError(f"{v!r} is not a list of {n} numbers")
+    return [_num(x) for x in v]
+
+
 def load(m, tilt=False):
     """Validate a motion and fill its defaults; raises ValueError on a malformed one. `tilt` lets it take a `tilt`
     (only a body can turn off z; absent stays absent, so a motion without one keeps its id)."""
-    from .level import _keys, _num, _vec  # level imports this module
-
     kind = m.get("type") if isinstance(m, dict) else None
     if kind not in FORMS:
         raise ValueError(f"motion type {kind!r} is not one of {sorted(FORMS)}")
@@ -46,8 +65,6 @@ def load(m, tilt=False):
 
 def _tilt(t, period):
     """`{axis: [x, y, 0], amplitude (deg), period (default the motion's), phase: 0}`."""
-    from .level import _keys, _num, _vec
-
     _keys(t, {"axis", "amplitude"}, {"period", "phase"}, "tilt")
     axis = np.array(_vec(t["axis"], 3))
     if axis[2] or not np.linalg.norm(axis):

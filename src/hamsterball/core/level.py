@@ -2,6 +2,8 @@
 
 import base64
 import hashlib
+import itertools
+import math
 import struct
 import zlib
 from dataclasses import asdict, dataclass, field
@@ -13,6 +15,7 @@ import yaml
 
 from . import motion as M
 from .marker import crosses
+from .motion import _keys, _num, _unit, _vec
 from .model import ROLL, TORSION
 
 GEOM_SIZES = {"plane": 3, "box": 3, "sphere": 1, "capsule": 2}
@@ -55,7 +58,7 @@ class Level:
     follow_yaw_deg: float = 0.0
     version: int = 1
     generator: dict | None = None  # provenance of a generated level; hand-authored files omit it
-    bodies: list = field(default_factory=list)  # kinematic bodies; a level without them omits the key
+    bodies: list = field(default_factory=list)  # kinematic bodies and seesaws; a level without them omits the key
     collapse: dict | None = None  # collapsing tiles {delay, tiles}; a level without them omits the key
 
     @classmethod
@@ -137,62 +140,64 @@ class Level:
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
 
     def body_mjcf(self):
-        """MJCF sections for model.build's `bodies`, after the view mocaps: each kinematic body `body<i>` (a free
-        joint, gravity compensated, heavy) with its geoms and the markers attached to it, and a contact exclude from
-        the world and from each other (the core poses them, so only the shell should touch them). "" for a level
-        without bodies."""
+        """MJCF sections for model.build's `bodies`, after the view mocaps: each body `body<i>` with its geoms and the
+        markers attached to it (a kinematic body as `_free_mjcf`, a seesaw as `_seesaw_mjcf`), and a contact exclude
+        from the world and from each other (the core poses or the joint moves them, so only the shell should touch
+        them). "" for a level without bodies."""
         if not self.bodies:
             return ""
         names = [f"body{i}" for i in range(len(self.bodies))]
-        attached = [(task[k]["attach"], _marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
-                    for name, task in self.tasks.items() for k in TASK_MARKERS[name]
+        attached = [(task[k], f"{name}/{k}", MARKER_RGBA[k]) for name, task in self.tasks.items() for k in TASK_MARKERS[name]
                     if k not in MARKER_LISTS and "attach" in task[k]]
-        out = [
-            f'<body name="{n}" pos="{_s(b["pos"])}" gravcomp="1"><freejoint/>'
-            f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
-            + "".join(_geom_mjcf(g) for g in b["geoms"]) + "".join(x for j, x in attached if j == i) + "</body>"
-            if "motion" in b else _seesaw_mjcf(n, b, "".join(x for j, x in attached if j == i))
-            for i, (n, b) in enumerate(zip(names, self.bodies))
-        ]
-        ex = [f'<exclude body1="world" body2="{n}"/>' for n in names]
-        ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(names) for b in names[i + 1:]]
-        return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
+        out = []
+        for i, (n, b) in enumerate(zip(names, self.bodies)):
+            mass = ' mass="0"' if "joint" in b else ""  # a marker on a seesaw weighs nothing
+            marks = "".join(_marker_mjcf(m, mn, rgba, mass) for m, mn, rgba in attached if m["attach"] == i)
+            out.append(_free_mjcf(n, b["pos"], "".join(_geom_mjcf(g) for g in b["geoms"]) + marks)
+                       if "motion" in b else _seesaw_mjcf(n, b, marks))
+        return _sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
 
     def tile_mjcf(self):
         """MJCF sections for model.build's `bodies`, after `body_mjcf()`'s: each collapsing tile `tile<i>`, a kinematic
-        body (as a kinematic body is) at its geom's pos, excluded from the world, the bodies, and each other. "" for a
-        level without tiles."""
+        body (`_free_mjcf`) at its geom's pos, excluded from the world, the bodies, and each other. "" for a level
+        without tiles."""
         if self.collapse is None:
             return ""
         tiles = [f"tile{i}" for i in range(len(self.collapse["tiles"]))]
-        out = [
-            f'<body name="{n}" pos="{_s(g["pos"])}" gravcomp="1"><freejoint/>'
-            f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>'
-            + _geom_mjcf({**g, "pos": [0.0, 0.0, 0.0]}) + "</body>"
-            for n, g in zip(tiles, self.collapse["tiles"])
-        ]
-        ex = [f'<exclude body1="{a}" body2="{t}"/>' for t in tiles
-              for a in ["world", *(f"body{i}" for i in range(len(self.bodies)))]]
-        ex += [f'<exclude body1="{a}" body2="{b}"/>' for i, a in enumerate(tiles) for b in tiles[i + 1:]]
-        return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(out), "".join(ex))
+        out = [_free_mjcf(n, g["pos"], _geom_mjcf({**g, "pos": [0.0, 0.0, 0.0]}))
+               for n, g in zip(tiles, self.collapse["tiles"])]
+        others = ["world", *(f"body{i}" for i in range(len(self.bodies)))]
+        return _sections(out, [(a, t) for t in tiles for a in others] + list(itertools.combinations(tiles, 2)))
+
+
+def _free_mjcf(name, pos, inner):
+    """A kinematic body: a free joint, gravity compensated, heavy (BODY_MASS), holding the MJCF `inner`."""
+    return (f'<body name="{name}" pos="{_s(pos)}" gravcomp="1"><freejoint/>'
+            f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>{inner}</body>')
+
+
+def _sections(bodies, excludes):
+    """A `<worldbody>` of the bodies' MJCF and a `<contact>` excluding each (body1, body2) pair."""
+    ex = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in excludes)
+    return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(bodies), ex)
 
 
 def _seesaw_mjcf(name, b, attached):
     """A seesaw: a passive hinge or ball joint at the body's origin (its pivot), gravity compensated so only the
     shell's weight and the spring tip it; its mass split evenly over its geoms, which then set its inertia (its
-    attached markers weigh nothing)."""
+    attached markers, `attached`, weigh nothing)."""
     j = b["joint"]
     kind = f'type="hinge" axis="{_s(j["axis"])}" range="{-j["range"]!r} {j["range"]!r}"' if j["type"] == "hinge" \
         else f'type="ball" range="0 {j["range"]!r}"'
-    mass = j["mass"] / len(b["geoms"])
+    mass = f' mass="{j["mass"] / len(b["geoms"])!r}"'
     return (f'<body name="{name}" pos="{_s(b["pos"])}" gravcomp="1"><joint {kind} limited="true" '
             f'stiffness="{j["stiffness"]!r}" damping="{j["damping"]!r}"/>'
-            + "".join(_geom_mjcf(g).replace("/>", f' mass="{mass!r}"/>') for g in b["geoms"])
-            + attached.replace("/>", ' mass="0"/>') + "</body>")  # a marker has no mass
+            + "".join(_geom_mjcf(g, extra=mass) for g in b["geoms"]) + attached + "</body>")
 
 
-def _geom_mjcf(g, shape=None):
-    """A level solid: group 0, contype and conaffinity 1 (the shell's outer sphere), contact values with priority."""
+def _geom_mjcf(g, shape=None, extra=""):
+    """A level solid: group 0, contype and conaffinity 1 (the shell's outer sphere), contact values with priority;
+    `extra` attributes last."""
     rgba = " ".join(map(repr, g.get("rgba", [0.45, 0.5, 0.45, 1.0])))
     shape = shape or f'size="{_s(g["size"])}"'
     if CONTACT.keys() & g.keys():
@@ -201,41 +206,21 @@ def _geom_mjcf(g, shape=None):
         shape += f' priority="1" condim="6" friction="{slide!r} {TORSION!r} {roll!r}"'
         shape += "".join(f' {k}="{_s(g[k])}"' for k in ("solref", "solimp") if k in g)
     return (f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" {shape} euler="{_s(g["euler"])}" '
-            f'rgba="{rgba}" contype="1" conaffinity="1" group="0"/>')
+            f'rgba="{rgba}" contype="1" conaffinity="1" group="0"{extra}/>')
 
 
-def _marker_mjcf(m, name, rgba):
+def _marker_mjcf(m, name, rgba, extra=""):
     if m["type"] == "sphere":
         shape = f'pos="{_s(m["pos"])}" size="{m["radius"]!r}"'
     elif m["type"] == "box":
         shape = f'pos="{_s(m["pos"])}" size="{_s(m["size"])}" euler="{_s(m["euler"])}"'
     else:
         shape = f'fromto="{_s(m["fromto"])}" size="{m["radius"]!r}"'
-    return f'<geom name="{name}" type="{m["type"]}" {shape} rgba="{_s(rgba)}" contype="0" conaffinity="0" group="0"/>'
+    return f'<geom name="{name}" type="{m["type"]}" {shape} rgba="{_s(rgba)}" contype="0" conaffinity="0" group="0"{extra}/>'
 
 
 def _s(v):
     return " ".join(map(repr, v))
-
-
-def _keys(d, required, optional, what):
-    if not isinstance(d, dict):
-        raise ValueError(f"{what} must be a mapping")
-    missing, unknown = required - d.keys(), d.keys() - required - optional
-    if missing or unknown:
-        raise ValueError(f"{what}: missing {sorted(missing)}, unknown {sorted(unknown)}")
-
-
-def _num(x):
-    if isinstance(x, bool) or not isinstance(x, (int, float)):
-        raise ValueError(f"{x!r} is not a number")
-    return float(x)
-
-
-def _vec(v, n):
-    if not isinstance(v, list) or len(v) != n:
-        raise ValueError(f"{v!r} is not a list of {n} numbers")
-    return [_num(x) for x in v]
 
 
 def _geom(g, base):
@@ -264,11 +249,7 @@ def _body(b, base):
     _keys(b, {"geoms"}, {"pos", "motion", "joint"}, "body")
     if ("motion" in b) == ("joint" in b):
         raise ValueError("a body needs a motion (driven) or a joint (a seesaw), not both or neither")
-    if not isinstance(b["geoms"], list) or not b["geoms"]:
-        raise ValueError("a body needs a non-empty list of geoms")
-    geoms = [_geom(g, base) for g in b["geoms"]]
-    if bad := {g["type"] for g in geoms} - BODY_GEOMS:
-        raise ValueError(f"body geom types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
+    geoms = _solids(b["geoms"], base, "a body", "geoms")
     pos = _vec(b.get("pos", [0, 0, 0]), 3)
     if "joint" in b:
         return {"pos": pos, "geoms": geoms, "joint": _joint(b["joint"])}
@@ -287,7 +268,7 @@ def _joint(j):
         axis = _vec(j["axis"], 3)
         if axis[2] != 0 or not any(axis):
             raise ValueError(f"hinge axis {axis} is not a horizontal direction")
-        out["axis"] = M._unit(np.array(axis))
+        out["axis"] = _unit(np.array(axis))
     out |= {"stiffness": _num(j["stiffness"]), "damping": _num(j.get("damping", 0)), "range": _num(j["range"]),
             "mass": _num(j.get("mass", SEESAW_MASS))}
     if out["stiffness"] < 0 or out["damping"] < 0 or out["mass"] <= 0 or not 0 < out["range"] < 90:
@@ -295,15 +276,21 @@ def _joint(j):
     return out
 
 
+def _solids(gs, base, owner, key):
+    """A body's `geoms` or the collapse `tiles`: a non-empty list of geoms that can move (BODY_GEOMS)."""
+    if not isinstance(gs, list) or not gs:
+        raise ValueError(f"{owner} needs a non-empty list of {key}")
+    out = [_geom(g, base) for g in gs]
+    if bad := {g["type"] for g in out} - BODY_GEOMS:
+        raise ValueError(f"{key[:-1]} types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
+    return out
+
+
 def _collapse(c, base):
     """Collapsing tiles: `tiles` (box, sphere or capsule geoms in world coordinates), each falling `delay` s after the
     shell first touches it."""
     _keys(c, {"delay", "tiles"}, set(), "collapse")
-    if not isinstance(c["tiles"], list) or not c["tiles"]:
-        raise ValueError("collapse needs a non-empty list of tiles")
-    tiles = [_geom(g, base) for g in c["tiles"]]
-    if bad := {g["type"] for g in tiles} - BODY_GEOMS:
-        raise ValueError(f"tile types {sorted(bad)} are not in {sorted(BODY_GEOMS)}")
+    tiles = _solids(c["tiles"], base, "collapse", "tiles")
     if (delay := _num(c["delay"])) < 0:
         raise ValueError(f"collapse delay {delay} is negative")
     return {"delay": delay, "tiles": tiles}
@@ -334,12 +321,20 @@ def _marker(m, moving=False, n_bodies=0):
     return out
 
 
-def body_frame(body, t):
-    """A body's world pose (pos, quat) at sim time t, from its motion: the frame its attached markers ride. A seesaw
-    starts level."""
-    if "joint" in body:
+def body_frame(body, q=None):
+    """A body's world pose (pos, quat), the frame its attached markers ride. From `q`, its joint's qpos slice (a free
+    joint's position and quaternion, a ball's quaternion, a hinge's angle about its axis about the fixed pivot), when
+    given; else its pose at t = 0, a seesaw level."""
+    if "joint" not in body:
+        if q is None:
+            return np.array(body["pos"]) + M.pose(body["motion"], 0.0)[0], M.quat(body["motion"], 0.0)
+        return q[:3], q[3:7]
+    if q is None:
         return np.array(body["pos"]), np.array([1.0, 0.0, 0.0, 0.0])
-    return np.array(body["pos"]) + M.pose(body["motion"], t)[0], M.quat(body["motion"], t)
+    if body["joint"]["type"] == "ball":
+        return np.array(body["pos"]), q[:4]
+    half = 0.5 * q[0]
+    return np.array(body["pos"]), np.array([math.cos(half), *(math.sin(half) * np.array(body["joint"]["axis"]))])
 
 
 def _task(name, t, bodies=()):
@@ -359,7 +354,7 @@ def _task(name, t, bodies=()):
         else:
             out[k] = _marker(t[k], moving=k == "region", n_bodies=len(bodies))
     if name == "survive" and not crosses(out["region"], out["spawn"]["pos"], out["spawn"]["pos"], t=0.0,
-                                         frame=body_frame(bodies[out["region"]["attach"]], 0.0) if "attach" in out["region"] else None):
+                                         frame=body_frame(bodies[out["region"]["attach"]]) if "attach" in out["region"] else None):
         raise ValueError(f"survive spawn {out['spawn']['pos']} is outside its region")
     return out
 

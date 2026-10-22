@@ -132,7 +132,7 @@ def layout(level):
     if level.collapse:
         return "collapse"
     if level.bodies:
-        return "seesaw" if "joint" in level.bodies[0] else "platform" if "attach" in region else "obstacles"
+        return "seesaw" if "joint" in level.bodies[0] else "platform" if "attach" in region else "pillars"
     f = region["fromto"]
     return "ridge" if f[:2] != f[3:5] else "plateau"
 
@@ -141,7 +141,7 @@ def test_survive_picks_one_of_six_layouts_by_seed():
     from collections import Counter
 
     counts = Counter(layout(GEN("survive", s, 0.0)) for s in range(120))
-    assert set(counts) == {"plateau", "ridge", "obstacles", "platform", "seesaw", "collapse"}
+    assert set(counts) == {"plateau", "ridge", "pillars", "platform", "seesaw", "collapse"}
     assert all(10 <= n <= 30 for n in counts.values()), counts  # 1/6 each
 
 
@@ -267,7 +267,7 @@ def first(kind, d):
 ])
 def test_the_body_layouts_scale_with_difficulty(d, pillars, speed, tilt, k, off, delay):
     peak = lambda m: m["amplitude"] * 2 * np.pi / m["period"]  # noqa: E731
-    bodies = first("obstacles", d).bodies
+    bodies = first("pillars", d).bodies
     assert len(bodies) == pillars and all(abs(peak(b["motion"]) - speed) < 0.01 for b in bodies)
     m = first("platform", d).bodies[0]["motion"]
     assert abs(peak(m) - GEN.params(d)["platform_speed"]) < 0.01

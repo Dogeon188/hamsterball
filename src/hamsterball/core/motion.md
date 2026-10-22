@@ -24,7 +24,7 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 
 ## Known quirks
 
-- `load` imports `level`'s validation helpers inside the function, since `level` imports this module.
+- The loader's validation helpers `_keys`, `_num`, `_vec` (and `_unit`) live here, and `level` imports them, since `level` imports this module anyway.
 - `pose` gives no velocity. A kinematic body (ticket 03) that needs one for contact friction adds it here, beside `pose`, from the same formulas.
 - An axis loads normalised only when its norm isn't already 1 (within 1e-12): a replay reloads the canonical level, and dividing a unit vector by its norm again moved the last bit of `[1, 1, 0]`'s components, so a `survive_raft` replay diverged at reset by 1.4e-17 in the body's angular velocity before this (ticket survive-movers/04).
 
@@ -43,3 +43,4 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 - 2026-10-22, ticket survive-movers/02: hazards use it too (`survive_sweepers`).
 - 2026-10-22, ticket survive-movers/03: kinematic bodies reuse `pose`. Their velocity is the secant over one physics step (in `step.drive_bodies`), not an analytic derivative beside `pose`, which the Known quirks entry anticipated: it lands the integrator exactly on the next pose and needs no second set of formulas.
 - 2026-10-22, ticket survive-movers/04: added `tilt` and `quat` for `survive_raft`; `_unit` keeps axis normalisation idempotent (see Known quirks).
+- 2026-10-22, code review of survive-movers: `_keys`, `_num`, `_vec` moved here from `level`, which imports them, in place of function-level imports of `level`.
