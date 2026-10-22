@@ -118,7 +118,7 @@ def test_the_spawn_check_uses_the_attached_bodys_pose_at_time_zero():
 
 
 def env(lv, **kw):
-    return gym.make("Hamsterball-v0", tasks=["survive"], levels=[lv], **kw)
+    return gym.make("Hamsterball-v1", tasks=["survive"], levels=[lv], **kw)
 
 
 def test_a_spawned_hamsterball_rests_on_the_platform_at_reset():
@@ -141,7 +141,7 @@ def test_the_region_test_and_goal_vector_follow_the_attached_body():
     np.testing.assert_allclose(obs["goal"][:3], [0, 0, 0], atol=1e-3)  # the region centre (0, 0, 0.5) at t = 0
     for i in range(1, 61):
         obs, _, terminated, _, info = e.step(np.zeros(2, np.float32))
-        if i == 15:  # 0.25 s: the body is 1 m along +x (camera yaw 0, so camera x is world x)
+        if i == 15:  # 0.25 s: the body is 1 m along +x (facing 0, so camera x is world x)
             np.testing.assert_allclose(obs["goal"][:3], [1, 0, 0], atol=1e-3)
         if terminated:
             break

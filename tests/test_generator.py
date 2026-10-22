@@ -31,7 +31,7 @@ def test_the_hamsterball_rests_at_a_generated_spawn():
 
 def toward_target(obs):
     """test_tasks.py's scripted controller: steer the shell's velocity toward the current target at up to 3 m/s."""
-    g, v = obs["goal"][:2], obs["state"][6:8]
+    g, v = obs["goal"][:2], obs["state"][8:10]
     a = g / max(np.linalg.norm(g), 1e-9) * min(3.0, np.linalg.norm(g)) - v
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
 
@@ -175,8 +175,8 @@ def spiral_walk(obs, walk):
     if np.linalg.norm(pts[i] - p) < 0.4:
         walk[1] = i = i + 1
     w = pts[i] - p
-    g = np.array([w[0] * cy + w[1] * sy, -w[0] * sy + w[1] * cy])  # world -> camera yaw frame, as the goal vector
-    a = g / max(np.linalg.norm(g), 1e-9) * 2.0 - obs["state"][6:8]
+    g = np.array([w[0] * cy + w[1] * sy, -w[0] * sy + w[1] * cy])  # world -> facing frame, as the goal vector
+    a = g / max(np.linalg.norm(g), 1e-9) * 2.0 - obs["state"][8:10]
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
 
 
@@ -431,7 +431,7 @@ def test_a_generated_episode_records_and_replays(tmp_path, monkeypatch):
     from hamsterball.data import Collector, replay
 
     monkeypatch.setenv("MINARI_DATASETS_PATH", str(tmp_path))
-    env = Collector(gym.make("HamsterballCollectItems-v0", levels=GEN, difficulty=0.7))
+    env = Collector(gym.make("HamsterballCollectItems-v1", levels=GEN, difficulty=0.7))
     env.action_space.seed(0)
     env.reset(seed=3)
     for _ in range(20):

@@ -12,7 +12,7 @@ ALL = list(TASKS)
 
 
 def make(**kw):
-    return gym.make("Hamsterball-v0", **{"tasks": ALL, **kw})
+    return gym.make("Hamsterball-v1", **{"tasks": ALL, **kw})
 
 
 def drawn(env, seed):
@@ -43,21 +43,21 @@ def test_an_episode_replays_from_its_reset_options_alone():
     _, info = env.reset(seed=7)
     opts = info["reset_options"]
     states = [env.step(a)[4]["core_state"] for a in actions]
-    other = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=["first_goal"])  # different kwargs
+    other = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"])  # different kwargs
     _, info2 = other.reset(options={"level": opts["level"], "task": opts["task"]})
     assert info2["reset_options"] == opts
     np.testing.assert_array_equal(states, [other.step(a)[4]["core_state"] for a in actions])
 
 
 def test_level_and_task_options_are_used_as_given():
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=["first_goal"])
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"])
     lv = Level.load(LEVELS_DIR / "first_survive.yaml")
     _, info = env.reset(options={"level": lv, "task": "survive"})
     assert info["reset_options"] == {"level": lv.canonical(), "level_id": lv.id, "task": "survive"}
 
 
 def test_a_task_option_draws_a_pool_level_that_supports_it():
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"])  # options override the task filter
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"])  # options override the task filter
     for s in range(5):
         _, info = env.reset(seed=s, options={"task": "collect_items"})
         assert info["reset_options"]["task"] == "collect_items"
@@ -65,7 +65,7 @@ def test_a_task_option_draws_a_pool_level_that_supports_it():
 
 
 def test_a_task_option_no_pool_level_supports_raises():
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=["first_goal"])
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"])
     with pytest.raises(ValueError):
         env.reset(options={"task": "survive"})
 
@@ -80,10 +80,10 @@ def two_task_level():
 
 def test_a_level_option_takes_an_allowed_task_then_falls_back_to_any():
     lv = two_task_level()
-    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"])
+    env = gym.make("Hamsterball-v1", tasks=["survive"], levels=["first_survive"])
     for s in range(5):
         assert env.reset(seed=s, options={"level": lv})[1]["reset_options"]["task"] == "survive"
-    env = gym.make("Hamsterball-v0", tasks=["waypoint_race"], levels=["waypoint_loop"])
+    env = gym.make("Hamsterball-v1", tasks=["waypoint_race"], levels=["waypoint_loop"])
     tasks = {env.reset(seed=s, options={"level": lv})[1]["reset_options"]["task"] for s in range(20)}
     assert tasks == {"reach_goal", "survive"}
 
@@ -95,14 +95,14 @@ def test_a_level_that_lacks_the_task_raises():
 
 
 def test_no_options_draws_a_pool_level_then_an_allowed_task():
-    env = gym.make("Hamsterball-v0", tasks=["survive", "reach_goal"], levels=[two_task_level(), "waypoint_loop"])
+    env = gym.make("Hamsterball-v1", tasks=["survive", "reach_goal"], levels=[two_task_level(), "waypoint_loop"])
     seen = {drawn(env, s)[1] for s in range(20)}
     assert seen == {"survive", "reach_goal"}  # waypoint_loop has no allowed task, so it is never drawn
 
 
 def test_construction_raises_when_no_pool_level_supports_an_allowed_task():
     with pytest.raises(ValueError):
-        gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_goal", "waypoint_loop"])
+        gym.make("Hamsterball-v1", tasks=["survive"], levels=["first_goal", "waypoint_loop"])
 
 
 def test_levels_take_names_paths_directories_and_level_objects(tmp_path):
@@ -119,7 +119,7 @@ def test_set_levels_replaces_the_pool_from_the_next_reset():
     env.unwrapped.set_levels(["first_survive"])
     assert {drawn(env, s)[1] for s in range(5)} == {"survive"}
     with pytest.raises(ValueError):
-        gym.make("Hamsterball-v0", tasks=["reach_goal"]).unwrapped.set_levels(["first_survive"])
+        gym.make("Hamsterball-v1", tasks=["reach_goal"]).unwrapped.set_levels(["first_survive"])
 
 
 def test_set_levels_works_through_a_vector_envs_call():
@@ -149,12 +149,12 @@ def test_the_model_cache_is_an_lru_keyed_by_level_id(monkeypatch):
 
 
 PRESETS = {
-    "Hamsterball-v0": set(TASKS),  # the bare id: `tasks` defaults to every task id
-    "HamsterballReachGoal-v0": {"reach_goal"},
-    "HamsterballWaypointRace-v0": {"waypoint_race"},
-    "HamsterballCollectItems-v0": {"collect_items"},
-    "HamsterballUnlockGoal-v0": {"unlock_goal"},
-    "HamsterballSurvive-v0": {"survive"},
+    "Hamsterball-v1": set(TASKS),  # the bare id: `tasks` defaults to every task id
+    "HamsterballReachGoal-v1": {"reach_goal"},
+    "HamsterballWaypointRace-v1": {"waypoint_race"},
+    "HamsterballCollectItems-v1": {"collect_items"},
+    "HamsterballUnlockGoal-v1": {"unlock_goal"},
+    "HamsterballSurvive-v1": {"survive"},
 }
 
 
@@ -166,6 +166,12 @@ def test_each_id_constructs_with_no_kwargs_and_its_default_pool(env_id):
 
 def test_the_general_id_takes_every_task():
     assert {drawn(make(), s)[1] for s in range(40)} == set(TASKS)
+
+
+def test_this_release_registers_v1_and_retires_v0():
+    assert hamsterball.ENV_VERSION == 1
+    with pytest.raises(gym.error.DeprecatedEnv, match=r"hamsterball==0\.\*"):
+        gym.make("HamsterballSurvive-v0")
 
 
 def test_an_older_id_raises_naming_the_release_to_install(monkeypatch):
@@ -183,7 +189,7 @@ def test_an_older_id_raises_naming_the_release_to_install(monkeypatch):
 def test_discrete_action_is_a_no_op_plus_8_directions_by_3_efforts():
     from hamsterball.env import DiscreteAction
 
-    env = DiscreteAction(gym.make("HamsterballReachGoal-v0"))
+    env = DiscreteAction(gym.make("HamsterballReachGoal-v1"))
     assert env.action_space == gym.spaces.Discrete(25)
     np.testing.assert_array_equal(env.action(0), [0, 0])
     np.testing.assert_allclose(env.action(1), [0, 0.25], atol=1e-7)  # forward, quarter effort
@@ -194,5 +200,5 @@ def test_discrete_action_is_a_no_op_plus_8_directions_by_3_efforts():
     assert len(np.unique(acts.round(6), axis=0)) == 25 and acts.dtype == np.float32
     env.reset(seed=0)
     env.step(17)
-    cam = DiscreteAction(gym.make("HamsterballReachGoal-v0", camera_action=True))
-    np.testing.assert_allclose(cam.action(1), [0, 0.25, 0], atol=1e-7)  # cam_yaw held at 0
+    cam = DiscreteAction(gym.make("HamsterballReachGoal-v1", camera_action=True))
+    np.testing.assert_allclose(cam.action(1), [0, 0.25, 0, 0], atol=1e-7)  # turn and cam_pitch held at 0

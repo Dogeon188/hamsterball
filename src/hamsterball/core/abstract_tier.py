@@ -5,7 +5,7 @@ import math
 import gymnasium as gym
 import numpy as np
 
-from .model import HAM, HAM_DOF, HAM_QPOS, M_HAM, R, SHELL, SHELL_DOF, SOLREF, T, TILE_NORMALS
+from .model import CORE_SLOTS, HAM, HAM_DOF, HAM_QPOS, M_HAM, R, SHELL, SHELL_DOF, SOLREF, T, TILE_NORMALS
 
 R_HAM = 0.12
 REST = R - T - R_HAM  # resting radius, hamster centre to shell centre (0.35 m)
@@ -15,7 +15,7 @@ K_GRIP = 2.0 * S  # N m s/rad: damps hamster spin relative to the shell
 LEAN = math.radians(70)  # lean ceiling at full effort
 TOUCH = 0.002 + 0.003  # wall gap (m) that counts as touching: the 2 mm margin + 3 mm
 GRACE = 0.045  # s after the last touch before the foot force cuts out
-LAST_TOUCH = 1  # userdata slot; slot 0 is the core's camera yaw
+LAST_TOUCH = CORE_SLOTS  # userdata slot, the first after the core's
 
 
 class AbstractTier:
@@ -38,10 +38,10 @@ class AbstractTier:
         data.qvel[HAM_DOF:HAM_DOF + 6] = 0
         data.userdata[LAST_TOUCH] = data.time
 
-    def obs(self, model, data, yaw):
+    def obs(self, model, data, facing):
         return {"wall_contact": data.time - data.userdata[LAST_TOUCH] <= GRACE}
 
-    def drive(self, model, data, action, yaw):
+    def drive(self, model, data, action, facing):
         """Foot force pair and grip couple into xfrc_applied. Needs fresh xpos/xmat/xipos for the current qpos."""
         cx, cy, cz = data.xpos[SHELL].tolist()
         hx, hy, hz = data.xipos[HAM].tolist()
@@ -57,9 +57,9 @@ class AbstractTier:
         ax, ay = float(action[0]), float(action[1])
         mag = math.hypot(ax, ay)
         e = min(mag, 1.0)
-        if mag > 0:  # camera frame -> world: rotate by the camera yaw
+        if mag > 0:  # camera frame -> world: rotate by the facing
             ax, ay = ax / mag, ay / mag
-            cyw, syw = math.cos(yaw), math.sin(yaw)
+            cyw, syw = math.cos(facing), math.sin(facing)
             ax, ay = ax * cyw - ay * syw, ax * syw + ay * cyw
         sl, cl = math.sin(LEAN * e), math.cos(LEAN * e)
         tx, ty, tz = sl * ax, sl * ay, -cl  # target lean

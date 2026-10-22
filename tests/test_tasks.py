@@ -12,8 +12,8 @@ FORWARD = np.array([0, 1], np.float32)
 
 
 def toward_target(obs):
-    """A scripted controller: steer the shell's velocity toward the current target, in the camera yaw frame."""
-    g, v = obs["goal"][:2], obs["state"][6:8]
+    """A scripted controller: steer the shell's velocity toward the current target, in the facing frame."""
+    g, v = obs["goal"][:2], obs["state"][8:10]
     want = g / np.linalg.norm(g) * min(3.0, np.linalg.norm(g))  # aim at 3 m/s, slowing on the last metres
     a = want - v
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
@@ -35,7 +35,7 @@ def level(task, **markers):
 
 
 def make(task, lv, **kw):
-    env = gym.make("Hamsterball-v0", tasks=[task], levels=[lv], **kw)
+    env = gym.make("Hamsterball-v1", tasks=[task], levels=[lv], **kw)
     obs, info = env.reset(seed=0)
     return env, obs
 
@@ -97,7 +97,7 @@ def test_collect_items_targets_the_nearest_item_and_hides_it_once_collected():
     obs, _, _, info = next(s for s in roll_forward(env, 3) if s[3]["reward_terms"]["event"])
     assert info["reward_terms"]["event"] == 1 and not info["success"]
     assert rgba(env, "collect_items/items/1")[3] == 0 and rgba(env, "collect_items/items/0")[3] > 0
-    other = np.linalg.norm(np.array([0, -6, 0.5]) - obs["state"][:3])  # the camera yaw frame turns; distance doesn't
+    other = np.linalg.norm(np.array([0, -6, 0.5]) - obs["state"][:3])  # the facing frame turns; distance doesn't
     assert np.linalg.norm(obs["goal"][:3]) == pytest.approx(other, rel=1e-5)
     assert obs["goal"][4] == pytest.approx(0.5)
 
@@ -139,7 +139,7 @@ def test_only_the_episode_task_markers_show():
 
 @pytest.mark.parametrize("gamma", [0.99, 0.5])
 def test_shaping_adds_gamma_phi_next_minus_phi_and_phi_is_0_at_the_terminal_state(gamma):
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=["first_goal"], shaped=True, shaping_gamma=gamma)
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], shaped=True, shaping_gamma=gamma)
     obs, _ = env.reset(seed=0)
     dist = 8.0  # first_goal: the goal sits 8 m ahead of the spawn
     for _ in range(1000):
@@ -162,7 +162,7 @@ def test_shaping_is_off_by_default():
 
 @pytest.mark.parametrize("task, targets", [("waypoint_race", "waypoints"), ("collect_items", "items"), ("unlock_goal", "keys")])
 def test_each_task_plays_to_success_on_its_bundled_level(task, targets):
-    env = gym.make("Hamsterball-v0", tasks=[task])  # the default pool: every bundled level
+    env = gym.make("Hamsterball-v1", tasks=[task])  # the default pool: every bundled level
     obs, _ = env.reset(seed=0)
     n = len(env.unwrapped.level.tasks[task][targets])
     events = []

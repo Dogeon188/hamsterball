@@ -5,43 +5,91 @@ import math
 import numpy as np
 import pytest
 
-from hamsterball.game.play import action
+from hamsterball.game.play import STICK_PITCH, STICK_TURN, Mouse, action
 
 
 def test_keys_run_in_the_camera_frame_at_half_effort():
-    np.testing.assert_allclose(action({"w"}), [0, 0.5, 0])
-    np.testing.assert_allclose(action({"d"}), [0.5, 0, 0])
+    np.testing.assert_allclose(action({"w"}), [0, 0.5, 0, 0])
+    np.testing.assert_allclose(action({"d"}), [0.5, 0, 0, 0])
     h = 0.5 / math.sqrt(2)
-    np.testing.assert_allclose(action({"w", "a"}), [-h, h, 0])
-    np.testing.assert_allclose(action({"w", "s"}), [0, 0, 0])
-    np.testing.assert_allclose(action(set()), [0, 0, 0])
+    np.testing.assert_allclose(action({"w", "a"}), [-h, h, 0, 0])
+    np.testing.assert_allclose(action({"w", "s"}), [0, 0, 0, 0])
+    np.testing.assert_allclose(action(set()), [0, 0, 0, 0])
 
 
 def test_shift_walks_ctrl_sprints_both_walk():
-    np.testing.assert_allclose(action({"s", "shift"}), [0, -0.25, 0])
-    np.testing.assert_allclose(action({"s", "ctrl"}), [0, -1.0, 0])
-    np.testing.assert_allclose(action({"s", "shift", "ctrl"}), [0, -0.25, 0])
+    np.testing.assert_allclose(action({"s", "shift"}), [0, -0.25, 0, 0])
+    np.testing.assert_allclose(action({"s", "ctrl"}), [0, -1.0, 0, 0])
+    np.testing.assert_allclose(action({"s", "shift", "ctrl"}), [0, -0.25, 0, 0])
 
 
 def test_q_turns_left_e_turns_right():
-    # +cam_yaw raises the yaw, turning camera forward from +y toward -x: left
-    assert action({"q"})[2] == 1
-    assert action({"e"})[2] == -1
+    # +turn raises the facing, turning camera forward from +y toward -x: left
+    assert action({"q"})[2] == pytest.approx(STICK_TURN)
+    assert action({"e"})[2] == pytest.approx(-STICK_TURN)
     assert action({"q", "e"})[2] == 0
 
 
 def test_left_stick_deadzone_rescales_effort_and_overrides_keys():
     # GLFW sticks: y is down, so pushing up is y = -1
-    np.testing.assert_allclose(action({"w"}, left=(0.1, -0.1)), [0, 0.5, 0])  # inside the deadzone: keys win
-    np.testing.assert_allclose(action({"w"}, left=(0.0, 1.0)), [0, -1.0, 0])
-    np.testing.assert_allclose(action(set(), left=(0.575, 0.0)), [0.5, 0, 0])  # (0.575 - 0.15) / 0.85 = 0.5
-    np.testing.assert_allclose(action(set(), left=(2.0, 0.0)), [1.0, 0, 0])  # capped at effort 1
+    np.testing.assert_allclose(action({"w"}, left=(0.1, -0.1)), [0, 0.5, 0, 0])  # inside the deadzone: keys win
+    np.testing.assert_allclose(action({"w"}, left=(0.0, 1.0)), [0, -1.0, 0, 0])
+    np.testing.assert_allclose(action(set(), left=(0.575, 0.0)), [0.5, 0, 0, 0])  # (0.575 - 0.15) / 0.85 = 0.5
+    np.testing.assert_allclose(action(set(), left=(2.0, 0.0)), [1.0, 0, 0, 0])  # capped at effort 1
 
 
-def test_right_stick_x_sets_cam_yaw_and_overrides_q_e():
-    assert action({"q"}, right_x=0.1)[2] == 1  # inside the deadzone
-    assert action({"q"}, right_x=1.0)[2] == pytest.approx(-1.0)  # right stick right turns right
-    assert action(set(), right_x=-0.575)[2] == pytest.approx(0.5)
+def test_right_stick_x_sets_turn_and_overrides_q_e():
+    assert action({"q"}, right=(0.1, 0.0))[2] == pytest.approx(STICK_TURN)  # inside the deadzone
+    assert action({"q"}, right=(1.0, 0.0))[2] == pytest.approx(-STICK_TURN)  # right stick right turns right
+    assert action(set(), right=(-0.575, 0.0))[2] == pytest.approx(0.5 * STICK_TURN)
+
+
+def test_right_stick_y_sets_cam_pitch_up_looks_up():
+    assert action(set(), right=(0.0, -1.0))[3] == pytest.approx(-STICK_PITCH)  # GLFW y down: pushed up lowers the pitch
+    assert action(set(), right=(0.0, 0.575))[3] == pytest.approx(0.5 * STICK_PITCH)
+    assert action(set(), right=(0.1, 0.1))[2:] == pytest.approx([0, 0])  # radial deadzone covers both axes
+    assert action({"q"}, right=(0.0, 1.0))[2:] == pytest.approx([STICK_TURN, STICK_PITCH])  # y alone leaves Q's turn
+
+
+def test_q_e_and_the_full_right_stick_turn_120_and_pitch_90_deg_per_s_at_60_hz():
+    # turn 1 turns the facing 30 deg in one env step, cam_pitch 1 pitches 15 deg; the game runs 60 env steps a second
+    assert action({"q"})[2] * 30 * 60 == pytest.approx(120)
+    assert action({"e"})[2] * 30 * 60 == pytest.approx(-120)
+    assert action(set(), right=(1.0, 0.0))[2] * 30 * 60 == pytest.approx(-120)
+    assert action(set(), right=(0.0, -1.0))[3] * 15 * 60 == pytest.approx(-90)
+
+
+def test_the_mouse_turns_and_pitches_a_tenth_of_a_degree_per_pixel_and_carries_over_the_cap():
+    m = Mouse()
+    turn, pitch = m.move(10, 10)
+    assert (turn * 30, pitch * 15) == (pytest.approx(-1), pytest.approx(1))  # degrees
+    assert [m.move(d, 0)[0] * 30 for d in (400, 0, 0)] == pytest.approx([-30, -10, 0])  # 40 deg: capped at 30 a frame
+
+
+def test_a_mouse_flick_turns_at_the_max_rate_over_frames_until_spent():
+    m = Mouse(sens=0.1)
+    assert [m.move(d, 0)[0] for d in (25, 0, 0, 0)] == pytest.approx([-1, -1, -0.5, 0])  # right turns right
+    assert m.move(-4, 0)[0] == pytest.approx(0.4)
+    m.move(30, 30)
+    m.clear()
+    assert m.move(0, 0) == (0, 0)
+
+
+def test_mouse_up_looks_up_and_each_axis_carries_on_its_own():
+    m = Mouse(sens=0.1)
+    # screen y is down; the pitch is below the horizon, so moving up (dy < 0) lowers it
+    assert [m.move(0, dy)[1] for dy in (-15, 0, 0)] == pytest.approx([-1, -0.5, 0])
+    assert [m.move(d, 0) for d in (25, 0)] == [pytest.approx((-1, 0)), pytest.approx((-1, 0))]
+    assert m.move(0, 25) == pytest.approx((-0.5, 1))  # the turn carry spends on while the pitch's starts
+
+
+def test_mouse_motion_overrides_only_its_own_stick_axis_and_keys():
+    assert action({"q"}, right=(1.0, 0.0), mouse=(0.3, 0.0))[2] == pytest.approx(0.3)
+    assert action({"q"}, mouse=(0.0, 0.0))[2] == pytest.approx(STICK_TURN)  # no motion and nothing carried: the keys win
+    assert action(set(), right=(1.0, 0.0), mouse=(0.0, 0.0))[2] == pytest.approx(-STICK_TURN)
+    assert action(set(), right=(0.0, 1.0), mouse=(0.0, -0.4))[3] == pytest.approx(-0.4)
+    assert action({"q"}, right=(0.0, 1.0), mouse=(0.0, -0.4))[2] == pytest.approx(STICK_TURN)  # a pitch flick leaves Q's turn
+    assert action(set(), right=(1.0, 1.0), mouse=(0.3, 0.0))[2:] == pytest.approx([0.3, STICK_PITCH])  # and the stick's pitch
 
 
 class FakeClock:
@@ -144,7 +192,7 @@ def test_hud_at_reset_shows_time_progress_recording_effort_speed(level, task, pr
 
     env = HamsterballEnv([task], levels=[level], camera_action=True)
     env.reset(options={"task": task})
-    assert hud(env, np.zeros(3), recording=False) == [
+    assert hud(env, np.zeros(4), recording=False) == [
         "0.0 / 10.0 s" if task == "survive" else "0.0 s",  # no time limit for a human player, except survive's
         progress,
         "not recording",
@@ -159,7 +207,7 @@ def test_hud_tracks_sim_time_effort_and_the_unlock_goal_once_the_keys_are_in():
 
     env = HamsterballEnv(["unlock_goal"], levels=["locked_goal"], camera_action=True)
     env.reset()
-    a = np.array([0, 1.0, 0])
+    a = np.array([0, 1.0, 0, 0])
     for _ in range(60):
         env.step(a)
     lines = hud(env, a, recording=True)
@@ -204,6 +252,7 @@ def test_the_window_module_imports_and_the_cli_prints_help():
 
     r = CliRunner().invoke(main, ["--help"])
     assert r.exit_code == 0
+    assert "mouse" in r.output
     for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty"):
         assert flag in r.output
 

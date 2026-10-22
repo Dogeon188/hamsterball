@@ -2,8 +2,8 @@
 (prototype/honest-physics: prototypes/honest_drive.py, measure() and contain_row(), at 1/600 s).
 
 The run goes along +x, as the prototype's did: the Fibonacci tiles aren't isotropic, and running along +y
-accelerates about 3% faster. The chase yaw is off, as the prototype's drive took a world-frame direction: on the
-climb the shell first rolls back faster than 0.8 m/s, and the chase would swing the run direction off the slope.
+accelerates about 3% faster. The facing holds without a turn input, so the run direction stays world +x, as the
+prototype's world-frame drive did.
 """
 
 import math
@@ -19,7 +19,7 @@ FULL, HALF, IDLE = np.array([0.0, 1.0]), np.array([0.0, 0.5]), np.zeros(2)
 
 def new_core():
     core = Core()
-    core.reset(yaw=-math.pi / 2)  # camera forward is +x
+    core.reset(facing=-math.pi / 2)  # camera forward is +x
     return core
 
 
@@ -51,8 +51,6 @@ def feel():
     out = {}
 
     # acceleration is measured uncapped, as the prototype's accel() did
-    patch = pytest.MonkeyPatch()
-    patch.setattr(step, "CHASE_MIN_SPEED2", math.inf)
     with pytest.MonkeyPatch.context() as uncapped:
         uncapped.setattr(step, "DRAG_K", 0.0)
         core = new_core()
@@ -96,7 +94,6 @@ def feel():
 
             run(core, 1.0, IDLE, track)
         out[f"sink{vr}"] = worst
-    patch.undo()
     print({k: round(float(v), 4) for k, v in out.items()})
     return out
 

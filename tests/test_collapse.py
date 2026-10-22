@@ -102,7 +102,7 @@ def test_setting_a_stored_core_state_on_a_collapse_level_reproduces_the_run_bit_
 
 def test_a_touched_tile_warns_by_colour_before_it_falls():
     lv = level(TILES)
-    env = gym.make("HamsterballSurvive-v0", levels=[lv]).unwrapped
+    env = gym.make("HamsterballSurvive-v1", levels=[lv]).unwrapped
     env.reset(seed=0)
     m = env.core.model
     rgba = lambda i: m.geom_rgba[m.body_geomadr[m.body(f"tile{i}").id]].copy()  # noqa: E731
@@ -119,7 +119,7 @@ def test_a_touched_tile_warns_by_colour_before_it_falls():
 
 
 def test_an_inputless_hamsterball_on_survive_collapse_falls_before_the_time_limit():
-    env = gym.make("HamsterballSurvive-v0", levels=["survive_collapse"])
+    env = gym.make("HamsterballSurvive-v1", levels=["survive_collapse"])
     env.reset(seed=0)
     for _ in range(10000):
         _, _, terminated, truncated, info = env.step(np.zeros(2, np.float32))

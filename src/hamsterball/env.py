@@ -21,7 +21,7 @@ from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TA
                          body_frame)
 from .core.marker import centre, crosses
 from .core.motion import pose, quat
-from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
+from .core.model import DT, HAM, FACING, PITCH, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -104,7 +104,7 @@ class HamsterballEnv(gym.Env):
         inf = np.float32(np.inf)
         spaces = {}
         if obs_state:
-            spaces["state"] = gym.spaces.Box(-inf, inf, (19,), np.float32)
+            spaces["state"] = gym.spaces.Box(-inf, inf, (21,), np.float32)
             spaces["goal"] = gym.spaces.Box(-inf, inf, (10,), np.float32)
         for v in self.views:
             spaces[v] = gym.spaces.Box(0, 255, (*self.view_size, 3), np.uint8)
@@ -322,10 +322,10 @@ class HamsterballEnv(gym.Env):
         mujoco.mj_subtreeVel(m, d)
         # posed even without views, so core_state (which holds the mocap poses) doesn't depend on the views kwarg
         V.pose(m, d, math.radians(self.level.follow_yaw_deg))
-        yaw = float(d.userdata[0])
-        cy, sy = math.cos(yaw), math.sin(yaw)
+        facing = float(d.userdata[FACING])
+        cy, sy = math.cos(facing), math.sin(facing)
 
-        def cam(v):  # world -> camera yaw frame: rotate by -yaw about z
+        def to_facing(v):  # world -> facing frame: rotate by -facing about z
             return v[0] * cy + v[1] * sy, -v[0] * sy + v[1] * cy, v[2]
 
         c = d.xpos[SHELL]
@@ -338,18 +338,20 @@ class HamsterballEnv(gym.Env):
                 c[2] - self.level.kill_plane_z,
                 sy,
                 cy,
-                *cam(v_shell),
-                *cam(w_shell),
-                *cam(d.subtree_com[HAM] - c),
-                *cam(d.subtree_linvel[HAM] - v_shell),
-                float(self.core.tier.obs(m, d, yaw)["wall_contact"]),
+                math.sin(d.userdata[PITCH]),
+                math.cos(d.userdata[PITCH]),
+                *to_facing(v_shell),
+                *to_facing(w_shell),
+                *to_facing(d.subtree_com[HAM] - c),
+                *to_facing(d.subtree_linvel[HAM] - v_shell),
+                float(self.core.tier.obs(m, d, facing)["wall_contact"]),
             ],
             np.float32,
         )
         goal = np.zeros(10, np.float32)
         goal[5 + TASKS.index(self.task)] = 1
         if not self._success:
-            goal[:3] = cam(self._target(c) - c)
+            goal[:3] = to_facing(self._target(c) - c)
             goal[3] = 1  # active target
             # fraction remaining; survive's is time left over the time limit, in env steps
             goal[4] = 1 - self._steps / self._max_steps if self.task == "survive" else len(self._todo) / self._n_targets
@@ -403,7 +405,7 @@ class HamsterballEnv(gym.Env):
 class DiscreteAction(gym.ActionWrapper):
     """Spec §5: action 0 is a no-op; 1 + 8·e + k runs toward k·45° clockwise from camera forward at effort EFFORTS[e].
 
-    Under the camera flag, cam_yaw stays 0.
+    Under the camera flag, turn and cam_pitch stay 0.
     """
 
     EFFORTS = (0.25, 0.5, 1.0)

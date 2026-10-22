@@ -12,7 +12,7 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - `discard_episode()`: drops the episode in progress (an abandoned run). Call `reset` before stepping again.
 - `provenance()`: `{hamsterball_version, mujoco_version, platform}` of this build, `platform` as `<OS>-<arch>` from `platform.system()` and `platform.machine()`.
 - `SPACE_KWARGS`: the env kwargs written into the dataset's `env_spec`: the space-shaping ones, plus `truncate` and `time_limit_s`, which decide when an episode ends.
-- `OBSERVATION`: the stored observation space, `Dict(goal=Box(10), state=Box(19))` float32, whatever the env's.
+- `OBSERVATION`: the stored observation space, `Dict(goal=Box(10), state=Box(21))` float32, whatever the env's.
 
 ## How it works
 
@@ -61,3 +61,4 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - 2026-10-22, user play-test request (no time-up for a human player, except in survive): the Collector writes the env's `truncate` and `time_limit_s` into `env_spec`, so `recover_environment()` rebuilds an env with the same episode ending. `tests/test_data.py::test_an_episode_recorded_past_the_time_limit_with_truncate_false_replays_bit_for_bit`.
 - 2026-10-22, ticket survive-movers/03: measured by the exploration agent and reproduced here: a Minari 0.5 dataset mixing core-state sizes 110 and 115 failed at `create_dataset` (the episode metadata callback reads the union of episodes) with `ArrowTypeError`. Fixed by the variable-length encoding.
 - 2026-10-22, code review of survive-movers, user decision: keep the `_encode_info` patch, pin minari to the installed 0.5.4 exactly (was `0.5.*`), and mark the patch with a `ponytail:` comment naming the ceiling (a Minari internal) and the upgrade path; old fixed-size datasets still can't take appends (Known quirks).
+- 2026-10-22, ticket mouse-camera/02: `OBSERVATION`'s state is 21 (the camera pitch's sin and cos).

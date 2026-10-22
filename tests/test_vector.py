@@ -11,7 +11,7 @@ import hamsterball  # noqa: F401  registers the env ids
 
 
 def make_vec(n=2, **kw):
-    return gym.make_vec("HamsterballReachGoal-v0", num_envs=n, **{"levels": ["first_goal"], **kw})
+    return gym.make_vec("HamsterballReachGoal-v1", num_envs=n, **{"levels": ["first_goal"], **kw})
 
 
 def test_make_vec_gives_a_stock_async_env_with_same_step_autoreset():
@@ -22,7 +22,7 @@ def test_make_vec_gives_a_stock_async_env_with_same_step_autoreset():
         assert venv.shared_memory is False  # no views
         assert venv.metadata["autoreset_mode"] == AutoresetMode.SAME_STEP
         obs, _ = venv.reset(seed=0)
-        assert obs["state"].shape == (2, 19) and obs["goal"].shape == (2, 10)
+        assert obs["state"].shape == (2, 21) and obs["goal"].shape == (2, 10)
     finally:
         venv.close()
 

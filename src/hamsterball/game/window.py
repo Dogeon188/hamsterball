@@ -19,7 +19,7 @@ from .. import ENV_VERSION  # noqa: E402
 from ..core import views as V  # noqa: E402
 from ..env import LEVELS_DIR, TASKS  # noqa: E402
 from . import menu  # noqa: E402
-from .play import Flow, Pacer, action, hud, outcome, sim_time  # noqa: E402
+from .play import Flow, Mouse, Pacer, action, hud, outcome, sim_time  # noqa: E402
 from .session import Session  # noqa: E402
 
 PERIOD = 1 / 60  # one env step (frame_skip 10 × 1/600 s) per frame, real time
@@ -37,12 +37,13 @@ PRESSES = {"esc": [imgui.Key.escape], "enter": [imgui.Key.enter, imgui.Key.keypa
 
 
 def _sticks():
-    """((left x, left y), right x) from the first connected gamepad, or zeros."""
+    """((left x, left y), (right x, right y)) from the first connected gamepad, or zeros."""
     for j in range(glfw.JOYSTICK_1, glfw.JOYSTICK_LAST + 1):
         if glfw.joystick_is_gamepad(j) and (state := glfw.get_gamepad_state(j)):
             ax = state.axes
-            return (ax[glfw.GAMEPAD_AXIS_LEFT_X], ax[glfw.GAMEPAD_AXIS_LEFT_Y]), ax[glfw.GAMEPAD_AXIS_RIGHT_X]
-    return (0.0, 0.0), 0.0
+            return ((ax[glfw.GAMEPAD_AXIS_LEFT_X], ax[glfw.GAMEPAD_AXIS_LEFT_Y]),
+                    (ax[glfw.GAMEPAD_AXIS_RIGHT_X], ax[glfw.GAMEPAD_AXIS_RIGHT_Y]))
+    return (0.0, 0.0), (0.0, 0.0)
 
 
 class _Chase:
@@ -182,14 +183,16 @@ def _menu(window, settings, levels_dir, record):
 
 def _play(window, session):
     """Play episodes of `session` until Menu, Quit, or closing the window. Returns "menu" or "quit"."""
-    chase, flow, pacer = None, Flow(), Pacer(PERIOD)
+    chase, flow, pacer, mouse = None, Flow(), Pacer(PERIOD), Mouse()
     act = action(set())
     env = session.env
+    cursor = None  # None: no reading since the cursor was locked, so the lock's jump isn't a turn
 
     def start(retry=False):
         session.start(retry)
         pacer.reset()
         pacer.overruns = 0
+        mouse.clear()
 
     start()
     command = None
@@ -199,16 +202,24 @@ def _play(window, session):
             presses = [n for n, ks in PRESSES.items() if any(imgui.is_key_pressed(k, False) for k in ks)]
             if glfw.window_should_close(window):
                 presses = ["close"]
-            if flow.state == "play":
+            # the cursor is locked and hidden only while playing, so the pause and result buttons stay clickable
+            playing = flow.state == "play"
+            glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED if playing else glfw.CURSOR_NORMAL)
+            if playing:
                 held = {n for n, ks in KEYS.items() if any(imgui.is_key_down(k) for k in ks)}
-                left, right_x = _sticks()
-                act = action(held, left, right_x)
+                left, right = _sticks()
+                xy = glfw.get_cursor_pos(window)
+                moved = (0.0, 0.0) if cursor is None else (xy[0] - cursor[0], xy[1] - cursor[1])
+                cursor = xy
+                act = action(held, left, right, mouse=mouse.move(*moved))
                 pacer.wait()
                 _, _, terminated, truncated, info = session.step(act, pacer.overruns)
                 if text := outcome(terminated, truncated, info):
                     flow.end(text)
             else:
                 pacer.reset()
+                mouse.clear()
+                cursor = None
                 time.sleep(PERIOD)
 
             core = env.unwrapped.core
@@ -241,6 +252,7 @@ def _play(window, session):
                 elif command in ("menu", "quit"):
                     break
     finally:
+        glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_NORMAL)  # the menu needs it
         session.close()  # abandons a run in progress
         if chase:
             chase.free()
@@ -277,7 +289,7 @@ def run(settings, levels_dir, record, skip_menu):
 @click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
 @click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
 def main(levels_dir, player, no_record, task, level, seed, difficulty):
-    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E) or gamepad, Esc to pause."""
+    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and look up and down, or gamepad, Esc to pause."""
     flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
     settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
     record = not no_record

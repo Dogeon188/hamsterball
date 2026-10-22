@@ -9,12 +9,12 @@ The abstract control tier of spec §5: the hamster is one 2.4 kg sphere, and a r
 `AbstractTier` implements the `Tier` protocol in [step.md](step.md):
 
 - `fragment`: a free body `hamster` with one frictionless sphere (`condim 1`, `priority 1`, solref `0.04 2`, 2 mm margin, group 2) and a site `hamster_eye` at its centre.
-- `nuserdata = 1`: `userdata[1]` holds the last wall-touch time.
+- `nuserdata = 1`: `userdata[LAST_TOUCH]` (`LAST_TOUCH = CORE_SLOTS`, the first slot after the core's) holds the last wall-touch time.
 - `resting_radius = 0.35` m.
-- `action_space()`: `Box(-1, 1, (2,), float32)` = `[run_x, run_y]` in the camera yaw frame.
+- `action_space()`: `Box(-1, 1, (2,), float32)` = `[run_x, run_y]` in the facing frame.
 - `reset(model, data, spawn)`: the hamster 1 cm above the bottom of a shell centred at `spawn`, with the last touch set to now.
-- `drive(model, data, action, yaw)`: the airborne cut, then the foot-force pair and grip couple into `xfrc_applied`.
-- `obs(model, data, yaw)`: `{"wall_contact": bool}`, true inside the 45 ms grace.
+- `drive(model, data, action, facing)`: the airborne cut, then the foot-force pair and grip couple into `xfrc_applied`.
+- `obs(model, data, facing)`: `{"wall_contact": bool}`, true inside the 45 ms grace.
 
 ## How it works
 
@@ -44,3 +44,6 @@ See the prototype's doc (`prototypes/honest_drive.md`, branch `prototype/honest-
 
 - 2026-10-21, ticket hamsterball-v1/01: ported from the prototype's `control()` (the `foot+grip` branch).
 - 2026-10-22, ticket hamsterball-v1/01: the feel test reproduces spec §5's drive rows within 1.3%; the measured table is in [step.md](step.md), History.
+- 2026-10-22, ticket mouse-camera/02 (prefactor, no behaviour change): the core's userdata slots are named in `model.py` (`YAW`, `CORE_SLOTS`); `LAST_TOUCH` is `CORE_SLOTS`, not a literal 1.
+- 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): `drive` and `obs` take `facing` (was `yaw`).
+- 2026-10-23, code review of mouse-camera tickets 04–05 (no behaviour change): the Interface named `drive` and `obs`'s last argument `yaw`; it reads `facing`, as the code has since the rename.

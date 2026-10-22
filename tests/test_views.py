@@ -1,5 +1,6 @@
 """Pixel views (spec §11): what each view sees, through the env's observation."""
 
+import math
 import os
 from importlib.resources import files
 import subprocess
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 
 from hamsterball.core import views
+from hamsterball.core.model import HAM
 from hamsterball.core.level import Level
 from test_env import level, make
 
@@ -41,22 +43,38 @@ def test_views_render_wider_and_taller_than_the_games_window():
     env.close()
 
 
-def test_chase_and_first_person_face_the_camera_yaw():
-    # yaw 0 faces +y, where the goal is: centred
+def test_chase_and_first_person_face_the_facing():
+    # facing 0 faces +y, where the goal is: centred
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["chase"]) - 0.5) < 0.05
     assert abs(goal_x(obs["first_person"]) - 0.5) < 0.05
-    # yaw 30 deg turns the view left, so the goal sits right of centre
+    # facing 30 deg turns the view left, so the goal sits right of centre
     obs, _ = make(levels=[level(30.0)], views=VIEWS).reset(seed=0)
     assert goal_x(obs["chase"]) > 0.6
     assert goal_x(obs["first_person"]) > 0.6
+
+
+def test_chase_and_first_person_follow_the_camera_pitch_and_follow_keeps_its_own():
+    env = make(camera_action=True, views=VIEWS)
+    env.reset(seed=0)
+
+    def pitch(v):  # degrees below the horizon that the view's camera looks
+        d = env.unwrapped.core.data
+        fwd = -d.cam_xmat[d.model.camera(v).id].reshape(3, 3)[:, 2]  # a MuJoCo camera looks along its -z
+        return math.degrees(math.asin(-fwd[2]))
+
+    assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((15, 0, 35))
+    for _ in range(2):  # 15 deg an env step: 30 deg further down
+        env.step(np.array([0, 0, 0, 1], np.float32))
+    assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((45, 30, 35))
+    env.close()
 
 
 def test_follow_keeps_the_level_yaw():
     lv = level(30.0)  # follow_yaw_deg 0: the follow view still looks along +y, at the goal
     obs, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["follow"]) - 0.5) < 0.05
-    lv.follow_yaw_deg = 30.0  # now the level turns the follow view left, whatever the camera yaw
+    lv.follow_yaw_deg = 30.0  # now the level turns the follow view left, whatever the facing
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)
     obs30, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["follow"]) - 0.5) < 0.05 and goal_x(obs30["follow"]) > 0.6
@@ -96,24 +114,63 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
     env = make(views=("chase",), obs_state=False)
     obs, info = env.reset(seed=0)
     assert set(obs) == set(env.observation_space.spaces) == {"chase"}
-    assert info["state"].shape == (19,) and info["goal"].shape == (10,)
+    assert info["state"].shape == (21,) and info["goal"].shape == (10,)
     obs, *_, info = env.step(np.zeros(2, np.float32))
     assert set(obs) == {"chase"} and {"state", "goal"} <= info.keys()
 
 
 def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
-    env = gym.make("Hamsterball-v0", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
+    env = gym.make("Hamsterball-v1", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
     obs, _ = env.reset(seed=0)
     assert obs["first_person"][-1].min() > 0
 
 
 def test_views_survive_model_cache_eviction():
     # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
     for name, task in [("first_goal", "reach_goal"), ("locked_goal", "unlock_goal"), ("first_goal", "reach_goal")]:
         obs, _ = env.reset(options={"level": Level.load(files("hamsterball") / f"levels/{name}.yaml"), "task": task})
         assert len(env.unwrapped._cores) == 1
         if name == "first_goal":
             assert abs(goal_x(obs["chase"]) - 0.5) < 0.05
     env.close()
+
+
+PARTS = ("tail", "ear_left", "ear_right")
+
+
+def part_offsets(env, facing):
+    """Each part's centre from the hamster centre, as (right, forward, up) in the facing frame."""
+    m, d = env.unwrapped.core.model, env.unwrapped.core.data
+    right = np.array([math.cos(facing), math.sin(facing), 0.0])
+    fwd = np.array([-math.sin(facing), math.cos(facing), 0.0])  # facing 0 faces +y
+    return {p: (lambda r: (r @ right, r @ fwd, r[2]))(d.geom_xpos[m.geom(p).id] - d.xpos[HAM]) for p in PARTS}
+
+
+def test_the_tail_sits_behind_and_the_ears_on_top_whatever_the_facing():
+    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap pose to the geoms
+    env.reset(seed=0)
+    for facing in (0.0, math.radians(60)):  # 60 deg: after two full turns left
+        o = part_offsets(env, facing)
+        assert abs(o["tail"][0]) < 1e-9 and o["tail"][1] < -0.12  # straight behind, out past the hamster's radius
+        (lx, ly, lz), (rx, ry, rz) = o["ear_left"], o["ear_right"]
+        assert lx < 0 < rx and abs(lx + rx) < 1e-9  # one each side
+        assert ly == pytest.approx(ry) and ly > 0 and lz == pytest.approx(rz) and lz > 0.08  # forward, on top
+        for _ in range(2):
+            env.step(np.array([0, 0, 1, 0], np.float32))
+    env.close()
+
+
+def test_the_tail_and_ears_show_in_chase_and_follow_only_and_never_touch_the_physics():
+    env = make()
+    env.reset(seed=0)
+    m = env.unwrapped.core.model
+    for p in PARTS:
+        g = m.geom(p).id
+        group = m.geom_group[g]
+        assert views.option("chase").geomgroup[group] and views.option("follow").geomgroup[group]
+        assert not views.option("first_person").geomgroup[group]
+        assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
+        assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
+

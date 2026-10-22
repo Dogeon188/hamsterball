@@ -27,6 +27,14 @@ _Avoid_: difficulty, mode
 The heading the hamster runs toward in the abstract tier, measured relative to the controlled third-person view.
 _Avoid_: steering, heading (alone)
 
+**Facing**:
+The direction the hamster faces, which sets the frame of actions and observations and the yaw of the chase and first-person views. Only the controller turns it.
+_Avoid_: camera yaw, heading (alone), view angle
+
+**Features**:
+The hamster's tail, a small ball behind it, and its two ears, small balls on top: they turn with the facing, so the chase and follow views show which way the hamster faces. They are a look only: no mass, no contacts.
+_Avoid_: arrow, heading marker
+
 **Effort**:
 How hard the hamster runs in the abstract tier: together with a run direction, it sets the hamster's target lean.
 _Avoid_: throttle, speed command
@@ -98,7 +106,7 @@ A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height
 
 **Spawn**:
-Where a task in a level starts the hamsterball, together with the initial camera yaw.
+Where a task in a level starts the hamsterball, together with the hamster's initial facing.
 _Avoid_: start point, respawn
 
 **Hazard**:
@@ -135,7 +143,7 @@ A camera from which pixel observations or the game's screen are rendered: the **
 _Avoid_: camera angle, perspective
 
 **Chase view**:
-The controlled third-person view, which trails the hamsterball and turns with the camera yaw; run direction is measured relative to it.
+The controlled third-person view, which trails the hamsterball and turns with the facing; run direction is measured relative to it.
 _Avoid_: controlled camera, main camera
 
 **Follow view**:
@@ -143,12 +151,12 @@ A third-person view that tracks the hamsterball's position but keeps a yaw fixed
 _Avoid_: fixed camera, fixed third-person
 
 **First-person view**:
-The view from the hamster's eye, facing the camera yaw, with the shell wall hidden.
+The view from the hamster's eye, looking along the facing, with the shell wall hidden.
 _Avoid_: fixed first-person, eye camera
 
-**Camera yaw**:
-The chase view's heading, which defines the frame of actions and observations.
-_Avoid_: heading, view angle
+**Camera pitch**:
+How far below the horizon the chase view looks; it pitches the chase and first-person views but moves no physics and leaves the frame of actions and observations alone.
+_Avoid_: tilt (a mover's rocking), elevation, view angle
 
 **Pose stream**:
 The sequence, one **pose** per env step, of what a front end needs to draw the scene without running physics: body poses, view poses, marker progress, and the outcome.

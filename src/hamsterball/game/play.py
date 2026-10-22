@@ -9,9 +9,14 @@ import time
 import numpy as np
 
 from ..core.model import DT
+from ..core.step import FRAME_SKIP, PITCH_STEP, TURN_STEP
 
 DEADZONE = 0.15  # radial, both sticks
 WALK, RUN, SPRINT = 0.25, 0.5, 1.0
+FRAME = FRAME_SKIP * DT  # s per env step: the game runs at the default frame skip, one step a frame
+STICK_TURN = math.radians(120) * FRAME / TURN_STEP  # Q/E and the full right stick: 120 deg/s
+STICK_PITCH = math.radians(90) * FRAME / PITCH_STEP  # the full right stick: 90 deg/s
+MOUSE_SENS = (math.radians(0.1) / TURN_STEP, math.radians(0.1) / PITCH_STEP)  # (turn, cam_pitch) per pixel: 0.1 deg
 
 
 def _stick(m):
@@ -19,11 +24,39 @@ def _stick(m):
     return min((m - DEADZONE) / (1 - DEADZONE), 1.0)
 
 
-def action(keys, left=(0.0, 0.0), right_x=0.0):
-    """The 3-D action [run_x, run_y, cam_yaw] (camera frame: x right, y forward) from held keys and stick axes.
+class Mouse:
+    """Mouse motion to (turn, cam_pitch): right turns right and up looks up, each at most ±1 per frame; the rest
+    carries to later frames, each axis on its own."""
+
+    def __init__(self, sens=MOUSE_SENS):
+        self.sens = sens
+        self.clear()
+
+    def clear(self):
+        """Drop carried motion (the cursor was released, or an episode starts)."""
+        self.carry = np.zeros(2)
+
+    def move(self, dx, dy):
+        """This frame's (turn, cam_pitch) from (dx, dy) pixels of motion plus what's carried. Screen y is down and
+        the pitch is below the horizon, so dy adds to it as is."""
+        self.carry += np.array([-dx, dy]) * self.sens
+        cam = np.clip(self.carry, -1.0, 1.0)
+        self.carry -= cam
+        return tuple(cam.tolist())
+
+
+def _axis(v):
+    """A right stick axis rescaled with its sign, or 0 inside the deadzone."""
+    return math.copysign(_stick(abs(v)), v) if abs(v) > DEADZONE else 0.0
+
+
+def action(keys, left=(0.0, 0.0), right=(0.0, 0.0), mouse=(0.0, 0.0)):
+    """The 4-D action [run_x, run_y, turn, cam_pitch] (camera frame: x right, y forward) from held keys, stick
+    axes, and this frame's Mouse.move value.
 
     keys: names held, from {"w", "a", "s", "d", "shift", "ctrl", "q", "e"}. Sticks are GLFW axes (y down).
-    A stick outside its deadzone overrides the keys it stands for.
+    A stick outside its deadzone overrides the keys it stands for; non-zero mouse motion on an axis overrides that
+    axis of the right stick (and Q/E for the turn). No keys drive the pitch.
     """
     m = math.hypot(*left)
     if m > DEADZONE:
@@ -33,11 +66,9 @@ def action(keys, left=(0.0, 0.0), right_x=0.0):
         n = np.linalg.norm(d)
         effort = WALK if "shift" in keys else SPRINT if "ctrl" in keys else RUN
         run = d / n * effort if n else d
-    if abs(right_x) > DEADZONE:
-        cam = -math.copysign(_stick(abs(right_x)), right_x)
-    else:
-        cam = ("q" in keys) - ("e" in keys)
-    return np.array([*run, cam], np.float32)
+    turn = mouse[0] or (-_axis(right[0]) or ("q" in keys) - ("e" in keys)) * STICK_TURN  # right stick right turns right
+    pitch = mouse[1] or _axis(right[1]) * STICK_PITCH  # GLFW y down: pushing up lowers the pitch, looking up
+    return np.array([*run, turn, pitch], np.float32)
 
 
 class Pacer:

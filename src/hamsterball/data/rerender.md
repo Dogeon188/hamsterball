@@ -19,7 +19,7 @@ Re-render (spec §12): turns a state-only dataset from the [Collector](collector
 
 ## Invariants and checks
 
-- `uv run --locked --all-extras pytest tests/test_rerender.py`: with `physics_step` patched to raise, re-render recomputes `goal` and `state` equal bit for bit to the recorded ones on an `unlock_goal` episode played to success, and its frames equal bit for bit the frames a live pixel env renders re-stepping the same actions. `to_video` writes one decodable frame per core state at 30 fps under `frame_skip=20`.
+- `uv run --locked --all-extras pytest tests/test_rerender.py`: with `physics_step` patched to raise, re-render recomputes `goal` and `state` equal bit for bit to the recorded ones on an `unlock_goal` episode played to success, and its frames equal bit for bit the frames a live pixel env renders re-stepping the same actions, the hamster's features ([views.md](../core/views.md)) among them after a turn. `to_video` writes one decodable frame per core state at 30 fps under `frame_skip=20`.
 
 ## Known quirks
 
@@ -39,3 +39,4 @@ Re-render (spec §12): turns a state-only dataset from the [Collector](collector
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/09: added.
+- 2026-10-23, code review of mouse-camera tickets 04–05: the tail's re-render test moved here from `test_views.py` and goes through `rerender` (it called `env.step_to` directly): 12 turning steps recorded, the chase re-rendered at 48×64, bit for bit the live frames. At that size the tail covers 4 chase pixels and none of the follow view's, so the test checks the chase only.

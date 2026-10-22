@@ -240,7 +240,7 @@ def coast_distance(**contact):
     d = yaml.safe_load(LEVEL)
     d["geoms"] = [{"type": "box", "pos": [0, 0, -0.5], "size": [50, 50, 0.5], **contact}]
     core = Core(level=Level.from_yaml(yaml.safe_dump(d)).mjcf())
-    core.reset(yaw=-1.5707963)
+    core.reset(facing=-1.5707963)
     core.data.qvel[[0, 6]] = 3.0  # shell and hamster
     core.data.qvel[4] = 3.0 / 0.5  # rolling, not sliding
     core.step(np.zeros(2), n=1200)

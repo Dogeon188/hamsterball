@@ -28,7 +28,7 @@ def to_lerobot(dataset, repo_id, root, use_videos=True):
     act = dataset.action_space
     features = {
         "action": {"dtype": "float32", "shape": act.shape, "names": None},
-        "observation.state": {"dtype": "float32", "shape": (19,), "names": None},
+        "observation.state": {"dtype": "float32", "shape": (21,), "names": None},
         "observation.goal": {"dtype": "float32", "shape": (10,), "names": None},
         "next.reward": {"dtype": "float32", "shape": (1,), "names": None},
         "next.done": {"dtype": "bool", "shape": (1,), "names": None},
