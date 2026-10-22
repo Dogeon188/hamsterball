@@ -11,6 +11,7 @@ M_SHELL, M_HAM = 0.8, 2.4  # kg; every tier's hamster weighs M_HAM
 N_TILES = 320
 SOLREF = "0.04 2"  # shell tiles and the abstract hamster
 TORSION, ROLL = 0.05, 0.04  # outer sphere's torsional and rolling friction (m)
+HITBOX_DOT = 0.04  # radius (m) of the hitbox view's shell-centre dot; a look constant
 
 # Fixed ids: the compiler puts the shell first and the hamster second, each a free body, so the per-step code
 # can hard-code them (as a GPU kernel would). Level geoms add no bodies; later bodies (view mocaps, then a level's
@@ -48,7 +49,10 @@ def _shell_xml():
     )
     # friction mixes by max, so a level geom's small rolling term loses to the outer sphere's
     outer = f'<geom type="sphere" size="{R}" mass="0" condim="6" friction="1 {TORSION} {ROLL}" group="1" rgba=".6 .8 1 .25"/>'
-    return f'<body name="shell" pos="0 0 {R}"><freejoint/>\n{tiles}\n{outer}\n</body>'
+    # the hitbox view's centre dot (group 4): opaque, so it shows through the translucent outer sphere
+    dot = (f'<geom name="hitbox_centre" type="sphere" size="{HITBOX_DOT}" mass="0" contype="0" conaffinity="0" '
+           f'group="4" rgba="1 1 1 1"/>')
+    return f'<body name="shell" pos="0 0 {R}"><freejoint/>\n{tiles}\n{outer}\n{dot}\n</body>'
 
 
 GAME_SIZE = (720, 1280)  # (height, width) of the game window, the smallest offscreen buffer a model gets

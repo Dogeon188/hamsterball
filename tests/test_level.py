@@ -87,7 +87,7 @@ def test_a_level_compiles_its_geoms_and_markers_into_the_model():
     from hamsterball.core import Core
 
     m = Core(level=Level.from_yaml(LEVEL).mjcf()).model
-    world = [g for g in range(m.ngeom) if m.geom_bodyid[g] == 0]
+    world = [g for g in range(m.ngeom) if m.geom_bodyid[g] == 0 and m.geom_group[g] != 4]  # 4: the hitbox kill plane
     assert len(world) == 3  # two level geoms, one goal marker
     solid, marker = world[:2], world[2]
     assert set(m.geom_contype[solid]) == {1} and set(m.geom_conaffinity[solid]) == {1}
@@ -303,7 +303,7 @@ def test_hazards_and_the_survive_region_compile_to_markers():
     from hamsterball.core import Core
 
     m = Core(level=Level.from_yaml(SURVIVE).mjcf()).model
-    world = [g for g in range(m.ngeom) if m.geom_bodyid[g] == 0]
+    world = [g for g in range(m.ngeom) if m.geom_bodyid[g] == 0 and m.geom_group[g] != 4]
     assert len(world) == 3  # ground, hazard, region
     markers = world[1:]
     assert set(m.geom_contype[markers]) == {0} and set(m.geom_conaffinity[markers]) == {0}

@@ -158,6 +158,10 @@ _Avoid_: fixed first-person, eye camera
 How far below the horizon the chase view looks; it pitches the chase and first-person views but moves no physics and leaves the frame of actions and observations alone.
 _Avoid_: tilt (a mover's rocking), elevation, view angle
 
+**Hitbox view**:
+A debug overlay on a view that draws what the normal view leaves out: the kill plane as a translucent sheet at its height, and a dot at the shell centre, the point the kill plane and the survive region test. Only the game shows it; pixel observations never do.
+_Avoid_: debug view, collision view
+
 **Pose stream**:
 The sequence, one **pose** per env step, of what a front end needs to draw the scene without running physics: body poses, view poses, marker progress, and the outcome.
 _Avoid_: frame stream, render stream
