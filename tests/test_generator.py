@@ -249,6 +249,7 @@ def test_the_region_drifts_faster_with_difficulty_and_its_centre_stays_on_the_fl
 
 @pytest.mark.parametrize("d, count", [(0.25, 1), (0.5, 2), (1.0, 3)])
 def test_survive_hazards_move_more_and_faster_with_difficulty_and_start_clear_of_the_spawn(d, count):
+    from hamsterball.core.generator import SHELL_R
     from hamsterball.core.marker import crosses
 
     for level in survive_levels(d):
@@ -258,7 +259,7 @@ def test_survive_hazards_move_more_and_faster_with_difficulty_and_start_clear_of
             m = hz["motion"]
             assert abs(m["amplitude"] * 2 * np.pi / m["period"] - GEN.params(d)["hazard_speed"]) < 0.01
             spawn = block["spawn"]["pos"]
-            assert not crosses(hz, spawn, spawn, 0.0)
+            assert not crosses(hz, spawn, spawn, 0.0, reach=SHELL_R)  # the shell starts clear of it
 
 
 @pytest.mark.parametrize("d", [0.5, 0.75, 1.0])
