@@ -6,7 +6,7 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 
 ## Interface
 
-- `build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0) -> MjModel`: `view_size` is `(height, width)`; the model's offscreen buffer (`<visual><global offwidth offheight>`) is the larger of it and `GAME_SIZE` (720, 1280, the game window) in each dimension, so env views and the game both fit. `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane. `bodies` is top-level MJCF sections too (`Level.body_mjcf()`: a `<worldbody>` of kinematic bodies and a `<contact>` of excludes), placed last, so its bodies follow the view mocaps (then `Level.tile_mjcf()`'s tiles); `""` leaves the model as before. `slots` adds userdata slots after the tier's (one per collapsing tile); 0 leaves `nuserdata` as before.
+- `build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0) -> MjModel`: `view_size` is `(height, width)`; the model's offscreen buffer (`<visual><global offwidth offheight>`) is the larger of it and `GAME_SIZE` (720, 1280, the game window) in each dimension, so env views and the game both fit. `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane. `bodies` is top-level MJCF sections too (`Level.body_mjcf()`: a `<worldbody>` of kinematic bodies and seesaws, and a `<contact>` of excludes), placed last, so its bodies follow the view mocaps (then `Level.tile_mjcf()`'s tiles); `""` leaves the model as before. `slots` adds userdata slots after the tier's (one per collapsing tile); 0 leaves `nuserdata` as before.
 - Constants the rest of the core imports: `GAME_SIZE`, `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`.
 
 ## How it works
@@ -19,7 +19,7 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 
 ## Invariants and checks
 
-- The shell is body 1 and the hamster body 2, both free, so the shell's qpos starts at 0 and the hamster root's at 7 (dofs 0 and 6). `build()` asserts this and that the hamster subtree weighs 2.4 kg. Later bodies, such as the view mocaps and then a level's kinematic bodies, must come after the hamster fragment.
+- The shell is body 1 and the hamster body 2, both free, so the shell's qpos starts at 0 and the hamster root's at 7 (dofs 0 and 6). `build()` asserts this and that the hamster subtree weighs 2.4 kg. Later bodies, such as the view mocaps and then a level's kinematic bodies and seesaws, must come after the hamster fragment.
 - `uv run pytest tests/test_model.py` checks the model against spec §3. A compiled `MjModel` keeps no per-geom mass, so the test checks the shell body's 0.8 kg, which also shows the outer sphere is massless.
 
 ## Known quirks

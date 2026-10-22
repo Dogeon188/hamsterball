@@ -75,8 +75,8 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket hamsterball-v1/10: added the optional `generator` provenance block and `Level.from_dict`.
 - 2026-10-22, user play-test request: passed waypoints turn dim green; added the look constant `PASSED_RGBA` (the goal's green at alpha 0.2), which the env sets.
 - 2026-10-22, user play-test request: waypoints after the next render grey; `LOCKED_GOAL_RGBA` is renamed `LOCKED_RGBA`, since it now colours locked waypoints too.
-- 2026-10-22, ticket survive-movers/02: hazards take an optional `motion`; `movers()` lists them as `hazard<i>`; bundled `survive_sweepers`.
 - 2026-10-22, ticket survive-movers/01: added the optional `motion` on the survive region, `Level.movers()`, and the bundled level `survive_drift`.
+- 2026-10-22, ticket survive-movers/02: hazards take an optional `motion`; `movers()` lists them as `hazard<i>`; bundled `survive_sweepers`.
 - 2026-10-22, ticket survive-movers/03: added `bodies`, `body_mjcf()`, and the bundled level `survive_pushers`. The static-geom MJCF moved into `_geom_mjcf`, shared with body geoms (same output).
 - 2026-10-22, ticket survive-movers/04: `attach` on the survive region, `tilt` on body motions, `body_frame`; bundled `survive_raft`. Levels without either keep their ids.
 - 2026-10-22, ticket survive-movers/06: added `collapse`, `tile_mjcf()`, `TILE_WARN_RGBA`, and the bundled level `survive_collapse`.

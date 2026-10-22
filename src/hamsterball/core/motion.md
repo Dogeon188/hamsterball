@@ -33,6 +33,7 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 - 2026-10-22, ticket survive-movers/01: one pure function of (motion, sim time) for every mover (region now, hazards and bodies in tickets 02 and 03); nothing about a mover is Python-side state.
 - 2026-10-22, ticket survive-movers/01: `phase` is a fraction of the period for both forms (rather than degrees for oscillate), and a path moves at constant speed by arc length rather than equal time per segment, so a drift speed is the path length over the period.
 - 2026-10-22, ticket survive-movers/04: a tilt is a sine about one horizontal body-frame axis with its own period and phase, not a general orientation path: enough to rock a raft, and it composes with spin. Only a body's motion takes it (a marker test turns points by yaw only); a region rides a tilting body by attaching to it instead.
+- 2026-10-22, ticket survive-movers/01, recorded in the survive-movers code review: a path's points and an oscillation are offsets from the mover's authored pose, not absolute positions (the ticket said "positions"), so one motion serves a sphere's `pos`, a capsule's `fromto` and a body of several geoms; and a path is walked at constant speed by arc length, not linearly in time per segment (the ticket's "interpolates linearly by sim time"), as the entry above states.
 
 ## Tried and rejected
 
