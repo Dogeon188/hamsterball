@@ -1,6 +1,7 @@
 """Pixel views (spec §11): what each view sees, through the env's observation."""
 
 import math
+import re
 import os
 from importlib.resources import files
 import subprocess
@@ -8,11 +9,13 @@ import sys
 import threading
 
 import gymnasium as gym
+import mujoco
 import numpy as np
 import pytest
 
 from hamsterball.core import views
-from hamsterball.core.model import HAM
+from hamsterball.core import Core
+from hamsterball.core.model import HAM, M_SHELL, SHELL
 from hamsterball.core.level import Level
 from test_env import level, make
 
@@ -85,6 +88,10 @@ def test_geom_groups_per_view():
     # already drops the shell and the hamster, so the option is checked directly.
     assert list(views.option("chase").geomgroup) == list(views.option("follow").geomgroup) == [1, 1, 1, 0, 0, 0]
     assert list(views.option("first_person").geomgroup) == [1, 0, 0, 0, 0, 0]
+    for v in VIEWS:  # hitboxes 4: off by default, so env pixels never show them; the flag turns only them on
+        on = list(views.option(v).geomgroup)
+        on[4] = 1
+        assert list(views.option(v, hitboxes=True).geomgroup) == on
 
 
 def test_renders_on_the_thread_that_steps_the_env():
@@ -121,14 +128,14 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
 
 def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
-    env = gym.make("Hamsterball-v1", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
+    env = gym.make("Hamsterball-v2", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
     obs, _ = env.reset(seed=0)
     assert obs["first_person"][-1].min() > 0
 
 
 def test_views_survive_model_cache_eviction():
     # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
-    env = gym.make("Hamsterball-v1", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
+    env = gym.make("Hamsterball-v2", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
     for name, task in [("first_goal", "reach_goal"), ("locked_goal", "unlock_goal"), ("first_goal", "reach_goal")]:
         obs, _ = env.reset(options={"level": Level.load(files("hamsterball") / f"levels/{name}.yaml"), "task": task})
         assert len(env.unwrapped._cores) == 1
@@ -174,3 +181,33 @@ def test_the_tail_and_ears_show_in_chase_and_follow_only_and_never_touch_the_phy
         assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
         assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
 
+
+
+def test_the_hitbox_dot_is_the_shell_centre_and_the_model_holds_no_kill_plane():
+    lv = level()
+    lv.kill_plane_z = -3.5
+    m = Core(level=lv).model
+    dot = m.geom("hitbox_centre").id
+    assert m.geom_bodyid[dot] == SHELL and list(m.geom_pos[dot]) == [0, 0, 0] and m.geom_rgba[dot][3] == 1
+    assert (m.geom_group[dot], m.geom_contype[dot], m.geom_conaffinity[dot]) == (4, 0, 0)
+    assert m.body_mass[SHELL] == pytest.approx(M_SHELL)  # the dot weighs nothing
+    assert (m.body("shell").id, m.body("hamster").id) == (SHELL, HAM) == (1, 2)
+    # the game window draws the kill plane into its scene: a model geom would grow the model's extent, which sets
+    # MuJoCo's clip planes and so env pixels
+    assert [g for g in range(m.ngeom) if m.geom_group[g] == 4] == [dot]
+
+
+def test_hitbox_geoms_change_no_trajectory(monkeypatch):
+    def run():
+        core = Core(level=Level.load(files("hamsterball") / "levels/survive_seesaw.yaml"))
+        for a in ([1, 0], [0.3, 1], [-1, 0.5]):
+            for _ in range(20):
+                core.step(np.array(a, np.float32))
+        return core.state()
+
+    with_hitboxes = run()
+    compile_ = mujoco.MjModel.from_xml_string
+    monkeypatch.setattr(mujoco.MjModel, "from_xml_string",
+                        lambda xml: compile_(re.sub(r'<geom name="hitbox_[^>]*/>', "", xml)))
+    without = run()
+    assert len(with_hitboxes) == len(without) and np.array_equal(with_hitboxes, without)

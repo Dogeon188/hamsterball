@@ -10,6 +10,7 @@ from typing import NamedTuple, Protocol, runtime_checkable
 import numpy as np
 
 from .level import Level
+from .model import R
 from .motion import load as load_motion
 from .motion import pose
 
@@ -58,7 +59,6 @@ SPEED = 5.0  # m/s, for the time limit
 ATTEMPTS = 32
 MAX_CLIMB, MAX_DESCENT = math.radians(15), math.radians(30)  # the flood fill's step limits
 NOISE_FEATURE = 2.0  # noise lattice spacing (m)
-SHELL_R = 0.5
 
 # ponytail: unspecified shape constants, picked to keep levels readable; promote to the table if a curriculum needs them
 PIT = 1.0  # off-corridor ground sits this far below the kill plane
@@ -68,7 +68,7 @@ SEGMENT = 5.0  # target length of one hill or valley segment (m)
 LANDING = 0.75  # flat radius around the spawn and each target (m)
 RIDGE_LENGTH = 8.0  # survive ridge, end to end (m)
 DRIFT_REACH = 0.5  # a drifting region's centre sweeps this fraction of the plateau radius or the ridge's half-length
-HAZARD_TRIES = 20
+HAZARD_TRIES = 100
 HAZARD_CLEAR = 2.0  # hazard centre to spawn or target, at least (m)
 MOVER_RADIUS = 0.4  # survive's moving hazards are spheres this size (m)
 MOVER_SWEEP = 3.0  # a moving hazard's amplitude (m)
@@ -118,7 +118,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 5
+    version = 6
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -238,9 +238,9 @@ def _route(task, p, rng):
         if found is None:
             raise _Retry
 
-    near = corridor & ((x - pts[0, 0]) ** 2 + (y - pts[0, 1]) ** 2 <= SHELL_R**2)
-    spawn = [float(pts[0, 0]), float(pts[0, 1]), round(float(h[near].max()) + SHELL_R, 3)]
-    marks = [{"type": "sphere", "pos": [float(pts[j, 0]), float(pts[j, 1]), round(float(h[c]) + SHELL_R, 3)],
+    near = corridor & ((x - pts[0, 0]) ** 2 + (y - pts[0, 1]) ** 2 <= R**2)
+    spawn = [float(pts[0, 0]), float(pts[0, 1]), round(float(h[near].max()) + R, 3)]
+    marks = [{"type": "sphere", "pos": [float(pts[j, 0]), float(pts[j, 1]), round(float(h[c]) + R, 3)],
               "radius": TARGET_RADIUS} for j, c in zip(targets, target_cells)]
     block = {"spawn": {"pos": spawn, "yaw_deg": _yaw(pts[1] - pts[0])},
              "time_limit_s": round(found[0] / SPEED * p["time_slack"], 3)}
@@ -290,14 +290,14 @@ def _survive(kind, p, rng):
         a = b = np.zeros(2)
         flat = p["survive_disc_radius"]
         # a vertical capsule centred at shell-centre height, so the goal vector to its centre lies flat
-        region = {"type": "capsule", "fromto": [0.0, 0.0, SHELL_R - 0.5, 0.0, 0.0, SHELL_R + 0.5], "radius": flat}
+        region = {"type": "capsule", "fromto": [0.0, 0.0, R - 0.5, 0.0, 0.0, R + 0.5], "radius": flat}
         yaw = 0.0
     else:
         phi = rng.uniform(0, math.pi)
         b = np.array([round(RIDGE_LENGTH / 2 * math.cos(phi), 3), round(RIDGE_LENGTH / 2 * math.sin(phi), 3)])
         a = -b
         flat = p["survive_ridge_width"] / 2
-        region = {"type": "capsule", "fromto": [*map(float, a), SHELL_R, *map(float, b), SHELL_R], "radius": flat}
+        region = {"type": "capsule", "fromto": [*map(float, a), R, *map(float, b), R], "radius": flat}
         yaw = _yaw(b - a)
     pts = np.array([a, b])
     x, y, shape, centre = _grid(pts, flat)
@@ -318,7 +318,7 @@ def _survive(kind, p, rng):
         # the first sweeps through the spawn, so standing still is hit; the rest through a point of the flat top
         c = _sweep_point(flat, rng, not i, (a, b))
         hz = _oscillate(_heading(rng.uniform(0, math.pi)), MOVER_SWEEP, p["hazard_speed"], round(rng.random(), 3))
-        hazards.append({"type": "sphere", "pos": [round(float(c[0]), 3), round(float(c[1]), 3), SHELL_R],
+        hazards.append({"type": "sphere", "pos": [round(float(c[0]), 3), round(float(c[1]), 3), R],
                         "radius": MOVER_RADIUS, "motion": hz})
     movers = [Mover(hz["pos"][:2], hz["motion"], MOVER_RADIUS, p["hazard_speed"]) for hz in hazards]
     if (hazards or "motion" in region) and not _dodge(x, y, pts, dist <= flat, region, movers, p,
@@ -328,7 +328,7 @@ def _survive(kind, p, rng):
                           geoms=[hfield], hazards=hazards)
 
 
-def _survive_level(kill, region, limit, spawn=(0.0, 0.0, SHELL_R), yaw=0.0, **rest):
+def _survive_level(kill, region, limit, spawn=(0.0, 0.0, R), yaw=0.0, **rest):
     """A survive level's dict: the kill plane, the one task, the follow yaw (the spawn's), and `rest` (geoms and the
     hazards, bodies or collapse)."""
     return {"kill_plane_z": kill, **rest, "follow_yaw_deg": yaw,
@@ -371,7 +371,7 @@ def _slab(kind, p, rng):
     joint of `seesaw_stiffness`, spawn `seesaw_offset` off the pivot in a random direction."""
     body = {"pos": [0.0, 0.0, -0.1], "geoms": [{"type": "box", "size": [SLAB, SLAB, 0.1],
                                                   "rgba": [0.55, 0.4, 0.25, 1]}]}
-    spawn = [0.0, 0.0, SHELL_R]
+    spawn = [0.0, 0.0, R]
     if kind == "platform":
         body["motion"] = _oscillate(_heading(rng.uniform(0, math.pi)), PLATFORM_SWEEP, p["platform_speed"], 0.0)
         phi = rng.uniform(0, math.pi)
@@ -381,7 +381,7 @@ def _slab(kind, p, rng):
     else:
         body["joint"] = SEESAW | {"stiffness": round(p["seesaw_stiffness"], 3)}
         q = p["seesaw_offset"] * _heading(rng.uniform(0, 2 * math.pi))
-        spawn = [round(float(q[0]), 3), round(float(q[1]), 3), SHELL_R]
+        spawn = [round(float(q[0]), 3), round(float(q[1]), 3), R]
     region = {"type": "box", "pos": [0.0, 0.0, 0.6], "size": [SLAB, SLAB, 0.5], "attach": 0}
     return _survive_level(-KILL_DEPTH, region, round(p["survive_duration"], 3), spawn, geoms=[], bodies=[body])
 
@@ -395,7 +395,7 @@ def _tiles(p, rng):
     tiles = [{"type": "box", "pos": [(i - nx // 2) * TILE_PITCH, (j - ny // 2) * TILE_PITCH, -0.1],
               "size": [half, half, 0.1]} for i in range(nx) for j in range(ny)]
     delay = round(p["tile_delay"], 3)
-    region = {"type": "box", "pos": [0.0, 0.0, SHELL_R], "size": [nx * TILE_PITCH / 2, ny * TILE_PITCH / 2, 2.0]}
+    region = {"type": "box", "pos": [0.0, 0.0, R], "size": [nx * TILE_PITCH / 2, ny * TILE_PITCH / 2, 2.0]}
     limit = round(min(p["survive_duration"], TILE_USE * len(tiles) * delay), 3)
     return _survive_level(-KILL_DEPTH, region, limit, geoms=[], collapse={"delay": delay, "tiles": tiles})
 
@@ -556,7 +556,7 @@ def _dodge(x, y, pts, top, region, movers, p, start):
     inner = region["radius"] - CELL - (p["survive_drift_speed"] * dt if drift else 0.0)
     seg = (pts[1] - pts[0])[None]
     seg_len = np.sqrt((seg**2).sum(1))
-    movers = [(np.array(c), load_motion(m), (r + SHELL_R + CELL / 2 + v * dt) ** 2) for c, m, r, v in movers]
+    movers = [(np.array(c), load_motion(m), (r + R + CELL / 2 + v * dt) ** 2) for c, m, r, v in movers]
     drift = drift and load_motion(drift)
     reach = None
     for k in range(math.ceil(p["survive_duration"] / dt) + 1):
@@ -584,8 +584,11 @@ def _dodge(x, y, pts, top, region, movers, p, start):
 
 
 def _footprint(x, y, pos):
-    """Nodes a hazard blocks: its box plus one cell, as the marker test runs on the swept shell centre."""
-    return (np.abs(x - pos[0]) <= HAZARD_SIZE[0] + CELL) & (np.abs(y - pos[1]) <= HAZARD_SIZE[1] + CELL)
+    """Nodes a hazard blocks: within the shell radius (markers trigger when the shell touches them) plus half a cell's
+    diagonal of the box, so every point of an 8-neighbour step between free nodes keeps the shell clear of it."""
+    dx = np.maximum(np.abs(x - pos[0]) - HAZARD_SIZE[0], 0)
+    dy = np.maximum(np.abs(y - pos[1]) - HAZARD_SIZE[1], 0)
+    return dx**2 + dy**2 <= (R + CELL * math.sqrt(0.5)) ** 2
 
 
 def _hazard(x, y, h, corridor, on_path, pts, seg, seg_len, s_vert, hw, total, targets, rng):
@@ -600,5 +603,5 @@ def _hazard(x, y, h, corridor, on_path, pts, seg, seg_len, s_vert, hw, total, ta
         k = np.unravel_index(np.argmin((x - px) ** 2 + (y - py) ** 2), x.shape)
         clear = all(math.hypot(px - pts[v, 0], py - pts[v, 1]) >= HAZARD_CLEAR for v in [0, *targets])
         if corridor[k] and clear and not on_path[_footprint(x, y, (px, py))].any():
-            return {"type": "box", "pos": [px, py, round(float(h[k]) + SHELL_R, 3)], "size": list(HAZARD_SIZE)}
+            return {"type": "box", "pos": [px, py, round(float(h[k]) + R, 3)], "size": list(HAZARD_SIZE)}
     raise _Retry

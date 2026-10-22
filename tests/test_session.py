@@ -29,11 +29,11 @@ def play_out(session, overruns=0):
 
 def test_each_finished_episode_appends_to_the_players_dataset_with_its_overrun_count():
     s = Session("survive", SURVIVE, player="eric")
-    assert s.dataset_id == "hamsterball/human-eric-v1"
+    assert s.dataset_id == "hamsterball/human-eric-v2"
     for overruns in (3, 0):
         s.start()
         play_out(s, overruns)
-    ds = minari.load_dataset("hamsterball/human-eric-v1")
+    ds = minari.load_dataset("hamsterball/human-eric-v2")
     first, second = ds.storage.get_episode_metadata([0, 1])
     assert ds.total_episodes == 2
     assert (first["overruns"], second["overruns"]) == (3, 0)
@@ -59,7 +59,7 @@ def test_the_dataset_replays_without_the_level_files_and_across_tasks(tmp_path):
     play_out(g)
     g.close()
     level.unlink()
-    ds = minari.load_dataset("hamsterball/human-eric-v1")
+    ds = minari.load_dataset("hamsterball/human-eric-v2")
     assert "levels" not in ds.env_spec.kwargs  # a level path only works on the recording machine
     options = [m["options"] for m in ds.storage.get_episode_metadata([0, 1])]
     assert [o["task"] for o in options] == ["survive", "reach_goal"]
@@ -77,7 +77,7 @@ def test_a_crash_loses_only_the_run_in_progress():
     for _ in range(5):
         s.step(OUT)
     del s  # the process dies here: no close, no flush
-    ds = minari.load_dataset("hamsterball/human-eric-v1")
+    ds = minari.load_dataset("hamsterball/human-eric-v2")
     assert (ds.total_episodes, ds.total_steps) == (1, n)
 
 
@@ -118,7 +118,7 @@ def test_a_recorded_episodes_pitch_is_in_its_4d_actions_and_replays():
     s.step(np.array([0, 0, 0, -1], np.float32))  # look up for a step, then run out
     play_out(s)
     s.close()
-    ds = minari.load_dataset("hamsterball/human-eric-v1")
+    ds = minari.load_dataset("hamsterball/human-eric-v2")
     actions = next(ds.iterate_episodes()).actions
     assert actions.shape[1] == 4 and actions[0, 3] == -1
     replay(ds)

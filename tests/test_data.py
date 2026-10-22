@@ -20,7 +20,7 @@ def datasets_path(tmp_path, monkeypatch):
     monkeypatch.setenv("MINARI_DATASETS_PATH", str(tmp_path / "datasets"))
 
 
-def record(env_id="HamsterballReachGoal-v1", episodes=1, steps=20, seed=0, **kw):
+def record(env_id="HamsterballReachGoal-v2", episodes=1, steps=20, seed=0, **kw):
     """Record episodes of seeded random actions, each cut after `steps` env steps, into a new dataset."""
     env = Collector(gym.make(env_id, **kw))
     env.action_space.seed(seed)
@@ -35,7 +35,7 @@ def record(env_id="HamsterballReachGoal-v1", episodes=1, steps=20, seed=0, **kw)
 
 def test_each_episode_stores_the_envs_reset_options():
     env = record(episodes=2, levels=["first_goal", "hill"])
-    _, info = gym.make("HamsterballReachGoal-v1", levels=["first_goal", "hill"]).reset(seed=1)
+    _, info = gym.make("HamsterballReachGoal-v2", levels=["first_goal", "hill"]).reset(seed=1)
     ds = env.create_dataset("test/reset-options-v0", algorithm_name="random")
     meta = list(ds.storage.get_episode_metadata([0, 1]))
     assert meta[1]["options"] == info["reset_options"]
@@ -68,7 +68,7 @@ def test_the_dataset_records_versions_platform_and_every_space_shaping_kwarg():
 
 
 def test_episode_metadata_holds_the_outcome_return_and_length():
-    env = Collector(gym.make("HamsterballSurvive-v1", levels=["first_survive"]))
+    env = Collector(gym.make("HamsterballSurvive-v2", levels=["first_survive"]))
     for action in ([0, 1], [0, 0]):  # run out of the region, then stand still to the time limit
         env.reset(seed=0)
         while not any(env.step(np.array(action, np.float32))[2:4]):
@@ -82,7 +82,7 @@ def test_episode_metadata_holds_the_outcome_return_and_length():
 
 @pytest.mark.parametrize("task", TASKS)
 def test_an_episode_of_every_task_replays_bit_for_bit(task):
-    env = record("Hamsterball-v1", episodes=2, steps=60, tasks=[task], camera_action=True)
+    env = record("Hamsterball-v2", episodes=2, steps=60, tasks=[task], camera_action=True)
     replay(env.create_dataset(f"test/replay-{task}-v0", algorithm_name="random"))
 
 
@@ -123,7 +123,7 @@ def test_a_pixel_env_records_state_and_goal_and_its_view_kwargs():
 
 def test_appended_episodes_get_the_outcome_metadata_too():
     # Minari's add_to_dataset skips the episode metadata callback; the game appends after every episode
-    env = Collector(gym.make("HamsterballSurvive-v1", levels=["first_survive"]))
+    env = Collector(gym.make("HamsterballSurvive-v2", levels=["first_survive"]))
     env.reset(seed=0)
     env.step(np.array([0, 0], np.float32))
     ds = env.create_dataset("test/append-v0", author="tester")
@@ -141,7 +141,7 @@ def test_appended_episodes_get_the_outcome_metadata_too():
 
 def test_one_dataset_holds_levels_whose_core_states_differ_in_size():
     # survive_pushers' bodies add qpos and qvel; the game's per-player dataset holds every level the player plays
-    env = Collector(gym.make("HamsterballSurvive-v1", levels=["first_survive", "survive_pushers"]))
+    env = Collector(gym.make("HamsterballSurvive-v2", levels=["first_survive", "survive_pushers"]))
     sizes = set()
     for level in ("first_survive", "survive_pushers"):
         env.reset(seed=0, options={"level": Level.load(LEVELS_DIR / f"{level}.yaml")})
