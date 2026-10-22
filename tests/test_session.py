@@ -110,3 +110,15 @@ def test_a_human_player_has_no_time_up_and_the_dataset_says_so():
     assert s.env.unwrapped.truncate is False
     assert s.env.unwrapped.spec.kwargs["truncate"] is False  # what the dataset's env_spec carries to replay
     s.close()
+
+
+def test_a_recorded_episodes_pitch_is_in_its_4d_actions_and_replays():
+    s = Session("survive", SURVIVE, player="eric")
+    s.start()
+    s.step(np.array([0, 0, 0, -1], np.float32))  # look up for a step, then run out
+    play_out(s)
+    s.close()
+    ds = minari.load_dataset("hamsterball/human-eric-v1")
+    actions = next(ds.iterate_episodes()).actions
+    assert actions.shape[1] == 4 and actions[0, 3] == -1
+    replay(ds)

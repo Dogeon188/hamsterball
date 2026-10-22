@@ -37,12 +37,13 @@ PRESSES = {"esc": [imgui.Key.escape], "enter": [imgui.Key.enter, imgui.Key.keypa
 
 
 def _sticks():
-    """((left x, left y), right x) from the first connected gamepad, or zeros."""
+    """((left x, left y), (right x, right y)) from the first connected gamepad, or zeros."""
     for j in range(glfw.JOYSTICK_1, glfw.JOYSTICK_LAST + 1):
         if glfw.joystick_is_gamepad(j) and (state := glfw.get_gamepad_state(j)):
             ax = state.axes
-            return (ax[glfw.GAMEPAD_AXIS_LEFT_X], ax[glfw.GAMEPAD_AXIS_LEFT_Y]), ax[glfw.GAMEPAD_AXIS_RIGHT_X]
-    return (0.0, 0.0), 0.0
+            return ((ax[glfw.GAMEPAD_AXIS_LEFT_X], ax[glfw.GAMEPAD_AXIS_LEFT_Y]),
+                    (ax[glfw.GAMEPAD_AXIS_RIGHT_X], ax[glfw.GAMEPAD_AXIS_RIGHT_Y]))
+    return (0.0, 0.0), (0.0, 0.0)
 
 
 class _Chase:
@@ -185,7 +186,7 @@ def _play(window, session):
     chase, flow, pacer, mouse = None, Flow(), Pacer(PERIOD), Mouse()
     act = action(set())
     env = session.env
-    cursor_x = None  # None: no reading since the cursor was locked, so the lock's jump isn't a turn
+    cursor = None  # None: no reading since the cursor was locked, so the lock's jump isn't a turn
 
     def start(retry=False):
         session.start(retry)
@@ -206,11 +207,11 @@ def _play(window, session):
             glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED if playing else glfw.CURSOR_NORMAL)
             if playing:
                 held = {n for n, ks in KEYS.items() if any(imgui.is_key_down(k) for k in ks)}
-                left, right_x = _sticks()
-                x = glfw.get_cursor_pos(window)[0]
-                cam = mouse.move(0.0 if cursor_x is None else x - cursor_x)
-                cursor_x = x
-                act = action(held, left, right_x, cam)
+                left, right = _sticks()
+                xy = glfw.get_cursor_pos(window)
+                cam = mouse.move(*((0.0, 0.0) if cursor is None else (xy[0] - cursor[0], xy[1] - cursor[1])))
+                cursor = xy
+                act = action(held, left, right, cam)
                 pacer.wait()
                 _, _, terminated, truncated, info = session.step(act, pacer.overruns)
                 if text := outcome(terminated, truncated, info):
@@ -218,7 +219,7 @@ def _play(window, session):
             else:
                 pacer.reset()
                 mouse.clear()
-                cursor_x = None
+                cursor = None
                 time.sleep(PERIOD)
 
             core = env.unwrapped.core
@@ -288,7 +289,7 @@ def run(settings, levels_dir, record, skip_menu):
 @click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
 @click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
 def main(levels_dir, player, no_record, task, level, seed, difficulty):
-    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn, or gamepad, Esc to pause."""
+    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and tilt, or gamepad, Esc to pause."""
     flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
     settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
     record = not no_record

@@ -39,24 +39,42 @@ def test_left_stick_deadzone_rescales_effort_and_overrides_keys():
 
 
 def test_right_stick_x_sets_cam_yaw_and_overrides_q_e():
-    assert action({"q"}, right_x=0.1)[2] == 1  # inside the deadzone
-    assert action({"q"}, right_x=1.0)[2] == pytest.approx(-1.0)  # right stick right turns right
-    assert action(set(), right_x=-0.575)[2] == pytest.approx(0.5)
+    assert action({"q"}, right=(0.1, 0.0))[2] == 1  # inside the deadzone
+    assert action({"q"}, right=(1.0, 0.0))[2] == pytest.approx(-1.0)  # right stick right turns right
+    assert action(set(), right=(-0.575, 0.0))[2] == pytest.approx(0.5)
+
+
+def test_right_stick_y_sets_cam_pitch_up_looks_up():
+    assert action(set(), right=(0.0, -1.0))[3] == pytest.approx(-1.0)  # GLFW y down: pushed up lowers the pitch
+    assert action(set(), right=(0.0, 0.575))[3] == pytest.approx(0.5)
+    assert action(set(), right=(0.1, 0.1))[2:] == pytest.approx([0, 0])  # radial deadzone covers both axes
+    assert action({"q"}, right=(0.0, 1.0))[2:] == pytest.approx([1, 1])  # y alone leaves Q's turn
 
 
 def test_a_mouse_flick_turns_at_the_max_rate_over_frames_until_spent():
     m = Mouse(sens=0.1)
-    assert [m.move(d) for d in (25, 0, 0, 0)] == pytest.approx([-1, -1, -0.5, 0])  # right turns right; 2.5 carried
-    assert m.move(-4) == pytest.approx(0.4)
-    m.move(30)
+    assert [m.move(d, 0)[0] for d in (25, 0, 0, 0)] == pytest.approx([-1, -1, -0.5, 0])  # right turns right
+    assert m.move(-4, 0)[0] == pytest.approx(0.4)
+    m.move(30, 30)
     m.clear()
-    assert m.move(0) == 0
+    assert m.move(0, 0) == (0, 0)
 
 
-def test_mouse_motion_overrides_the_right_stick_and_q_e():
-    assert action({"q"}, right_x=1.0, mouse_cam=0.3)[2] == pytest.approx(0.3)
-    assert action({"q"}, mouse_cam=0.0)[2] == 1  # no motion and nothing carried: the keys win
-    assert action(set(), right_x=1.0, mouse_cam=0.0)[2] == pytest.approx(-1.0)
+def test_mouse_up_looks_up_and_each_axis_carries_on_its_own():
+    m = Mouse(sens=0.1)
+    # screen y is down; the pitch is below the horizon, so moving up (dy < 0) lowers it
+    assert [m.move(0, dy)[1] for dy in (-15, 0, 0)] == pytest.approx([-1, -0.5, 0])
+    assert [m.move(d, 0) for d in (25, 0)] == [pytest.approx((-1, 0)), pytest.approx((-1, 0))]
+    assert m.move(0, 25) == pytest.approx((-0.5, 1))  # the yaw carry spends on while the pitch's starts
+
+
+def test_mouse_motion_overrides_only_its_own_stick_axis_and_keys():
+    assert action({"q"}, right=(1.0, 0.0), mouse=(0.3, 0.0))[2] == pytest.approx(0.3)
+    assert action({"q"}, mouse=(0.0, 0.0))[2] == 1  # no motion and nothing carried: the keys win
+    assert action(set(), right=(1.0, 0.0), mouse=(0.0, 0.0))[2] == pytest.approx(-1.0)
+    assert action(set(), right=(0.0, 1.0), mouse=(0.0, -0.4))[3] == pytest.approx(-0.4)
+    assert action({"q"}, right=(0.0, 1.0), mouse=(0.0, -0.4))[2] == 1  # a pitch flick leaves Q's turn
+    assert action(set(), right=(1.0, 1.0), mouse=(0.3, 0.0))[2:] == pytest.approx([0.3, 1])  # and the stick's pitch
 
 
 class FakeClock:
