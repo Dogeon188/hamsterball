@@ -29,6 +29,7 @@ def goal_x(img):
     return None if len(xs) == 0 else xs.mean() / img.shape[1]
 
 
+@pytest.mark.gl
 def test_views_are_uint8_rgb_at_view_size():
     env = make(views=VIEWS, view_size=(48, 64))
     obs, _ = env.reset(seed=0)
@@ -39,6 +40,7 @@ def test_views_are_uint8_rgb_at_view_size():
     env.close()
 
 
+@pytest.mark.gl
 def test_views_render_wider_and_taller_than_the_games_window():
     env = make(views=("chase",), view_size=(800, 1600))  # past the 1280 x 720 offscreen buffer the game needs
     obs, _ = env.reset(seed=0)
@@ -46,6 +48,7 @@ def test_views_render_wider_and_taller_than_the_games_window():
     env.close()
 
 
+@pytest.mark.gl
 def test_chase_and_first_person_face_the_facing():
     # facing 0 faces +y, where the goal is: centred
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)
@@ -57,6 +60,7 @@ def test_chase_and_first_person_face_the_facing():
     assert goal_x(obs["first_person"]) > 0.6
 
 
+@pytest.mark.gl
 def test_chase_and_first_person_follow_the_camera_pitch_and_follow_keeps_its_own():
     env = make(camera_action=True, views=VIEWS)
     env.reset(seed=0)
@@ -73,6 +77,7 @@ def test_chase_and_first_person_follow_the_camera_pitch_and_follow_keeps_its_own
     env.close()
 
 
+@pytest.mark.gl
 def test_follow_keeps_the_level_yaw():
     lv = level(30.0)  # follow_yaw_deg 0: the follow view still looks along +y, at the goal
     obs, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
@@ -94,6 +99,7 @@ def test_geom_groups_per_view():
         assert list(views.option(v, hitboxes=True).geomgroup) == on
 
 
+@pytest.mark.gl
 def test_renders_on_the_thread_that_steps_the_env():
     env = make(views=("chase",))
     out = []
@@ -117,6 +123,7 @@ def test_glfw_is_refused_for_env_views(monkeypatch):
         make(views=("chase",))
 
 
+@pytest.mark.gl
 def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
     env = make(views=("chase",), obs_state=False)
     obs, info = env.reset(seed=0)
@@ -126,6 +133,7 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
     assert set(obs) == {"chase"} and {"state", "goal"} <= info.keys()
 
 
+@pytest.mark.gl
 def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
     env = gym.make("Hamsterball-v2", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
@@ -133,6 +141,7 @@ def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     assert obs["first_person"][-1].min() > 0
 
 
+@pytest.mark.gl
 def test_views_survive_model_cache_eviction():
     # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
     env = gym.make("Hamsterball-v2", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
@@ -155,6 +164,7 @@ def part_offsets(env, facing):
     return {p: (lambda r: (r @ right, r @ fwd, r[2]))(d.geom_xpos[m.geom(p).id] - d.xpos[HAM]) for p in PARTS}
 
 
+@pytest.mark.gl
 def test_the_tail_sits_behind_and_the_ears_on_top_whatever_the_facing():
     env = make(camera_action=True, views=("chase",))  # rendering carries the mocap pose to the geoms
     env.reset(seed=0)

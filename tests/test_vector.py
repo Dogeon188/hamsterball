@@ -61,6 +61,7 @@ def test_the_warp_backend_is_not_built_in_v1():
         make_vec(backend="warp")
 
 
+@pytest.mark.gl
 def test_views_render_in_spawned_workers():
     venv = make_vec(views=("chase", "first_person"), view_size=(32, 48))
     try:

@@ -14,6 +14,8 @@ from test_platforms import raft_env
 from test_seesaw import seesaw_env
 from test_tasks import toward_target
 
+pytestmark = pytest.mark.gl
+
 
 @pytest.fixture(autouse=True)
 def datasets_path(tmp_path, monkeypatch):

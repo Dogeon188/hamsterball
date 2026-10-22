@@ -2,11 +2,14 @@
 
 import re
 
+import pytest
+
 from click.testing import CliRunner
 
 from hamsterball.bench import main
 
 
+@pytest.mark.gl  # the pixels config renders
 def test_the_bench_prints_every_configuration_and_the_gate():
     result = CliRunner().invoke(main, ["--secs", "0.3", "--reps", "1", "--copies", "2"])
     rows = re.findall(r"^(state|pixels)\s+(flat|hfield)\s+(\d+)\s+[\d,]+$", result.output, re.M)
