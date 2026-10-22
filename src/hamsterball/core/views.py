@@ -64,11 +64,13 @@ def pose(model, data, follow_yaw):
     data.mocap_quat[mocap] = (math.cos(facing / 2), 0.0, 0.0, math.sin(facing / 2))
 
 
-def option(view):
-    """The MjvOption a view renders with: group 3 (inner tiles) hidden everywhere; first person also hides 1 and 2."""
+def option(view, hitboxes=False):
+    """The MjvOption a view renders with: group 3 (inner tiles) hidden everywhere; first person also hides 1 and 2.
+    `hitboxes` shows group 4, the hitbox view's geoms (off by default, so env pixels never show them)."""
     opt = mujoco.MjvOption()
     opt.geomgroup[:] = 0
     opt.geomgroup[0] = 1
     if view != "first_person":
         opt.geomgroup[1] = opt.geomgroup[2] = 1
+    opt.geomgroup[4] = hitboxes
     return opt

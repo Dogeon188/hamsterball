@@ -1,6 +1,7 @@
 """Pixel views (spec §11): what each view sees, through the env's observation."""
 
 import math
+import re
 import os
 from importlib.resources import files
 import subprocess
@@ -8,11 +9,13 @@ import sys
 import threading
 
 import gymnasium as gym
+import mujoco
 import numpy as np
 import pytest
 
 from hamsterball.core import views
-from hamsterball.core.model import HAM
+from hamsterball.core import Core
+from hamsterball.core.model import HAM, M_SHELL, SHELL
 from hamsterball.core.level import Level
 from test_env import level, make
 
@@ -85,6 +88,10 @@ def test_geom_groups_per_view():
     # already drops the shell and the hamster, so the option is checked directly.
     assert list(views.option("chase").geomgroup) == list(views.option("follow").geomgroup) == [1, 1, 1, 0, 0, 0]
     assert list(views.option("first_person").geomgroup) == [1, 0, 0, 0, 0, 0]
+    for v in VIEWS:  # hitboxes 4: off by default, so env pixels never show them; the flag turns only them on
+        on = list(views.option(v).geomgroup)
+        on[4] = 1
+        assert list(views.option(v, hitboxes=True).geomgroup) == on
 
 
 def test_renders_on_the_thread_that_steps_the_env():
@@ -174,3 +181,32 @@ def test_the_tail_and_ears_show_in_chase_and_follow_only_and_never_touch_the_phy
         assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
         assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
 
+
+
+def test_hitbox_geoms_are_the_shell_centre_and_the_kill_plane_and_never_touch_the_physics():
+    lv = level()
+    lv.kill_plane_z = -3.5
+    m = Core(level=lv).model
+    dot, plane = m.geom("hitbox_centre").id, m.geom("hitbox_kill_plane").id
+    assert m.geom_bodyid[dot] == SHELL and list(m.geom_pos[dot]) == [0, 0, 0] and m.geom_rgba[dot][3] == 1
+    assert m.geom_bodyid[plane] == 0 and m.geom_pos[plane][2] == -3.5 and m.geom_rgba[plane][3] < 1
+    for g in (dot, plane):
+        assert (m.geom_group[g], m.geom_contype[g], m.geom_conaffinity[g]) == (4, 0, 0)
+    assert m.body_mass[SHELL] == pytest.approx(M_SHELL)  # the dot weighs nothing
+    assert (m.body("shell").id, m.body("hamster").id) == (SHELL, HAM) == (1, 2)
+
+
+def test_hitbox_geoms_change_no_trajectory(monkeypatch):
+    def run():
+        core = Core(level=Level.load(files("hamsterball") / "levels/survive_seesaw.yaml"))
+        for a in ([1, 0], [0.3, 1], [-1, 0.5]):
+            for _ in range(20):
+                core.step(np.array(a, np.float32))
+        return core.state()
+
+    with_hitboxes = run()
+    compile_ = mujoco.MjModel.from_xml_string
+    monkeypatch.setattr(mujoco.MjModel, "from_xml_string",
+                        lambda xml: compile_(re.sub(r'<geom name="hitbox_[^>]*/>', "", xml)))
+    without = run()
+    assert len(with_hitboxes) == len(without) and np.array_equal(with_hitboxes, without)

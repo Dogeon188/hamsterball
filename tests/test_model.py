@@ -36,7 +36,8 @@ def test_shell_wall_is_320_fibonacci_tiles_carrying_the_shell_mass(model):
 
 
 def test_outer_collider_is_a_massless_rolling_sphere(model):
-    (outer,) = [g for g in shell_geoms(model) if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_SPHERE]
+    # the one colliding sphere: the hitbox view's centre dot is a contactless sphere too
+    (outer,) = [g for g in shell_geoms(model) if model.geom_type[g] == mujoco.mjtGeom.mjGEOM_SPHERE and model.geom_contype[g]]
     assert model.geom_size[outer][0] == 0.5
     assert model.body_mass[model.body("shell").id] == pytest.approx(0.8)  # a solid 0.5 m sphere would add 524 kg
     assert model.geom_contype[outer] == 1 and model.geom_condim[outer] == 6 and model.geom_group[outer] == 1
