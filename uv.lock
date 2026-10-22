@@ -949,7 +949,7 @@ requires-dist = [
     { name = "hamsterball", extras = ["data", "game"], marker = "extra == 'all'" },
     { name = "imgui-bundle", marker = "extra == 'game'" },
     { name = "lerobot", extras = ["dataset"], marker = "python_full_version >= '3.12' and python_full_version < '3.14' and extra == 'lerobot'", specifier = ">=0.6" },
-    { name = "minari", extras = ["arrow", "create"], marker = "extra == 'data'", specifier = "==0.5.*" },
+    { name = "minari", extras = ["arrow", "create"], marker = "extra == 'data'", specifier = "==0.5.4" },
     { name = "mujoco", specifier = "==3.16.0" },
     { name = "numpy" },
     { name = "pillow", marker = "extra == 'data'" },

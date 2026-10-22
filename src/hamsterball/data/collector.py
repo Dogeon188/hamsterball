@@ -32,6 +32,8 @@ def _encode_core_state(info):
     return pa.StructArray.from_arrays(arrays, fields=fields)
 
 
+# ponytail: patches a Minari 0.5.4 internal, so pyproject pins minari==0.5.4; a Minari release that stores variable-size
+# info fields itself (or renames _encode_info) means dropping this patch or porting it before raising the pin
 arrow_storage._encode_info = _encode_core_state  # Minari internal: every arrow write in this process goes through it
 
 
