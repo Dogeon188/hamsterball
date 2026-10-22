@@ -78,8 +78,9 @@ def _tilt(t, period):
 
 def _unit(v):
     """v normalised, left as is when it already is one: a replay reloads the canonical level, and normalising a
-    unit vector again can move its last bits."""
-    n = np.linalg.norm(v)
+    unit vector again can move its last bits. The norm is plain float math: np.linalg.norm of a vector is a BLAS ddot,
+    whose kernel (and so its last bit) varies by CPU, and the axis lands in the canonical level."""
+    n = math.sqrt(math.fsum(c * c for c in v.tolist()))
     return (v if abs(n - 1) < 1e-12 else v / n).tolist()
 
 
