@@ -5,7 +5,7 @@ import math
 import mujoco
 import numpy as np
 
-from .model import SHELL
+from .model import SHELL, YAW
 
 VIEWS = ("chase", "follow", "first_person")
 
@@ -35,7 +35,7 @@ def _quat(yaw, pitch):
 
 def pose(model, data, follow_yaw):
     """Pose the view mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the cameras."""
-    yaw = float(data.userdata[0])
+    yaw = float(data.userdata[YAW])
     c = data.xpos[SHELL]
     for v, at, yw, pitch, dist in (
         ("chase", c, yaw, CHASE_PITCH, CHASE_DIST),

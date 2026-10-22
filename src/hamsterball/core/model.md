@@ -7,12 +7,12 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 ## Interface
 
 - `build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0) -> MjModel`: `view_size` is `(height, width)`; the model's offscreen buffer (`<visual><global offwidth offheight>`) is the larger of it and `GAME_SIZE` (720, 1280, the game window) in each dimension, so env views and the game both fit. `level` is top-level MJCF sections (`<asset>`, `<worldbody>` with geoms only, no bodies), placed after the light's worldbody and before the shell's. `FLAT` is an infinite ground plane. `bodies` is top-level MJCF sections too (`Level.body_mjcf()`: a `<worldbody>` of kinematic bodies and seesaws, and a `<contact>` of excludes), placed last, so its bodies follow the view mocaps (then `Level.tile_mjcf()`'s tiles); `""` leaves the model as before. `slots` adds userdata slots after the tier's (one per collapsing tile); 0 leaves `nuserdata` as before.
-- Constants the rest of the core imports: `GAME_SIZE`, `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`.
+- Constants the rest of the core imports: `GAME_SIZE`, `DT`, `R`, `T`, `M_SHELL`, `M_HAM`, `SOLREF`, `TILE_NORMALS` (320×3, shell frame), and the fixed ids `SHELL`, `HAM`, `SHELL_QPOS`, `HAM_QPOS`, `SHELL_DOF`, `HAM_DOF`, and the core's userdata slots: `YAW` (the camera yaw) and their count `CORE_SLOTS`.
 
 ## How it works
 
 - The shell is a free body whose origin is the shell centre: 320 box tiles on a Fibonacci sphere carry its 0.8 kg (contype and conaffinity 2, group 3), and a massless outer sphere (contype 1, `condim 6`, friction `1 0.05 0.04`, group 1) touches the level.
-- The tier's `fragment` goes in the worldbody after the shell, then the view mocaps of [views.md](views.md), and `nuserdata` is 1 (the core's camera yaw) plus the tier's slots plus `slots` (a level's tiles).
+- The tier's `fragment` goes in the worldbody after the shell, then the view mocaps of [views.md](views.md), and `nuserdata` is `CORE_SLOTS` (the core's slots) plus the tier's slots plus `slots` (a level's tiles).
 - Floats go into the MJCF with `repr` of plain Python floats (NumPy 2's `repr` of `np.float64` isn't valid MJCF), so tile poses match the spec's formulas to full precision.
 - Integrator `implicitfast`, as in the prototype that set the feel.
 - `<visual><map znear="0.001"/>`: the near clip plane is a fraction of the model's extent, which large levels grow; the default 0.01 cut the ground below the first-person eye on a 30 m level. It changes pixels only.
@@ -44,3 +44,4 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 - 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. `build` now takes `view_size` and sizes the buffer to it, never below the game's 1280×720.
 - 2026-10-22, ticket survive-movers/03: added `bodies` to `build`. A level without bodies passes `""` and compiles the same model (one more newline in the XML).
 - 2026-10-22, ticket survive-movers/06: added `slots` to `build` for the collapsing tiles' trigger times.
+- 2026-10-22, ticket mouse-camera/02 (prefactor, no behaviour change): the core's userdata slots are named in `model.py` (`YAW`, `CORE_SLOTS`); `nuserdata` counts from `CORE_SLOTS`, and the tier's and the tiles' slots follow from it.

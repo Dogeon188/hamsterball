@@ -21,7 +21,7 @@ from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TA
                          body_frame)
 from .core.marker import centre, crosses
 from .core.motion import pose, quat
-from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
+from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS, YAW
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -322,7 +322,7 @@ class HamsterballEnv(gym.Env):
         mujoco.mj_subtreeVel(m, d)
         # posed even without views, so core_state (which holds the mocap poses) doesn't depend on the views kwarg
         V.pose(m, d, math.radians(self.level.follow_yaw_deg))
-        yaw = float(d.userdata[0])
+        yaw = float(d.userdata[YAW])
         cy, sy = math.cos(yaw), math.sin(yaw)
 
         def cam(v):  # world -> camera yaw frame: rotate by -yaw about z

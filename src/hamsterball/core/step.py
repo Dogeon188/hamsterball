@@ -1,8 +1,8 @@
 """The core step (spec §4): camera yaw, shell drag, containment, then the tier's drive, once per physics step.
 
 Every per-step function is a pure function of model and data fields plus the action (and a level's constant body
-motions). All state lives in time, qpos, qvel and userdata (slot 0 the camera yaw, the tier's slots after it), so one
-mj_getState(mjSTATE_INTEGRATION) vector is the core state.
+motions). All state lives in time, qpos, qvel and userdata (the core's slots, `model.YAW` first, then the tier's, then
+a level's collapsing tiles'), so one mj_getState(mjSTATE_INTEGRATION) vector is the core state.
 """
 
 import math
@@ -15,7 +15,8 @@ import numpy as np
 from .abstract_tier import AbstractTier
 from .level import Level
 from .motion import pose, quat
-from .model import DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF, SHELL_QPOS, build
+from .model import (CORE_SLOTS, DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF,
+                    SHELL_QPOS, YAW, build)
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
@@ -61,7 +62,7 @@ class Tier(Protocol):
     """What the core needs from a control tier (spec §6)."""
 
     fragment: str  # MJCF: a free body named "hamster", 2.4 kg in total, geoms in group 2, a site "hamster_eye"
-    nuserdata: int  # its userdata slots, after the core's slot 0
+    nuserdata: int  # its userdata slots, after the core's CORE_SLOTS
     resting_radius: float  # m, shell centre to hamster subtree centre of mass at rest
 
     def action_space(self) -> gym.spaces.Box: ...
@@ -78,12 +79,12 @@ def wrap(a):
 
 def camera_yaw(data, cam):
     """Turn toward the shell's direction of travel, add the orbit input, store and return the yaw."""
-    yaw = data.userdata[0]
+    yaw = data.userdata[YAW]
     vx, vy = data.qvel[SHELL_DOF], data.qvel[SHELL_DOF + 1]
     if vx * vx + vy * vy > CHASE_MIN_SPEED2:
         yaw += CHASE_ALPHA * wrap(math.atan2(-vx, vy) - yaw)
     yaw = wrap(yaw + ORBIT_RATE * cam * DT)
-    data.userdata[0] = yaw
+    data.userdata[YAW] = yaw
     return yaw
 
 
@@ -224,7 +225,7 @@ class Core:
                            for i, b in enumerate(level.bodies)]
             self.tiles = None
             if c:
-                self.tiles = Tiles(1 + self.tier.nuserdata, m.body("tile0").id, c["delay"],
+                self.tiles = Tiles(CORE_SLOTS + self.tier.nuserdata, m.body("tile0").id, c["delay"],
                                    [Tile(*adr(f"tile{i}"), np.array(g["pos"]),
                                          level.kill_plane_z - TILE_DROP - g["pos"][2]) for i, g in enumerate(c["tiles"])])
         else:
@@ -241,14 +242,14 @@ class Core:
 
     @property
     def yaw(self):
-        return float(self.data.userdata[0])
+        return float(self.data.userdata[YAW])
 
     def reset(self, spawn=(0.0, 0.0, R), yaw=0.0):
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
         self.tier.reset(m, d, spawn)
-        d.userdata[0] = yaw
+        d.userdata[YAW] = yaw
         if self.tiles:
             d.userdata[self.tiles.slot:] = math.inf  # untouched
         drive_bodies(d, self.bodies)

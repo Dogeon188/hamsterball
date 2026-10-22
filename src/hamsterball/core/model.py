@@ -18,6 +18,9 @@ TORSION, ROLL = 0.05, 0.04  # outer sphere's torsional and rolling friction (m)
 SHELL, HAM = 1, 2
 SHELL_QPOS, HAM_QPOS = 0, 7
 SHELL_DOF, HAM_DOF = 0, 6
+# The core's userdata slots; the tier's follow them, then a level's collapsing tiles'.
+YAW = 0
+CORE_SLOTS = 1
 
 
 def _tile_normals():
@@ -59,7 +62,7 @@ def build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0):
 
     h, w = max(view_size[0], GAME_SIZE[0]), max(view_size[1], GAME_SIZE[1])
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
-<size nuserdata="{1 + tier.nuserdata + slots}"/>
+<size nuserdata="{CORE_SLOTS + tier.nuserdata + slots}"/>
 <visual><global offwidth="{w}" offheight="{h}"/><map znear="0.001"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}

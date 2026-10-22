@@ -5,7 +5,7 @@ import math
 import gymnasium as gym
 import numpy as np
 
-from .model import HAM, HAM_DOF, HAM_QPOS, M_HAM, R, SHELL, SHELL_DOF, SOLREF, T, TILE_NORMALS
+from .model import CORE_SLOTS, HAM, HAM_DOF, HAM_QPOS, M_HAM, R, SHELL, SHELL_DOF, SOLREF, T, TILE_NORMALS
 
 R_HAM = 0.12
 REST = R - T - R_HAM  # resting radius, hamster centre to shell centre (0.35 m)
@@ -15,7 +15,7 @@ K_GRIP = 2.0 * S  # N m s/rad: damps hamster spin relative to the shell
 LEAN = math.radians(70)  # lean ceiling at full effort
 TOUCH = 0.002 + 0.003  # wall gap (m) that counts as touching: the 2 mm margin + 3 mm
 GRACE = 0.045  # s after the last touch before the foot force cuts out
-LAST_TOUCH = 1  # userdata slot; slot 0 is the core's camera yaw
+LAST_TOUCH = CORE_SLOTS  # userdata slot, the first after the core's
 
 
 class AbstractTier:
