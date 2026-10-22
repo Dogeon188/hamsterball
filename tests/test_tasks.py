@@ -35,7 +35,7 @@ def level(task, **markers):
 
 
 def make(task, lv, **kw):
-    env = gym.make("Hamsterball-v1", tasks=[task], levels=[lv], **kw)
+    env = gym.make("Hamsterball-v2", tasks=[task], levels=[lv], **kw)
     obs, info = env.reset(seed=0)
     return env, obs
 
@@ -139,7 +139,7 @@ def test_only_the_episode_task_markers_show():
 
 @pytest.mark.parametrize("gamma", [0.99, 0.5])
 def test_shaping_adds_gamma_phi_next_minus_phi_and_phi_is_0_at_the_terminal_state(gamma):
-    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], shaped=True, shaping_gamma=gamma)
+    env = gym.make("Hamsterball-v2", tasks=["reach_goal"], levels=["first_goal"], shaped=True, shaping_gamma=gamma)
     obs, _ = env.reset(seed=0)
     dist = 8.0  # first_goal: the goal sits 8 m ahead of the spawn
     for _ in range(1000):
@@ -162,7 +162,7 @@ def test_shaping_is_off_by_default():
 
 @pytest.mark.parametrize("task, targets", [("waypoint_race", "waypoints"), ("collect_items", "items"), ("unlock_goal", "keys")])
 def test_each_task_plays_to_success_on_its_bundled_level(task, targets):
-    env = gym.make("Hamsterball-v1", tasks=[task])  # the default pool: every bundled level
+    env = gym.make("Hamsterball-v2", tasks=[task])  # the default pool: every bundled level
     obs, _ = env.reset(seed=0)
     n = len(env.unwrapped.level.tasks[task][targets])
     events = []

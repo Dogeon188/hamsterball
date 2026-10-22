@@ -22,7 +22,7 @@ def datasets_path(tmp_path, monkeypatch):
 
 def play(task="unlock_goal", level="locked_goal", dataset_id="test/played-v0", **kw):
     """Record one episode of the scripted controller to success: keys hide, the goal unlocks, then goes inactive."""
-    env = Collector(gym.make("Hamsterball-v1", tasks=[task], levels=[level], **kw))
+    env = Collector(gym.make("Hamsterball-v2", tasks=[task], levels=[level], **kw))
     obs, _ = env.reset(seed=0)
     for _ in range(5000):
         obs, _, terminated, truncated, info = env.step(toward_target(obs))
@@ -71,7 +71,7 @@ def test_rerender_recomputes_progress_and_adds_lossless_views(monkeypatch):
 
 
 def test_rerender_reproduces_the_camera_pitch():
-    env = Collector(gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
+    env = Collector(gym.make("Hamsterball-v2", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
     env.reset(seed=0)
     for i in range(45):  # pitch down, then back up past the default
         env.step(np.array([0, 1, 0, 1 if i < 20 else -1], np.float32))
@@ -85,7 +85,7 @@ def test_rerender_reproduces_the_camera_pitch():
 
 
 def test_rerender_draws_the_tail_where_it_was():
-    env = Collector(gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
+    env = Collector(gym.make("Hamsterball-v2", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
     env.reset(seed=0)
     for i in range(12):  # turn, so the features swing off their reset pose
         env.step(np.array([0, 1, 1 if i < 6 else 0, 0], np.float32))
@@ -153,7 +153,7 @@ def test_a_survive_sweepers_episode_replays_and_rerenders_bit_for_bit(monkeypatc
 
 
 def test_a_survive_pushers_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
-    env = Collector(gym.make("HamsterballSurvive-v1", levels=["survive_pushers"]))
+    env = Collector(gym.make("HamsterballSurvive-v2", levels=["survive_pushers"]))
     env.reset(seed=0)
     while not any(env.step(np.array([0.3, 0.2], np.float32))[2:4]):
         pass
@@ -182,7 +182,7 @@ def test_a_survive_raft_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
 
 
 def test_a_survive_collapse_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
-    env = Collector(gym.make("HamsterballSurvive-v1", levels=["survive_collapse"]))
+    env = Collector(gym.make("HamsterballSurvive-v2", levels=["survive_collapse"]))
     env.reset(seed=0)
     while not any(env.step(np.array([0.3, 0.6], np.float32))[2:4]):  # rolls over several tiles, then off the floor
         pass

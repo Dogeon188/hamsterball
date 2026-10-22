@@ -18,7 +18,7 @@ def datasets_path(tmp_path, monkeypatch):
 
 def synthetic(dataset_id, episodes, **kw):
     """A dataset of one-step episodes whose metadata then says `episodes`: (options, success, length, return)."""
-    env = Collector(gym.make("HamsterballReachGoal-v1", levels=["first_goal"], **kw))
+    env = Collector(gym.make("HamsterballReachGoal-v2", levels=["first_goal"], **kw))
     for i in range(len(episodes)):
         env.reset(seed=i)
         env.step(env.action_space.sample())
