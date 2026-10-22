@@ -13,6 +13,7 @@ from imgui_bundle import imgui  # before glfw: imgui_bundle points pyglfw at the
 
 import glfw  # noqa: E402
 import mujoco  # noqa: E402
+import numpy as np  # noqa: E402
 from OpenGL import GL  # noqa: E402
 
 from .. import ENV_VERSION  # noqa: E402
@@ -35,6 +36,9 @@ KEYS = {
 }
 PRESSES = {"esc": [imgui.Key.escape], "enter": [imgui.Key.enter, imgui.Key.keypad_enter], "r": [imgui.Key.r],
            "f3": [imgui.Key.f3]}
+# The hitbox view's kill plane, drawn into the scene rather than compiled into the model: a model geom would grow the
+# model's extent, which sets MuJoCo's clip planes and so env pixels. A translucent sheet, 200 m square.
+KILL_PLANE_RGBA, KILL_PLANE_HALF = (0.9, 0.1, 0.1, 0.2), 100.0
 
 
 def _sticks():
@@ -47,11 +51,21 @@ def _sticks():
     return (0.0, 0.0), (0.0, 0.0)
 
 
+def _kill_plane(scene, z):
+    """Append the hitbox view's kill plane at height `z` to `scene`, after `mjv_updateScene`; a full scene gets none."""
+    if scene.ngeom >= scene.maxgeom:
+        return
+    mujoco.mjv_initGeom(scene.geoms[scene.ngeom], mujoco.mjtGeom.mjGEOM_PLANE,
+                        np.array([KILL_PLANE_HALF, KILL_PLANE_HALF, 1.0]), np.array([0.0, 0.0, z]),
+                        np.eye(3).ravel(), np.array(KILL_PLANE_RGBA, np.float32))
+    scene.ngeom += 1
+
+
 class _Chase:
     """The chase view drawn into the window's framebuffer, with shadows on; rebuilt when the level's model changes."""
 
-    def __init__(self, model, hitboxes=False):
-        self.model = model
+    def __init__(self, model, kill_plane_z, hitboxes=False):
+        self.model, self.kill_plane_z = model, kill_plane_z
         self.ctx = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_WINDOW, self.ctx)
         self.scene = mujoco.MjvScene(model, maxgeom=10000)
@@ -59,12 +73,23 @@ class _Chase:
         self.cam = mujoco.MjvCamera()
         self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         self.cam.fixedcamid = model.camera("chase").id
-        self.opt = V.option("chase", hitboxes=hitboxes)
+        self.hitboxes = hitboxes
+
+    @property
+    def hitboxes(self):
+        """The hitbox view: the option's group 4, plus the kill plane `draw` adds to the scene."""
+        return bool(self.opt.geomgroup[4])
+
+    @hitboxes.setter
+    def hitboxes(self, on):
+        self.opt = V.option("chase", hitboxes=on)
 
     def draw(self, data, width, height):
         mujoco.mj_kinematics(self.model, data)  # the env posed the view mocaps; carry them to the camera
         mujoco.mj_camlight(self.model, data)
         mujoco.mjv_updateScene(self.model, data, self.opt, None, self.cam, mujoco.mjtCatBit.mjCAT_ALL, self.scene)
+        if self.hitboxes:
+            _kill_plane(self.scene, self.kill_plane_z)
         mujoco.mjr_render(mujoco.MjrRect(0, 0, width, height), self.scene, self.ctx)
         # mjr_render leaves texture unit 1 active; imgui would bind its font there with no texcoords, drawing each
         # glyph as a dim solid block
@@ -208,7 +233,7 @@ def _play(window, session, hitboxes=False):
                 presses.remove("f3")
                 hitboxes = not hitboxes
                 if chase:
-                    chase.opt = V.option("chase", hitboxes=hitboxes)
+                    chase.hitboxes = hitboxes
             # the cursor is locked and hidden only while playing, so the pause and result buttons stay clickable
             playing = flow.state == "play"
             glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED if playing else glfw.CURSOR_NORMAL)
@@ -233,7 +258,7 @@ def _play(window, session, hitboxes=False):
             if chase is None or chase.model is not core.model:
                 if chase:
                     chase.free()
-                chase = _Chase(core.model, hitboxes)
+                chase = _Chase(core.model, env.unwrapped.level.kill_plane_z, hitboxes)
             chase.draw(core.data, *glfw.get_framebuffer_size(window))
 
             _hud(hud(env, act, session.recording))

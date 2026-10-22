@@ -12,7 +12,7 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 ## How it works
 
 - The shell is a free body whose origin is the shell centre: 320 box tiles on a Fibonacci sphere carry its 0.8 kg (contype and conaffinity 2, group 3), and a massless outer sphere (contype 1, `condim 6`, friction `1 0.05 0.04`, group 1) touches the level.
-- The hitbox view's centre dot `hitbox_centre` (radius `HITBOX_DOT` 0.04 m, opaque white) sits on the shell body at its origin: group 4, `mass="0"`, contype and conaffinity 0, so it adds no mass or contacts and is drawn only when [views.md](views.md)'s `option(..., hitboxes=True)` shows group 4. The level's `mjcf()` adds the matching kill plane (see [level.md](level.md)).
+- The hitbox view's centre dot `hitbox_centre` (radius `HITBOX_DOT` 0.04 m, opaque white) sits on the shell body at its origin: group 4, `mass="0"`, contype and conaffinity 0, so it adds no mass or contacts and is drawn only when [views.md](views.md)'s `option(..., hitboxes=True)` shows group 4. The hitbox view's kill plane is not in the model: the game window draws it into its scene (see [window.md](../game/window.md)), since a model geom would grow the extent.
 - The tier's `fragment` goes in the worldbody after the shell, then the view and feature mocaps of [views.md](views.md), and `nuserdata` is `CORE_SLOTS` (the core's slots) plus the tier's slots plus `slots` (a level's tiles).
 - Floats go into the MJCF with `repr` of plain Python floats (NumPy 2's `repr` of `np.float64` isn't valid MJCF), so tile poses match the spec's formulas to full precision.
 - Integrator `implicitfast`, as in the prototype that set the feel.
@@ -52,3 +52,4 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 - 2026-10-23, ticket mouse-camera/05: `build` places `views.ASSET` (the tail's mesh) before the level, and the tail mocap body follows the view mocaps.
 - 2026-10-23, user request: the tail's mesh asset is gone (the hamster's features are spheres), so `build` no longer places `views.ASSET`.
 - 2026-10-23, ticket hitbox-view/03: added `hitbox_centre` to the shell. `tests/test_model.py`'s outer-sphere test now picks the shell's colliding sphere (the dot is a sphere too). `tests/test_views.py` checks a stepped state matches with and without the hitbox geoms compiled.
+- 2026-10-23, code review of hitbox-view: the kill plane left the model for the game window's scene, so the centre dot is the only hitbox geom; it sits inside the shell and leaves the extent alone.

@@ -46,8 +46,6 @@ HFIELD_BASE = 1.0  # depth (m) of the solid slab under each hfield; MuJoCo needs
 BODY_MASS, BODY_INERTIA = 1000.0, 1000.0
 BODY_GEOMS = {"box", "sphere", "capsule"}  # a plane or hfield can't move
 SEESAW_MASS = 20.0  # kg, a seesaw's default mass: light enough that the 3.2 kg ball tips it within a second
-# The hitbox view's kill plane (group 4): a translucent sheet, 200 m square, past every bundled level's extent
-KILL_PLANE_RGBA, KILL_PLANE_HALF = (0.9, 0.1, 0.1, 0.2), 100.0
 TILE_WARN_RGBA = (0.9, 0.25, 0.1, 1.0)  # look constant: a touched tile's colour blends to this as its fall nears
 
 
@@ -121,7 +119,7 @@ class Level:
 
     def mjcf(self):
         """MJCF sections for model.build: hfield assets, then worldbody geoms: the level's solids, the hazards, then
-        each task's markers (translucent, no contact), and the hitbox view's kill plane (group 4)."""
+        each task's markers (translucent, no contact)."""
         assets, out = [], []
         for i, g in enumerate(self.geoms):
             if g["type"] == "hfield":
@@ -139,9 +137,6 @@ class Level:
                     out += [_marker_mjcf(m, f"{name}/{k}/{i}", MARKER_RGBA[k]) for i, m in enumerate(task[k])]
                 elif "attach" not in task[k]:  # an attached marker is drawn in its body (body_mjcf)
                     out.append(_marker_mjcf(task[k], f"{name}/{k}", MARKER_RGBA[k]))
-        out.append(f'<geom name="hitbox_kill_plane" type="plane" pos="0 0 {self.kill_plane_z!r}" '
-                   f'size="{KILL_PLANE_HALF!r} {KILL_PLANE_HALF!r} 1" rgba="{_s(KILL_PLANE_RGBA)}" contype="0" '
-                   f'conaffinity="0" group="4"/>')
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
 
     def body_mjcf(self):

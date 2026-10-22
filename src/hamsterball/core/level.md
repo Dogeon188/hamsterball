@@ -9,7 +9,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - `Level.from_yaml(text, base=".")`, `Level.load(path)`, `Level.from_dict(d, base=".")` (an already-parsed level, as the generator builds it): validate and fill every default; a malformed level raises `ValueError`. An hfield's `file` resolves against `base`; `load` passes the level file's directory.
 - `Level` fields: `kill_plane_z`, `geoms` (list of dicts), `tasks` (task id to block), `hazards` (list of markers, default empty), `follow_yaw_deg` (default 0), `version` (1), `generator` (the provenance block, or `None`), `bodies` (list of kinematic bodies and seesaws, default empty), `collapse` (the collapsing tiles block, or `None`).
 - `level.canonical()`: `yaml.safe_dump(asdict(level), sort_keys=True)`, leaving out `generator` and `collapse` when they are `None` and `bodies` when it is empty. `level.id`: SHA-256 hex of the canonical form. Both are computed on first read and cached, so edit a `Level` only before then.
-- `level.mjcf()`: top-level MJCF sections (an `<asset>` with the hfields, then a `<worldbody>` with the geoms, the markers, and the hitbox view's `hitbox_kill_plane`) for `model.build(tier, level)`. `level.body_mjcf()`: the kinematic bodies' sections for `model.build(..., bodies=)`, or `""`. `level.tile_mjcf()`: the collapsing tiles' sections, appended to `body_mjcf()`'s, or `""`. `Core(level=level)` takes the `Level` and calls all three. `KILL_PLANE_RGBA`, `KILL_PLANE_HALF`: the hitbox kill plane's colour and half-size. `TILE_WARN_RGBA`: the colour a touched tile blends to before it falls (the env sets it).
+- `level.mjcf()`: top-level MJCF sections (an `<asset>` with the hfields, then a `<worldbody>` with the geoms and markers) for `model.build(tier, level)`. `level.body_mjcf()`: the kinematic bodies' sections for `model.build(..., bodies=)`, or `""`. `level.tile_mjcf()`: the collapsing tiles' sections, appended to `body_mjcf()`'s, or `""`. `Core(level=level)` takes the `Level` and calls all three. `TILE_WARN_RGBA`: the colour a touched tile blends to before it falls (the env sets it).
 
 ## How it works
 
@@ -31,7 +31,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 ## Invariants and checks
 
 - Two files that differ only in comments, key order, int-versus-float spelling, or written-out defaults share an id.
-- The hitbox kill plane (`hitbox_kill_plane`, a plane at `kill_plane_z`, 200 m square, translucent red) is group 4, contype and conaffinity 0, so only the hitbox view draws it and nothing touches it. `tests/test_views.py` checks it and that a trajectory is the same with and without it.
+- `mjcf()` adds no hitbox geom: a world geom would grow the model's extent, and with it MuJoCo's clip planes and env pixels. The game window draws the hitbox view's kill plane into its scene (see [window.md](../game/window.md)). `tests/test_views.py` checks the model holds no group-4 geom but the shell's centre dot.
 - Level geoms add no bodies, so the shell and hamster keep body ids 1 and 2 (see [model.md](model.md)).
 - The canonical form round-trips: file → canonical YAML → `Level` → same id, hfield samples included.
 - `uv run pytest tests/test_level.py`; `test_authored_friction_overrides_the_shells` checks the priority by coast distance from 3 m/s over 2 s on a box: 3.78 m with no contact values or the shell's own, 5.30 m with rolling 0.004 (max-mixing would give 3.78 m), 1.28 m with rolling 0.2.
@@ -61,6 +61,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 
 - 2026-10-22, ticket survive-movers/05: a seesaw is a `bodies` entry (with `joint` for `motion`), not a separate block, so ticket 04's `attach` works unchanged and tiles stay after every body. Its mass is authored as one number and split evenly over its geoms (exact for the usual one-geom platform) rather than an explicit inertial, so MuJoCo derives the inertia from the shape; gravity compensation keeps an off-pivot geom from tipping it by itself.
 - 2026-10-23, ticket hitbox-view/03: `mjcf()` adds the hitbox view's kill plane, since the level knows `kill_plane_z`. A model built from bare MJCF sections (`model.FLAT`) has no kill plane, so it gets no plane geom; the centre dot is in the shell (see [model.md](model.md)).
+- 2026-10-23, code review of hitbox-view: supersedes ticket hitbox-view/03's entry above: `mjcf()` holds no kill plane. The 200 m plane grew `model.stat.extent` (`first_goal` 28.30 → 28.65), which moves MuJoCo's clip planes and so env pixels; the game window draws the plane into its scene instead.
 
 ## Tried and rejected
 
@@ -86,3 +87,4 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, code review of survive-movers: `body_mjcf()` and `tile_mjcf()` share `_free_mjcf` and `_sections` (same MJCF, byte for byte); `_body` and `_collapse` share `_solids`; a seesaw's masses go in through `_geom_mjcf`'s and `_marker_mjcf`'s `extra` rather than a string replace; `body_frame` takes the joint's qpos instead of a time, and is the one place a body becomes a pose (the env's `_frame` calls it); `_keys`, `_num`, `_vec` moved to [motion.md](motion.md)'s module, so neither imports the other inside a function.
 - 2026-10-23, ticket hitbox-view/01: markers trigger when the shell touches them (the survive region stays a centre test); the level format and ids are unchanged, and the survive spawn check keeps its centre test.
 - 2026-10-23, ticket hitbox-view/03: added the `hitbox_kill_plane` geom to `mjcf()`. Level ids are unchanged (it isn't in the canonical form). Two `tests/test_level.py` geom counts now skip group 4.
+- 2026-10-23, code review of hitbox-view: removed `hitbox_kill_plane`, `KILL_PLANE_RGBA`, and `KILL_PLANE_HALF` (now in [window.py](../game/window.md)); `first_goal`'s extent is back to 28.30. The two `tests/test_level.py` geom counts no longer skip group 4.

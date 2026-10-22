@@ -159,7 +159,7 @@ How far below the horizon the chase view looks; it pitches the chase and first-p
 _Avoid_: tilt (a mover's rocking), elevation, view angle
 
 **Hitbox view**:
-A debug overlay on a view that draws what the normal view leaves out: the kill plane as a translucent sheet at its height, and a dot at the shell centre, the point the kill plane and the survive region test. Only the game shows it; pixel observations never do.
+A debug overlay on the game's view that draws what the normal view leaves out: the kill plane as a translucent sheet at its height, which the game window adds to its scene (the model holds no such geom), and a dot at the shell centre, the point the kill plane and the survive region test. Only the game shows it; pixel observations never do.
 _Avoid_: debug view, collision view
 
 **Pose stream**:

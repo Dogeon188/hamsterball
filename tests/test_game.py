@@ -244,6 +244,29 @@ def test_outcome_names_how_the_episode_ended(terminated, truncated, info, text):
     assert outcome(terminated, truncated, info) == text
 
 
+def test_the_window_draws_the_kill_plane_into_its_scene_not_the_model():
+    import mujoco
+
+    from hamsterball.core import Core
+    from hamsterball.core.level import Level
+    from hamsterball.game import window
+
+    lv = Level.load(window.LEVELS_DIR / "first_goal.yaml")
+    core = Core(level=lv)
+    scene = mujoco.MjvScene(core.model, maxgeom=1000)
+    mujoco.mjv_updateScene(core.model, core.data, mujoco.MjvOption(), None, mujoco.MjvCamera(),
+                           mujoco.mjtCatBit.mjCAT_ALL, scene)
+    n = scene.ngeom
+    window._kill_plane(scene, lv.kill_plane_z)
+    assert scene.ngeom == n + 1
+    plane = scene.geoms[n]
+    assert plane.type == mujoco.mjtGeom.mjGEOM_PLANE and plane.pos[2] == pytest.approx(lv.kill_plane_z)
+    assert 0 < plane.rgba[3] < 1
+    full = mujoco.MjvScene(core.model, maxgeom=0)
+    window._kill_plane(full, lv.kill_plane_z)  # a full scene: no plane, no overrun
+    assert full.ngeom == 0
+
+
 def test_the_window_module_imports_and_the_cli_prints_help():
     pytest.importorskip("imgui_bundle")
     from click.testing import CliRunner

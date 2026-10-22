@@ -183,17 +183,18 @@ def test_the_tail_and_ears_show_in_chase_and_follow_only_and_never_touch_the_phy
 
 
 
-def test_hitbox_geoms_are_the_shell_centre_and_the_kill_plane_and_never_touch_the_physics():
+def test_the_hitbox_dot_is_the_shell_centre_and_the_model_holds_no_kill_plane():
     lv = level()
     lv.kill_plane_z = -3.5
     m = Core(level=lv).model
-    dot, plane = m.geom("hitbox_centre").id, m.geom("hitbox_kill_plane").id
+    dot = m.geom("hitbox_centre").id
     assert m.geom_bodyid[dot] == SHELL and list(m.geom_pos[dot]) == [0, 0, 0] and m.geom_rgba[dot][3] == 1
-    assert m.geom_bodyid[plane] == 0 and m.geom_pos[plane][2] == -3.5 and m.geom_rgba[plane][3] < 1
-    for g in (dot, plane):
-        assert (m.geom_group[g], m.geom_contype[g], m.geom_conaffinity[g]) == (4, 0, 0)
+    assert (m.geom_group[dot], m.geom_contype[dot], m.geom_conaffinity[dot]) == (4, 0, 0)
     assert m.body_mass[SHELL] == pytest.approx(M_SHELL)  # the dot weighs nothing
     assert (m.body("shell").id, m.body("hamster").id) == (SHELL, HAM) == (1, 2)
+    # the game window draws the kill plane into its scene: a model geom would grow the model's extent, which sets
+    # MuJoCo's clip planes and so env pixels
+    assert [g for g in range(m.ngeom) if m.geom_group[g] == 4] == [dot]
 
 
 def test_hitbox_geoms_change_no_trajectory(monkeypatch):

@@ -9,7 +9,7 @@ The three views of spec §11 (`chase`, `follow`, `first_person`): a model `<came
 - `VIEWS`: the view names, in that order.
 - `FRAGMENT`: MJCF for the three mocap bodies (`view_chase`, `view_follow`, `view_first_person`), each holding a camera named after its view, then the `features` mocap body holding the `tail`, `ear_left`, and `ear_right` sphere geoms. `model.build` appends it after the tier's fragment.
 - `pose(model, data, follow_yaw)`: writes the views' and the features' `mocap_pos` and `mocap_quat` from fresh positions (after `mj_kinematics`). The cameras move only on the next `mj_kinematics` plus `mj_camlight`.
-- `option(view, hitboxes=False)`: a fresh `MjvOption`. Groups 0 to 2 shown and 3 to 5 hidden for `chase` and `follow`; only group 0 for `first_person`. `hitboxes=True` also shows group 4, the **hitbox view**'s geoms (GLOSSARY.md): the shell-centre dot ([model.md](model.md)) and the kill plane ([level.md](level.md)). The env never passes it, so pixel observations never show hitboxes.
+- `option(view, hitboxes=False)`: a fresh `MjvOption`. Groups 0 to 2 shown and 3 to 5 hidden for `chase` and `follow`; only group 0 for `first_person`. `hitboxes=True` also shows group 4, the **hitbox view**'s geoms (GLOSSARY.md): the shell-centre dot ([model.md](model.md)); the game window adds the kill plane to its scene ([window.md](../game/window.md)). The env never passes it, so pixel observations never show hitboxes.
 
 The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
@@ -42,7 +42,7 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
   | `EARS` | ±0.07 m right, 0.04 m forward, 0.10 m up, radius 0.035 m |
   | `FEATURE_RGBA` | `1 .6 .2 1`, the hamster's orange |
   | `HITBOX_DOT` (in [model.py](model.md)) | 0.04 m, opaque white |
-  | `KILL_PLANE_RGBA`, `KILL_PLANE_HALF` (in [level.py](level.md)) | `0.9 0.1 0.1 0.2` red; 100 m |
+  | `KILL_PLANE_RGBA`, `KILL_PLANE_HALF` (in [window.py](../game/window.md)) | `0.9 0.1 0.1 0.2` red; 100 m |
 
 - The chase and follow cameras aim at the shell centre, so at 84×84 the shell covers the near part of the goal when the goal is straight ahead.
 - Pixels can't show the `first_person` group hiding: from inside, back-face culling already drops the shell sphere and the hamster. The test checks the option itself.
@@ -74,3 +74,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-23, code review of mouse-camera tickets 04–05 (no behaviour change): the comment over `FRAGMENT` says the view mocaps hold only their cameras (it said "no geoms" over a fragment that also holds the tail). Reusing `motion.quat` for the tail's quaternion was considered and left: it takes a motion dict and a time, so the call would be longer than the one-line quaternion. The tail's re-render test moved to `test_rerender.py` and goes through `rerender` (see [rerender.md](../data/rerender.md)).
 - 2026-10-23, user request: the tail cone became the hamster's **features**, a tail ball and two ears, all spheres in the hamster's orange on one `features` mocap body at the hamster centre (was the `tail` body behind it). The mesh asset (`ASSET`) is gone. Same mocap count, so the core state's length is unchanged. In a sample chase frame the ears read clearly from behind, where the cone had shown only end-on as a dark nub.
 - 2026-10-23, ticket hitbox-view/03: added `option`'s `hitboxes` flag. The geomgroup test checks group 4 is off in every default and on with the flag; the hitbox look constants join the table, needing play-test.
+- 2026-10-23, code review of hitbox-view: group 4 holds only the centre dot; the kill plane moved from the level's MJCF to the game window's scene, so the model's extent (and env pixels) match `main`.
