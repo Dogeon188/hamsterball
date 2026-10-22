@@ -85,7 +85,10 @@ def test_a_hazard_fails_every_task(name, task):
 def test_a_hazard_crossed_within_one_env_step_triggers():
     # a 10 cm thick wall across the path to the goal; one env step is a whole second, so the shell skips clean over it
     wall = {"type": "box", "pos": [0, 4, 0.5], "size": [3, 0.05, 3]}
-    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[with_hazards("first_goal", wall)], frame_skip=600)
+    d = yaml.safe_load((files("hamsterball") / "levels/first_goal.yaml").read_text())
+    d["hazards"] = [wall]
+    d["tasks"]["reach_goal"]["goal"]["pos"] = [0, 9, 0.5]  # out of that step's reach: success would beat the hazard
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[Level.from_yaml(yaml.safe_dump(d))], frame_skip=600)
     obs, _ = env.reset(seed=0)
     ys = [obs["state"][1]]
     for _ in range(5):

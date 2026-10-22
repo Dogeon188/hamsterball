@@ -12,7 +12,7 @@ def drive(core, start, stop):
     """Env steps start..stop of a run that turns and orbits the camera."""
     out = []
     for i in range(start, stop):
-        a = np.array([np.sin(i / 20), 1.0, 1.0 if i % 60 < 20 else 0.0, np.cos(i / 15)], np.float32)
+        a = np.array([np.sin(i / 20), 1.0, 1 / 15 if i % 60 < 20 else 0.0, np.cos(i / 15)], np.float32)  # turn 2 deg
         core.step(a)
         out.append(core.state())
     return out
@@ -39,13 +39,23 @@ def test_camera_flag_appends_turn_and_cam_pitch_to_the_tier_action_space():
     assert space.shape == (4,) and (space.low == -1).all() and (space.high == 1).all()
 
 
-def test_cam_pitch_turns_the_pitch_at_90_deg_per_s_within_minus_10_to_60_deg():
+@pytest.mark.parametrize("n", [10, 7])
+def test_turn_1_turns_the_facing_30_deg_in_one_env_step_whatever_its_physics_steps(n):
+    core = Core(camera_action=True)
+    core.step(np.array([0, 0, 1, 0], np.float32), n=n)
+    assert math.degrees(core.facing) == pytest.approx(30)
+    core.step(np.array([0, 0, -0.5, 0], np.float32), n=n)
+    assert math.degrees(core.facing) == pytest.approx(15)
+
+
+def test_cam_pitch_1_pitches_15_deg_in_one_env_step_within_minus_10_to_60_deg():
     core = Core(camera_action=True)
     assert math.degrees(core.pitch) == pytest.approx(15)  # the default: 15 deg below the horizon
-    for _ in range(15):  # a quarter second at 60 Hz
-        core.step(np.array([0, 0, 0, -1], np.float32))
-    assert math.degrees(core.pitch) == pytest.approx(15 - 22.5)
-    for _ in range(60):
+    core.step(np.array([0, 0, 0, -1], np.float32))
+    assert math.degrees(core.pitch) == pytest.approx(0)
+    core.step(np.array([0, 0, 0, 1], np.float32), n=7)
+    assert math.degrees(core.pitch) == pytest.approx(15)
+    for _ in range(4):
         core.step(np.array([0, 0, 0, 1], np.float32))
     assert math.degrees(core.pitch) == pytest.approx(60)
     for _ in range(60):
@@ -72,3 +82,14 @@ def test_cam_pitch_moves_no_physics():
         runs.append((d.qpos.copy(), d.qvel.copy(), d.time, core.pitch))
     (q0, v0, t0, p0), (q1, v1, t1, p1) = runs
     assert np.array_equal(q0, q1) and np.array_equal(v0, v1) and t0 == t1 and p0 != p1
+
+
+@pytest.mark.parametrize("camera_action", [False, True])
+def test_with_no_turn_input_the_facing_holds_at_the_spawn_yaw_however_fast_the_shell_runs(camera_action):
+    core = Core(camera_action=camera_action)
+    core.reset(facing=0.3)
+    run = [1, 0, 0, 0] if camera_action else [1, 0]  # sideways, across the facing
+    for _ in range(180):  # 3 s: well past 0.8 m/s
+        core.step(np.array(run, np.float32))
+    assert np.hypot(*core.data.qvel[:2]) > 2
+    assert core.facing == 0.3

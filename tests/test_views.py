@@ -63,7 +63,7 @@ def test_chase_and_first_person_follow_the_camera_pitch_and_follow_keeps_its_own
         return math.degrees(math.asin(-fwd[2]))
 
     assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((15, 0, 35))
-    for _ in range(20):  # a third of a second at 90 deg/s: 30 deg further down
+    for _ in range(2):  # 15 deg an env step: 30 deg further down
         env.step(np.array([0, 0, 0, 1], np.float32))
     assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((45, 30, 35))
     env.close()

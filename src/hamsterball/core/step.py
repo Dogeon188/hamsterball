@@ -20,12 +20,10 @@ from .model import (CORE_SLOTS, DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_H
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
-CHASE_ALPHA = 1 - math.exp(-DT / 0.55)  # chase yaw, tau 0.55 s
-CHASE_MIN_SPEED2 = 0.8 ** 2  # (m/s)^2, horizontal shell speed below which the chase yaw holds
-ORBIT_RATE = math.radians(120)  # rad/s at turn = 1
+TURN_STEP = math.radians(30)  # rad per env step at turn = 1, spread evenly over its physics steps
 # camera pitch, below the horizon; needs play-test (see step.md)
 PITCH_MIN, PITCH_MAX = math.radians(-10), math.radians(60)  # PITCH_DEFAULT is in model.py
-PITCH_RATE = math.radians(90)  # rad/s at cam_pitch = 1
+PITCH_STEP = math.radians(15)  # rad per env step at cam_pitch = 1, spread the same way
 FIELD_START, FIELD_HARD = 0.005, 0.020  # m past the resting radius: containment starts, and stops hard
 MU = M_HAM * M_SHELL / (M_HAM + M_SHELL)  # the pair's reduced mass
 STATE = mujoco.mjtState.mjSTATE_INTEGRATION
@@ -80,20 +78,16 @@ def wrap(a):
     return math.pi if a == -math.pi else a
 
 
-def turn_facing(data, turn):
-    """Turn toward the shell's direction of travel, add the turn input, store and return the facing."""
-    facing = data.userdata[FACING]
-    vx, vy = data.qvel[SHELL_DOF], data.qvel[SHELL_DOF + 1]
-    if vx * vx + vy * vy > CHASE_MIN_SPEED2:
-        facing += CHASE_ALPHA * wrap(math.atan2(-vx, vy) - facing)
-    facing = wrap(facing + ORBIT_RATE * turn * DT)
+def turn_facing(data, d):
+    """Turn the facing by d rad, store and return it. Nothing else turns it."""
+    facing = wrap(data.userdata[FACING] + d)
     data.userdata[FACING] = facing
     return facing
 
 
-def camera_pitch(data, cam):
-    """Add the pitch input and clamp to [PITCH_MIN, PITCH_MAX]. Moves no physics."""
-    data.userdata[PITCH] = min(max(data.userdata[PITCH] + PITCH_RATE * cam * DT, PITCH_MIN), PITCH_MAX)
+def camera_pitch(data, d):
+    """Pitch by d rad and clamp to [PITCH_MIN, PITCH_MAX]. Moves no physics."""
+    data.userdata[PITCH] = min(max(data.userdata[PITCH] + d, PITCH_MIN), PITCH_MAX)
 
 
 def drag(data):
@@ -195,8 +189,8 @@ def touch_tiles(model, data, tiles):
             data.userdata[slot + i] = data.time
 
 
-def physics_step(model, data, tier, action, turn, cam_pitch, bodies=(), tiles=None):
-    """One physics step. action is the tier's part; turn and cam_pitch are the turn and pitch inputs in [-1, 1];
+def physics_step(model, data, tier, action, turn, pitch, bodies=(), tiles=None):
+    """One physics step. action is the tier's part; turn and pitch are this step's change of facing and pitch (rad);
     bodies as `drive_bodies`, tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
@@ -205,7 +199,7 @@ def physics_step(model, data, tier, action, turn, cam_pitch, bodies=(), tiles=No
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
     facing = turn_facing(data, turn)
-    camera_pitch(data, cam_pitch)
+    camera_pitch(data, pitch)
     drag(data)
     contain(model, data, tier.resting_radius)
     tier.drive(model, data, action, facing)
@@ -276,8 +270,9 @@ class Core:
         turn = cam_pitch = 0.0
         if self.camera_action:
             action, turn, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
+        turn, pitch = TURN_STEP * turn / n, PITCH_STEP * cam_pitch / n  # per physics step
         for _ in range(n):
-            physics_step(m, d, tier, action, turn, cam_pitch, self.bodies, self.tiles)
+            physics_step(m, d, tier, action, turn, pitch, self.bodies, self.tiles)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))

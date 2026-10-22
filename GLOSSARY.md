@@ -28,7 +28,7 @@ The heading the hamster runs toward in the abstract tier, measured relative to t
 _Avoid_: steering, heading (alone)
 
 **Facing**:
-The hamster's heading, which sets the frame of actions and observations and the yaw of the chase and first-person views.
+The hamster's heading, which sets the frame of actions and observations and the yaw of the chase and first-person views. Only the controller turns it.
 _Avoid_: camera yaw, heading (alone), view angle
 
 **Effort**:

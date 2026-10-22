@@ -62,7 +62,7 @@ def test_observations_are_the_21_d_state_and_10_d_goal():
     np.testing.assert_array_equal(info["state"], s)
 
 
-def test_yaw_0_faces_plus_y_and_vectors_read_in_the_facing_frame():
+def test_facing_0_faces_plus_y_and_vectors_read_in_the_facing_frame():
     env = make(levels=[level(spawn_yaw_deg=90)])
     obs, _ = env.reset(seed=0)
     s = obs["state"]
@@ -72,7 +72,8 @@ def test_yaw_0_faces_plus_y_and_vectors_read_in_the_facing_frame():
     for _ in range(60):
         obs, *_ = env.step(np.array([0, 1], np.float32))  # run camera-forward for a second
     s = obs["state"]
-    assert s[0] < -1 and abs(s[1]) < 0.3 * -s[0]  # world -x, give or take the chase yaw's drift
+    np.testing.assert_allclose(s[4:6], [1, 0], atol=1e-6)  # the facing holds at the spawn's
+    assert s[0] < -1 and abs(s[1]) < 0.05 * -s[0]  # world -x
     assert s[9] > 1 and abs(s[8]) < 0.05 * s[9]  # shell velocity: camera forward
     assert s[11] < -1 and abs(s[12]) < 0.05 * -s[11]  # rolling forward spins the shell about camera -x
     assert s[15] > 0.1  # the hamster leans forward
@@ -125,16 +126,15 @@ def test_truncate_false_runs_past_the_time_limit_with_the_time_penalty():
     assert reward == pytest.approx(-0.001) and obs["goal"][4] == 1  # the goal's fraction remaining ignores the limit
 
 
-def test_camera_action_adds_turn_and_cam_pitch_turning_at_120_and_90_deg_per_s():
+def test_camera_action_adds_turn_and_cam_pitch_turning_30_and_15_deg_per_env_step():
     env = make(camera_action=True)
     assert env.action_space.shape == (4,)
     env.reset(seed=0)
-    for _ in range(30):  # half a second at 60 Hz
+    for _ in range(2):
         obs, *_ = env.step(np.array([0, 0, 1, 0], np.float32))
     sin, cos = obs["state"][4:6]
     assert math.degrees(math.atan2(sin, cos)) == pytest.approx(60, abs=1e-3)
-    for _ in range(10):  # a sixth of a second: 15 deg further down
-        obs, *_ = env.step(np.array([0, 0, 0, 1], np.float32))
+    obs, *_ = env.step(np.array([0, 0, 0, 1], np.float32))  # 15 deg further down
     sin, cos = obs["state"][6:8]
     assert math.degrees(math.atan2(sin, cos)) == pytest.approx(30, abs=1e-3)
 

@@ -9,10 +9,14 @@ import time
 import numpy as np
 
 from ..core.model import DT
+from ..core.step import FRAME_SKIP, PITCH_STEP, TURN_STEP
 
 DEADZONE = 0.15  # radial, both sticks
 WALK, RUN, SPRINT = 0.25, 0.5, 1.0
-MOUSE_SENS = 0.05  # turn per pixel: 0.1 deg/px, since turn 1 turns 2 deg in one env step
+FRAME = FRAME_SKIP * DT  # s per env step: the game runs at the default frame skip, one step a frame
+TURN = math.radians(120) * FRAME / TURN_STEP  # Q/E and the full right stick: 120 deg/s
+PITCH = math.radians(90) * FRAME / PITCH_STEP  # the full right stick: 90 deg/s
+MOUSE_SENS = (math.radians(0.1) / TURN_STEP, math.radians(0.1) / PITCH_STEP)  # (turn, cam_pitch) per pixel: 0.1 deg
 
 
 def _stick(m):
@@ -62,8 +66,8 @@ def action(keys, left=(0.0, 0.0), right=(0.0, 0.0), mouse=(0.0, 0.0)):
         n = np.linalg.norm(d)
         effort = WALK if "shift" in keys else SPRINT if "ctrl" in keys else RUN
         run = d / n * effort if n else d
-    cam = mouse[0] or -_axis(right[0]) or ("q" in keys) - ("e" in keys)  # right stick right turns right
-    pitch = mouse[1] or _axis(right[1])  # GLFW y down: pushing up lowers the pitch, looking up
+    cam = mouse[0] or (-_axis(right[0]) or ("q" in keys) - ("e" in keys)) * TURN  # right stick right turns right
+    pitch = mouse[1] or _axis(right[1]) * PITCH  # GLFW y down: pushing up lowers the pitch, looking up
     return np.array([*run, cam, pitch], np.float32)
 
 
