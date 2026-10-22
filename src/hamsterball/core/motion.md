@@ -27,6 +27,7 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 - The loader's validation helpers `_keys`, `_num`, `_vec` (and `_unit`) live here, and `level` imports them, since `level` imports this module anyway.
 - `pose` gives no velocity. A kinematic body (ticket 03) that needs one for contact friction adds it here, beside `pose`, from the same formulas.
 - An axis loads normalised only when its norm isn't already 1 (within 1e-12): a replay reloads the canonical level, and dividing a unit vector by its norm again moved the last bit of `[1, 1, 0]`'s components, so a `survive_raft` replay diverged at reset by 1.4e-17 in the body's angular velocity before this (ticket survive-movers/04).
+- `_unit`'s norm is `sqrt(fsum(squares))`, not `np.linalg.norm`: NumPy computes a vector's norm as a BLAS `ddot`, and OpenBLAS's AVX512 kernel (CI's AMD EPYC 9V45 and 9V74 runners) rounded the last bit of a 3-decimal heading's norm differently from macOS arm64 and AVX2 hosts, so the stored hazard axis, and with it the level id, differed by host.
 
 ## Decisions
 
@@ -44,3 +45,4 @@ Offsets, not absolute positions: a path's points and an oscillation are added to
 - 2026-10-22, ticket survive-movers/03: kinematic bodies reuse `pose`. Their velocity is the secant over one physics step (in `step.drive_bodies`), not an analytic derivative beside `pose`, which the Known quirks entry anticipated: it lands the integrator exactly on the next pose and needs no second set of formulas.
 - 2026-10-22, ticket survive-movers/04: added `tilt` and `quat` for `survive_raft`; `_unit` keeps axis normalisation idempotent (see Known quirks).
 - 2026-10-22, code review of survive-movers: `_keys`, `_num`, `_vec` moved here from `level`, which imports them, in place of function-level imports of `level`.
+- 2026-10-23, fix-ci: `_unit` normalises with `math.fsum`, so an axis, and the level id it lands in, is the same on every CPU (see Known quirks). Same values on macOS arm64 and AVX2 x86_64, so no id or golden hash changed.

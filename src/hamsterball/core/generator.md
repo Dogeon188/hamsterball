@@ -44,7 +44,7 @@ The procedural generator of spec §8: `ProceduralGenerator` builds a solvable hf
 
 ## Known quirks
 
-- Platform-stable output rests on PCG64, IEEE arithmetic, `sqrt`, and the platform's libm for `sin`, `cos`, `tan`, and `atan`. Their results feed only values that are then rounded (millimetres, uint16), so a last-bit libm difference changes a level only if it lands exactly on a rounding boundary. The golden test on both CI platforms is the check.
+- Platform-stable output rests on PCG64, IEEE arithmetic, `sqrt`, and the platform's libm for `sin`, `cos`, `tan`, and `atan`. Their results feed only values that are then rounded (millimetres, uint16), so a last-bit libm difference changes a level only if it lands exactly on a rounding boundary. Nothing that reaches the level goes through BLAS, whose kernels vary by CPU: `motion._unit` normalises axes with `math.fsum` for that reason (see [motion.md](motion.md)). The golden test on both CI platforms is the check, and GitHub's Linux runners mix AVX2 and AVX512 hosts.
 - Overrides change the output, but the provenance block carries no overrides: two generators with different tables give the same (task, seed, difficulty, version) different levels. The canonical level, which trajectories embed, is still exact.
 - Short legs bend less: at d = 0 with 3 waypoints over 5 m the turn limit is near 0, so easy routes are near straight, and reach goal at low d is one straight.
 - The corridor can still fold back near an earlier straight. When neighbouring corridor nodes map to spine points more than 1 m apart and differ in height by more than a 15° cell step, the attempt retries (`_seams`). No sweep so far has hit it.

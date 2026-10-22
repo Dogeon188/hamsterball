@@ -112,6 +112,7 @@ def test_replay_warns_when_the_recording_build_differs():
     assert any("platform" in str(x.message) for x in w)
 
 
+@pytest.mark.gl
 def test_a_pixel_env_records_state_and_goal_and_its_view_kwargs():
     env = record(steps=5, levels=["first_goal"], views=("chase",), view_size=(16, 24), obs_state=False)
     ds = env.create_dataset("test/pixels-v0", algorithm_name="random")
