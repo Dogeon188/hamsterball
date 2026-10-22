@@ -74,6 +74,10 @@ MOVER_RADIUS = 0.4  # survive's moving hazards are spheres this size (m)
 MOVER_SWEEP = 3.0  # a moving hazard's amplitude (m)
 DODGE_SPEED = 2.5  # the speed the dodge check grants the hamsterball (m/s)
 LAYOUTS = ("plateau", "ridge", "pillars", "platform", "seesaw", "collapse")  # survive's, 1/6 each by seed
+STILL_LAYOUTS = LAYOUTS[:2]  # survive's layouts below BODIES_FROM, 1/2 each by seed
+# Difficulty from which the body layouts join. Every body layout moves, tips or drops a still ball from d = 0, and the
+# plateau and ridge get their first moving hazard at d = 1/6, so below it standing still survives every survive level.
+BODIES_FROM = 1 / 6
 PILLAR = (0.4, 0.5)  # a pillar: a vertical capsule's radius and half-length (m)
 SLAB = 2.0  # a platform's or seesaw's half-side (m); its top sits at z = 0
 PLATFORM_SWEEP = 3.0  # a driven platform's amplitude (m)
@@ -114,7 +118,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 4
+    version = 5
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -143,8 +147,9 @@ class ProceduralGenerator:
             raise ValueError(f"difficulty {difficulty} is not in [0, 1]")
         rng = np.random.Generator(np.random.PCG64(seed))  # retries take the next draws from the same stream
         p = self.params(difficulty)
-        # survive's layout is drawn once, so retries stay in it and the seed's 1/6 split holds at every difficulty
-        kind = LAYOUTS[int(rng.random() * len(LAYOUTS))] if task == "survive" else None
+        # survive's layout is drawn once, so retries stay in it and the seed's split holds at every difficulty
+        layouts = LAYOUTS if difficulty >= BODIES_FROM else STILL_LAYOUTS
+        kind = layouts[int(rng.random() * len(layouts))] if task == "survive" else None
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 d = _survive(kind, p, rng) if task == "survive" else _route(task, p, rng)
@@ -275,7 +280,7 @@ def _profile(length, p, rng):
 
 
 def _survive(kind, p, rng):
-    """One of LAYOUTS, 1/6 each: a disc region on a plateau (bare or with pillars) or a capsule region along
+    """One of LAYOUTS (generate draws which): a disc region on a plateau (bare or with pillars) or a capsule region along
     a ridge, each falling off at the falloff grade; or a driven platform, a seesaw, or a floor of collapsing tiles."""
     if kind in ("platform", "seesaw"):
         return _slab(kind, p, rng)
