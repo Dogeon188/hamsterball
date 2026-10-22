@@ -33,7 +33,8 @@ KEYS = {
     "shift": [imgui.Key.left_shift, imgui.Key.right_shift],
     "ctrl": [imgui.Key.left_ctrl, imgui.Key.right_ctrl],
 }
-PRESSES = {"esc": [imgui.Key.escape], "enter": [imgui.Key.enter, imgui.Key.keypad_enter], "r": [imgui.Key.r]}
+PRESSES = {"esc": [imgui.Key.escape], "enter": [imgui.Key.enter, imgui.Key.keypad_enter], "r": [imgui.Key.r],
+           "f3": [imgui.Key.f3]}
 
 
 def _sticks():
@@ -49,7 +50,7 @@ def _sticks():
 class _Chase:
     """The chase view drawn into the window's framebuffer, with shadows on; rebuilt when the level's model changes."""
 
-    def __init__(self, model):
+    def __init__(self, model, hitboxes=False):
         self.model = model
         self.ctx = mujoco.MjrContext(model, mujoco.mjtFontScale.mjFONTSCALE_150)
         mujoco.mjr_setBuffer(mujoco.mjtFramebuffer.mjFB_WINDOW, self.ctx)
@@ -58,7 +59,7 @@ class _Chase:
         self.cam = mujoco.MjvCamera()
         self.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         self.cam.fixedcamid = model.camera("chase").id
-        self.opt = V.option("chase")
+        self.opt = V.option("chase", hitboxes=hitboxes)
 
     def draw(self, data, width, height):
         mujoco.mj_kinematics(self.model, data)  # the env posed the view mocaps; carry them to the camera
@@ -181,8 +182,9 @@ def _menu(window, settings, levels_dir, record):
     return None
 
 
-def _play(window, session):
-    """Play episodes of `session` until Menu, Quit, or closing the window. Returns "menu" or "quit"."""
+def _play(window, session, hitboxes=False):
+    """Play episodes of `session` until Menu, Quit, or closing the window. Returns ("menu" or "quit", the hitbox
+    flag as F3 left it)."""
     chase, flow, pacer, mouse = None, Flow(), Pacer(PERIOD), Mouse()
     act = action(set())
     env = session.env
@@ -202,6 +204,11 @@ def _play(window, session):
             presses = [n for n, ks in PRESSES.items() if any(imgui.is_key_pressed(k, False) for k in ks)]
             if glfw.window_should_close(window):
                 presses = ["close"]
+            if "f3" in presses:  # the hitbox view: in every state, around the flow table
+                presses.remove("f3")
+                hitboxes = not hitboxes
+                if chase:
+                    chase.opt = V.option("chase", hitboxes=hitboxes)
             # the cursor is locked and hidden only while playing, so the pause and result buttons stay clickable
             playing = flow.state == "play"
             glfw.set_input_mode(window, glfw.CURSOR, glfw.CURSOR_DISABLED if playing else glfw.CURSOR_NORMAL)
@@ -226,7 +233,7 @@ def _play(window, session):
             if chase is None or chase.model is not core.model:
                 if chase:
                     chase.free()
-                chase = _Chase(core.model)
+                chase = _Chase(core.model, hitboxes)
             chase.draw(core.data, *glfw.get_framebuffer_size(window))
 
             _hud(hud(env, act, session.recording))
@@ -256,12 +263,13 @@ def _play(window, session):
         session.close()  # abandons a run in progress
         if chase:
             chase.free()
-    return command
+    return command, hitboxes
 
 
 def run(settings, levels_dir, record, skip_menu):
     """The menu, then episodes with its choices, then the menu again, until Quit or closing the window."""
     window = _open()
+    hitboxes = False  # the hitbox view, for the whole game session; never saved or recorded
     try:
         while True:
             if not skip_menu:
@@ -273,7 +281,8 @@ def run(settings, levels_dir, record, skip_menu):
             level = menu.resolve(settings["level"], levels_dir)
             session = Session(settings["task"], level, settings["difficulty"], settings["seed"], settings["player"],
                               record)
-            if _play(window, session) == "quit":
+            command, hitboxes = _play(window, session, hitboxes)
+            if command == "quit":
                 break
     finally:
         _close(window)
@@ -289,7 +298,7 @@ def run(settings, levels_dir, record, skip_menu):
 @click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
 @click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
 def main(levels_dir, player, no_record, task, level, seed, difficulty):
-    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and look up and down, or gamepad, Esc to pause."""
+    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and look up and down, or gamepad, Esc to pause, F3 to show or hide the hitbox view."""
     flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
     settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
     record = not no_record

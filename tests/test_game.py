@@ -253,6 +253,7 @@ def test_the_window_module_imports_and_the_cli_prints_help():
     r = CliRunner().invoke(main, ["--help"])
     assert r.exit_code == 0
     assert "mouse" in r.output
+    assert "F3" in r.output
     for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty"):
         assert flag in r.output
 

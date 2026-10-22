@@ -6,7 +6,7 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 
 ## Interface
 
-- `hamsterball-play [--levels DIR] [--player NAME] [--no-record] [--task T] [--level FILE|NAME|generated] [--seed S] [--difficulty D]` (`main`, a click command). `--levels` defaults to the bundled levels; `--level` is a level YAML, a stem in `--levels`, or `generated`; `--seed` is an integer ≥ 0 and `--difficulty` in [0, 1]. With `--task` and `--level`, and a valid `--player` (or a remembered one) unless `--no-record`, the game skips the menu.
+- `hamsterball-play [--levels DIR] [--player NAME] [--no-record] [--task T] [--level FILE|NAME|generated] [--seed S] [--difficulty D]` (`main`, a click command). `--levels` defaults to the bundled levels; `--level` is a level YAML, a stem in `--levels`, or `generated`; `--seed` is an integer ≥ 0 and `--difficulty` in [0, 1]. With `--task` and `--level`, and a valid `--player` (or a remembered one) unless `--no-record`, the game skips the menu. `--help` lists the controls, F3 among them.
 - `run(settings, levels_dir, record, skip_menu)`: the menu (unless skipped), then episodes with its choices, back to the menu on Menu, until Quit or the window closes.
 
 ## How it works
@@ -17,11 +17,12 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 - The env is the session's (`Hamsterball-v<N>` with `camera_action=True`, wrapped in the Collector when recording) with no views; the window has its own `MjrContext`, `MjvScene` (shadow flag on), and a fixed `MjvCamera` on the model's `chase` camera with `views.option("chase")`. The env poses the view mocaps every step; the window runs `mj_kinematics` and `mj_camlight` (derived only) before `mjv_updateScene`. The context is rebuilt when the episode's model changes. After `mjr_render`, `_Chase.draw` makes texture unit 0 active again for imgui.
 - Each frame: poll events, read held keys with `imgui.is_key_down` and presses with `imgui.is_key_pressed`, read the first gamepad's sticks (both axes of each) and the cursor's (x, y) change for `Mouse.move`; while playing, `Pacer.wait()`, then one `session.step(action(...), overruns)`, ending the episode on `outcome`. Paused or on the result card, physics doesn't step and the loop sleeps one period. Then draw the chase view, the HUD, and the pause or result window, swap, and run the flow's commands: `retry` is `session.start(retry=True)` (same level and seed), `next` is `session.start()`, `menu` and `quit` leave. `session.step` gets the Pacer's overrun count, so a finished episode is saved with it; leaving `_play` closes the session, which discards a run in progress.
 - Mouse: the cursor is `CURSOR_DISABLED` (locked and hidden) on every frame the flow is `play` and `CURSOR_NORMAL` otherwise, and on leaving `_play`, so the pause and result buttons and the menu stay clickable. Off play, both carries are cleared and the last cursor position forgotten, so the first frame after locking reads no motion (the lock's jump); each episode start clears the carry too. imgui's GLFW backend leaves a disabled cursor alone, so no `NoMouseCursorChange` flag.
+- Hitbox view: F3 is in `PRESSES` but taken out before the flow runs, so it flips `run`'s hitbox flag in play, paused, and result alike and changes no flow state. The flag lives for the game session (`_play` takes it and returns it with its command, so it survives retries, next, and Menu → Play), starts off, and is never saved to the config file, recorded, or passed to the env. `_Chase` builds its option as `views.option("chase", hitboxes=flag)`, and a toggle swaps the live `_Chase`'s option.
 - The overrun count resets each episode and shows on the result card, with "saved to <dataset id>" or "not recorded".
 
 ## Invariants and checks
 
-- `uv run --all-extras pytest tests/test_game.py -k "window or cli"`: the module imports, `--help` lists every spec §13 flag and mentions the mouse, and `main` skips the menu only with a task, a level, and a valid name or `--no-record`, prefilling from flags over the config file.
+- `uv run --all-extras pytest tests/test_game.py -k "window or cli"`: the module imports, `--help` lists every spec §13 flag and mentions the mouse and F3, and `main` skips the menu only with a task, a level, and a valid name or `--no-record`, prefilling from flags over the config file.
 - `uv run --all-extras pytest tests/test_game.py -k result_card_text`: opens the real window (skips without a display), ends an episode on its first step, and reads back the frame: the result card shows white text over the chase view.
 - Agent smoke runs (scratch scripts, not in CI) on an M-series Mac: 240 frames of `item_scatter` opened the window, rendered the chase view with the shell's shadow at 2560×1440 framebuffer, and counted 2 overruns: the second frame (after the first draw builds the `MjrContext`) and the frame the script read pixels back; a scripted result card, Enter, pause, and resume stepped only while playing.
 
@@ -29,6 +30,7 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 
 - **Needs play-test:** the whole window behaviour: feel of the keys, sticks, and mouse (looking up and down included; cursor lock and release on pause and the result card), pacing and tearing without vsync, the HUD and cards' placement, mouse clicks on the pause buttons, retina scaling, resizing, and the shadow's jagged edge at the default shadow map size.
 - **Needs play-test (ticket 12):** the menu screen: its layout, typing in the name and seed fields, the combos, the disabled Play button, Menu → menu → Play again, and the REC indicator. A level file that fails to compile with `--task`/`--level` raises out of the window rather than showing an error.
+- **Needs play-test (hitbox-view/04):** F3 shows and hides the hitbox view in play, paused, and on the result card, and the choice holds across retries, next episodes, and Menu → Play. Look constants to judge while there: the centre dot `HITBOX_DOT` 0.04 m opaque white ([model.py](../core/model.md)), and the kill plane `KILL_PLANE_RGBA` `0.9 0.1 0.1 0.2` with half-size `KILL_PLANE_HALF` 100 m ([level.py](../core/level.md)).
 - No vsync: vsync on top of the Pacer's schedule would beat against it and count false overruns; the cost is possible tearing.
 
 ## Decisions
@@ -43,6 +45,7 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 
 - 2026-10-22, ticket mouse-camera/01: the mouse turns the view only while playing, with the cursor locked; every other screen releases it.
 - 2026-10-22, ticket mouse-camera/03: the cursor's y change and the right stick's y feed `cam_pitch`; `_sticks` returns the right stick as an (x, y) pair like the left.
+- 2026-10-23, hitbox-view spec "Game toggle", ticket hitbox-view/04: F3 toggles a session-long hitbox flag outside the pause/result flow table; the flag is not saved, not recorded, and never reaches the env.
 
 ## Tried and rejected
 
@@ -56,3 +59,4 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 - 2026-10-22, ticket mouse-camera/01: added the mouse turn and cursor lock; `--help` mentions the mouse. Agent finding (scratch script, M-series Mac): after 10 imgui frames a `CURSOR_DISABLED` window stayed disabled, and `CURSOR_NORMAL` restored normally.
 - 2026-10-22, ticket mouse-camera/03: vertical mouse motion and the right stick's y tilt the view; `--help` says the mouse turns and tilts.
 - 2026-10-22, code review of mouse-camera: `--help` says the mouse turns and looks up and down (was "turn and tilt"; tilt is a mover's rocking in GLOSSARY.md), and `_play` passes `mouse=mouse.move(...)` as `action`'s `mouse` in place of a local `cam`.
+- 2026-10-23, ticket hitbox-view/04: added the F3 hitbox toggle; `--help` mentions F3. No display run: the toggle is on the play-test list.
