@@ -122,7 +122,7 @@ def test_the_attached_region_tilts_with_the_seesaw(kind):
         d["tasks"]["survive"]["spawn"]["pos"] = [1, 0.5, 0.5]
         if kind == "ball":
             d["bodies"][0]["joint"] = {"type": "ball", "stiffness": 200, "damping": 50, "range": 15}
-    e = gym.make("Hamsterball-v1", tasks=["survive"], levels=[level(edit)])
+    e = gym.make("Hamsterball-v2", tasks=["survive"], levels=[level(edit)])
     e.reset(seed=0)
     for _ in range(60):
         obs, *_ = e.step(np.zeros(2, np.float32))
@@ -137,7 +137,7 @@ def test_the_attached_region_tilts_with_the_seesaw(kind):
 
 
 def seesaw_env(**kw):
-    return gym.make("Hamsterball-v1", tasks=["survive"], levels=["survive_seesaw"], **kw)  # by name, for a Collector
+    return gym.make("Hamsterball-v2", tasks=["survive"], levels=["survive_seesaw"], **kw)  # by name, for a Collector
 
 
 def test_an_inputless_hamsterball_tips_survive_seesaw_and_rolls_off():

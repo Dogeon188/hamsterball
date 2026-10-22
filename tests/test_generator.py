@@ -431,7 +431,7 @@ def test_a_generated_episode_records_and_replays(tmp_path, monkeypatch):
     from hamsterball.data import Collector, replay
 
     monkeypatch.setenv("MINARI_DATASETS_PATH", str(tmp_path))
-    env = Collector(gym.make("HamsterballCollectItems-v1", levels=GEN, difficulty=0.7))
+    env = Collector(gym.make("HamsterballCollectItems-v2", levels=GEN, difficulty=0.7))
     env.action_space.seed(0)
     env.reset(seed=3)
     for _ in range(20):

@@ -121,14 +121,14 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
 
 def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
-    env = gym.make("Hamsterball-v1", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
+    env = gym.make("Hamsterball-v2", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
     obs, _ = env.reset(seed=0)
     assert obs["first_person"][-1].min() > 0
 
 
 def test_views_survive_model_cache_eviction():
     # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
-    env = gym.make("Hamsterball-v1", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
+    env = gym.make("Hamsterball-v2", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
     for name, task in [("first_goal", "reach_goal"), ("locked_goal", "unlock_goal"), ("first_goal", "reach_goal")]:
         obs, _ = env.reset(options={"level": Level.load(files("hamsterball") / f"levels/{name}.yaml"), "task": task})
         assert len(env.unwrapped._cores) == 1

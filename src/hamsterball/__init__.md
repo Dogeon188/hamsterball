@@ -7,7 +7,7 @@ The package root: it picks the headless GL backend before anything imports `mujo
 ## Interface
 
 - `import hamsterball` sets `MUJOCO_GL=egl` on Linux unless it's already set (`osmesa` is the CPU fallback, set by hand); macOS leaves it unset (CGL). glfw is never used for env rendering; an env with views raises under `MUJOCO_GL=glfw` (see [env.md](env.md)).
-- `ENV_VERSION`: N of spec §2 (1), bumped with every change that can alter a trajectory, as a major release.
+- `ENV_VERSION`: N of spec §2 (2), bumped with every change that can alter a trajectory, as a major release.
 - `PRESETS`: id name → the one task its `tasks` kwarg fixes, or `None` for `Hamsterball`, whose `tasks` defaults to every task id.
 - `register_ids(n=ENV_VERSION)`: registers the six ids `<name>-v<n>` with `entry_point="hamsterball.env:HamsterballEnv"` and `vector_entry_point="hamsterball.env:make_vec"`, and every version below n as an id whose entry point raises `gymnasium.error.DeprecatedEnv` naming the release to install (`hamsterball==<old N>.*`). Import runs it once.
 - `_worker_env(i, devices, kwargs)`: `make_vec`'s env fn for worker i (see [env.md](env.md)): with `devices` above 1 it sets `MUJOCO_EGL_DEVICE_ID` to `i mod devices` unless set, then unpickles `kwargs` and builds `HamsterballEnv(**kwargs)`.
@@ -38,3 +38,4 @@ The package root: it picks the headless GL backend before anything imports `mujo
 
 - 2026-10-22, code review of hamsterball-v1: doc added; the root's description moved here from [env.md](env.md). The registration and `MUJOCO_GL` code came in tickets 02, 06, 07, and 14 (commits `bb2b439`, `e40241e`, `cc5be87`, `0fff3f9`), and `_worker_env` in `ff2f49d`.
 - 2026-10-22, ticket mouse-camera/02: `ENV_VERSION` 0 → 1 for the camera pitch (a longer core state and a 4-D camera-flag action, per [ADR-0002](../../docs/adr/0002-exact-mujoco-pin-bumps-env-version.md)); the v0 ids now raise naming `hamsterball==0.*`, and the game's human datasets carry `-v1`.
+- 2026-10-23, ticket hitbox-view/01: `ENV_VERSION` 1 → 2 for the touch rule (markers trigger when the shell touches them, per [ADR-0002](../../docs/adr/0002-exact-mujoco-pin-bumps-env-version.md)); the v1 ids now raise naming `hamsterball==1.*`, and the game's human datasets carry `-v2`.

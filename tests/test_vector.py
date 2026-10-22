@@ -11,7 +11,7 @@ import hamsterball  # noqa: F401  registers the env ids
 
 
 def make_vec(n=2, **kw):
-    return gym.make_vec("HamsterballReachGoal-v1", num_envs=n, **{"levels": ["first_goal"], **kw})
+    return gym.make_vec("HamsterballReachGoal-v2", num_envs=n, **{"levels": ["first_goal"], **kw})
 
 
 def test_make_vec_gives_a_stock_async_env_with_same_step_autoreset():

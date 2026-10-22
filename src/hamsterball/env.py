@@ -21,7 +21,7 @@ from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TA
                          body_frame)
 from .core.marker import centre, crosses
 from .core.motion import pose, quat
-from .core.model import DT, HAM, FACING, PITCH, SHELL, SHELL_DOF, SHELL_QPOS
+from .core.model import DT, HAM, FACING, PITCH, R, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -237,8 +237,9 @@ class HamsterballEnv(gym.Env):
             inside = crosses(region, pos, pos, t=now, frame=self._frame(region))
             if inside and self._steps >= self._max_steps:
                 self._todo.clear()
+        # the touch rule: a target or hazard triggers once the shell reaches it (reach R); the region tests the centre
         # rerun until nothing new triggers, so one step can complete several targets in task order
-        while not survive and (hit := [t for t in self._live() if crosses(self._marker(t), self._prev, pos)]):
+        while not survive and (hit := [t for t in self._live() if crosses(self._marker(t), self._prev, pos, reach=R)]):
             for t in hit:
                 self._todo.remove(t)
                 event += t[0] != "goal"  # +1 per item, key, or waypoint
@@ -252,7 +253,7 @@ class HamsterballEnv(gym.Env):
                 self._look(self._todo[0], MARKER_RGBA["waypoints"])
         if not self._todo:  # success wins over failure
             self._success, event = True, event + 1.0
-        elif any(crosses(h, self._prev, pos, t=now, t0=self._prev_t) for h in self.level.hazards):
+        elif any(crosses(h, self._prev, pos, t=now, t0=self._prev_t, reach=R) for h in self.level.hazards):
             self._failure, event = "hazard", event - 1.0
         elif pos[2] < self.level.kill_plane_z:
             self._failure, event = "kill_plane", event - 1.0

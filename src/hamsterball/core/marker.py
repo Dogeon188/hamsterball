@@ -25,10 +25,12 @@ def centre(marker, t=0.0, frame=None):
     return c + pose(marker["motion"], t)[0] if "motion" in marker else c
 
 
-def crosses(marker, p0, p1, t=0.0, t0=None, frame=None):
+def crosses(marker, p0, p1, t=0.0, t0=None, frame=None, reach=0.0):
     """The swept test from p0 at sim time t0 (default t) to p1 at sim time t. A moving marker is tested on the
     relative path: p0 in its frame at t0, p1 in its frame at t, joined by a straight segment. An attached marker
-    (`frame`, its body's pose now) takes both points into that one frame: a point test, as the survive region's is."""
+    (`frame`, its body's pose now) takes both points into that one frame: a point test, as the survive region's is.
+    `reach` is how far a point on the segment may stay outside the volume and still trigger: the shell radius for
+    the touch rule, 0 (the default) for a centre test."""
     p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
     if frame is not None:
         rot = _mat(frame[1])
@@ -37,11 +39,11 @@ def crosses(marker, p0, p1, t=0.0, t0=None, frame=None):
         p0, p1 = _authored(marker, p0, t if t0 is None else t0), _authored(marker, p1, t)
     kind = marker["type"]
     if kind == "sphere":
-        return _seg_seg_dist(p0, p1, np.array(marker["pos"]), np.array(marker["pos"])) <= marker["radius"]
+        return _seg_seg_dist(p0, p1, np.array(marker["pos"]), np.array(marker["pos"])) <= marker["radius"] + reach
     if kind == "capsule":
         f = marker["fromto"]
-        return _seg_seg_dist(p0, p1, np.array(f[:3]), np.array(f[3:])) <= marker["radius"]
-    return _seg_box(p0, p1, marker)
+        return _seg_seg_dist(p0, p1, np.array(f[:3]), np.array(f[3:])) <= marker["radius"] + reach
+    return _seg_box(p0, p1, marker, reach)
 
 
 def _authored(marker, p, t):
@@ -83,14 +85,17 @@ def _seg_seg_dist(p1, q1, p2, q2):
     return float(np.linalg.norm(p1 + d1 * s - (p2 + d2 * t)))
 
 
-def _seg_box(p0, p1, box):
-    """Slab test in the box's frame (euler in degrees, MuJoCo's xyz sequence)."""
+def _seg_box(p0, p1, box, reach):
+    """In the box's frame (euler in degrees, MuJoCo's xyz sequence): a slab test at reach 0, else the segment's
+    distance to the box against the reach (the box grown by a sphere: rounded edges and corners)."""
     q, rot = np.empty(4), np.empty(9)
     mujoco.mju_euler2Quat(q, np.radians(box["euler"]), "xyz")
     mujoco.mju_quat2Mat(rot, q)
     rot = rot.reshape(3, 3)
     a = (p0 - box["pos"]) @ rot  # R^T (p - pos)
     d = (p1 - p0) @ rot
+    if reach > 0:
+        return _seg_box_dist(a, d, np.asarray(box["size"], float)) <= reach
     lo, hi = 0.0, 1.0
     for i, h in enumerate(box["size"]):
         if abs(d[i]) < 1e-12:
@@ -102,3 +107,24 @@ def _seg_box(p0, p1, box):
         if lo > hi:
             return False
     return True
+
+
+def _seg_box_dist(a, d, h, tol=1e-6):
+    """Distance from the segment a + s d (s in [0, 1]) to the box of half-sizes h at the origin, to `tol` metres.
+    The point-to-box distance is convex along the segment, so a golden-section search over s finds its minimum; the
+    distance changes by at most |d| per unit s, so stopping once the bracket spans tol / |d| bounds the error."""
+    f = lambda s: float(np.linalg.norm(np.maximum(np.abs(a + s * d) - h, 0.0)))  # noqa: E731
+    g = (math.sqrt(5) - 1) / 2
+    lo, hi, span = 0.0, 1.0, tol / max(float(np.linalg.norm(d)), tol)
+    x1, x2 = hi - g * (hi - lo), lo + g * (hi - lo)
+    f1, f2 = f(x1), f(x2)
+    while hi - lo > span:
+        if f1 <= f2:
+            hi, x2, f2 = x2, x1, f1
+            x1 = hi - g * (hi - lo)
+            f1 = f(x1)
+        else:
+            lo, x1, f1 = x1, x2, f2
+            x2 = lo + g * (hi - lo)
+            f2 = f(x2)
+    return min(f(lo), f(hi), f1, f2)
