@@ -118,7 +118,7 @@ def test_the_spawn_check_uses_the_attached_bodys_pose_at_time_zero():
 
 
 def env(lv, **kw):
-    return gym.make("Hamsterball-v0", tasks=["survive"], levels=[lv], **kw)
+    return gym.make("Hamsterball-v1", tasks=["survive"], levels=[lv], **kw)
 
 
 def test_a_spawned_hamsterball_rests_on_the_platform_at_reset():

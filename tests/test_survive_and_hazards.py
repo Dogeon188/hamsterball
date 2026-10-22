@@ -34,7 +34,7 @@ def play(env, policy, max_steps=5000):
 
 
 def test_surviving_to_the_time_limit_terminates_in_success():
-    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"])
+    env = gym.make("Hamsterball-v1", tasks=["survive"], levels=["first_survive"])
     n, reward, terminated, truncated, info, goals = play(env, STILL)
     assert (n, terminated, truncated) == (600, True, False)  # 10 s at 60 Hz
     assert info["success"] and info["failure_reason"] is None
@@ -46,13 +46,13 @@ def test_surviving_to_the_time_limit_terminates_in_success():
 
 
 def test_survive_with_truncate_false_still_succeeds_at_its_time_limit():
-    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"], truncate=False)
+    env = gym.make("Hamsterball-v1", tasks=["survive"], levels=["first_survive"], truncate=False)
     n, reward, terminated, truncated, info, _ = play(env, STILL)
     assert (n, terminated, truncated, info["success"]) == (600, True, False, True)
 
 
 def test_leaving_the_survive_region_fails():
-    env = gym.make("Hamsterball-v0", tasks=["survive"], levels=["first_survive"])
+    env = gym.make("Hamsterball-v1", tasks=["survive"], levels=["first_survive"])
     n, reward, terminated, truncated, info, _ = play(env, FORWARD)
     assert terminated and not info["success"] and info["failure_reason"] == "left_region"
     assert reward == -1.0 and info["state"][1] > 2  # out past the 2 m radius
@@ -76,7 +76,7 @@ def with_hazards(name, *hazards):
     ],
 )
 def test_a_hazard_fails_every_task(name, task):
-    env = gym.make("Hamsterball-v0", tasks=[task], levels=[with_hazards(name, {"type": "sphere", "pos": [0, 0, 0.5], "radius": 0.2})])
+    env = gym.make("Hamsterball-v1", tasks=[task], levels=[with_hazards(name, {"type": "sphere", "pos": [0, 0, 0.5], "radius": 0.2})])
     n, reward, terminated, truncated, info, _ = play(env, STILL)
     assert (n, terminated, info["failure_reason"], info["success"]) == (1, True, "hazard", False)
     assert info["reward_terms"]["event"] == -1.0
@@ -85,7 +85,7 @@ def test_a_hazard_fails_every_task(name, task):
 def test_a_hazard_crossed_within_one_env_step_triggers():
     # a 10 cm thick wall across the path to the goal; one env step is a whole second, so the shell skips clean over it
     wall = {"type": "box", "pos": [0, 4, 0.5], "size": [3, 0.05, 3]}
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=[with_hazards("first_goal", wall)], frame_skip=600)
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[with_hazards("first_goal", wall)], frame_skip=600)
     obs, _ = env.reset(seed=0)
     ys = [obs["state"][1]]
     for _ in range(5):
@@ -99,7 +99,7 @@ def test_a_hazard_crossed_within_one_env_step_triggers():
 
 def test_a_step_that_reaches_the_goal_and_crosses_a_hazard_succeeds():
     over_goal = {"type": "sphere", "pos": [0, 8, 0.5], "radius": 1}
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=[with_hazards("first_goal", over_goal)])
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[with_hazards("first_goal", over_goal)])
     n, reward, terminated, truncated, info, _ = play(env, toward_target)
     assert terminated and info["success"] and info["failure_reason"] is None
     assert info["reward_terms"]["event"] == 1.0

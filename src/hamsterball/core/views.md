@@ -15,15 +15,15 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
 ## How it works
 
-- `chase`: `CHASE_DIST` back from the shell centre along the camera yaw, pitched `CHASE_PITCH` down, looking at the shell centre.
+- `chase`: `CHASE_DIST` back from the shell centre along the camera yaw, pitched down by the camera pitch (`userdata[PITCH]`, see [step.md](step.md)), looking at the shell centre.
 - `follow`: the same construction at `FOLLOW_DIST` and `FOLLOW_PITCH`, with the level's `follow_yaw_deg` in place of the camera yaw.
-- `first_person`: at the `hamster_eye` site, facing the camera yaw, level with the horizon.
+- `first_person`: at the `hamster_eye` site, facing the camera yaw, pitched by the camera pitch minus `PITCH_DEFAULT`, so level with the horizon at the default.
 - A MuJoCo camera looks along its −z with +y up, so the mocap's rotation matrix has columns right, up, −forward, with forward `(−sin yaw·cos pitch, cos yaw·cos pitch, −sin pitch)` (yaw 0 faces +y, as the camera yaw frame).
 
 ## Invariants and checks
 
 - The mocaps carry no geoms, so they add no mass or contacts and never change a trajectory. They do add 21 numbers (`mocap_pos`, `mocap_quat`) to the core state, so the env poses them every env step, views or not, and `core_state` doesn't depend on the `views` kwarg.
-- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the camera yaw, follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720.
+- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the camera yaw and tilted by the camera pitch (the follow view not), follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720.
 
 ## Known quirks
 
@@ -31,7 +31,7 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
   | Constant | Value |
   |---|---|
-  | `CHASE_DIST`, `CHASE_PITCH` | 3.0 m, 15° down |
+  | `CHASE_DIST` | 3.0 m (its pitch is the camera pitch, default 15° down: see [step.md](step.md)) |
   | `FOLLOW_DIST`, `FOLLOW_PITCH` (the follow offset) | 6.0 m, 35° down |
   | `FOVY` (vertical) | chase 60°, follow 50°, first person 75° |
   | Marker colours (`MARKER_RGBA` in [level.py](level.md)) | goal `0.2 0.9 0.3 0.4` green, waypoints `0.2 0.5 1.0 0.4` blue, items `1.0 0.85 0.1 0.4` yellow, keys `1.0 0.4 0.1 0.4` orange, survive region `0.6 0.3 0.9 0.25` purple |
@@ -59,3 +59,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, code review of hamsterball-v1: the offscreen buffer was a fixed 1280×720, so a `view_size` wider or taller raised in `mujoco.Renderer`; spec §7 asks for at least `view_size`. Views now render at any `view_size` (checked at 800×1600).
 - 2026-10-22, user play-test request: passed waypoints turn dim green; `PASSED_RGBA` (in [level.py](level.md)) joins the look constants, needing play-test like the rest.
 - 2026-10-22, user play-test request: waypoints after the next render in the locked grey, renamed `LOCKED_RGBA` (was `LOCKED_GOAL_RGBA`).
+- 2026-10-22, ticket mouse-camera/02: `CHASE_PITCH` is gone; the chase view reads the camera pitch from the core state, and the first-person view tilts by it minus its 15° default (the old chase pitch), so neither view changes at the default. The follow view keeps `FOLLOW_PITCH`.

@@ -9,18 +9,18 @@ from hamsterball.game.play import action
 
 
 def test_keys_run_in_the_camera_frame_at_half_effort():
-    np.testing.assert_allclose(action({"w"}), [0, 0.5, 0])
-    np.testing.assert_allclose(action({"d"}), [0.5, 0, 0])
+    np.testing.assert_allclose(action({"w"}), [0, 0.5, 0, 0])
+    np.testing.assert_allclose(action({"d"}), [0.5, 0, 0, 0])
     h = 0.5 / math.sqrt(2)
-    np.testing.assert_allclose(action({"w", "a"}), [-h, h, 0])
-    np.testing.assert_allclose(action({"w", "s"}), [0, 0, 0])
-    np.testing.assert_allclose(action(set()), [0, 0, 0])
+    np.testing.assert_allclose(action({"w", "a"}), [-h, h, 0, 0])
+    np.testing.assert_allclose(action({"w", "s"}), [0, 0, 0, 0])
+    np.testing.assert_allclose(action(set()), [0, 0, 0, 0])
 
 
 def test_shift_walks_ctrl_sprints_both_walk():
-    np.testing.assert_allclose(action({"s", "shift"}), [0, -0.25, 0])
-    np.testing.assert_allclose(action({"s", "ctrl"}), [0, -1.0, 0])
-    np.testing.assert_allclose(action({"s", "shift", "ctrl"}), [0, -0.25, 0])
+    np.testing.assert_allclose(action({"s", "shift"}), [0, -0.25, 0, 0])
+    np.testing.assert_allclose(action({"s", "ctrl"}), [0, -1.0, 0, 0])
+    np.testing.assert_allclose(action({"s", "shift", "ctrl"}), [0, -0.25, 0, 0])
 
 
 def test_q_turns_left_e_turns_right():
@@ -32,10 +32,10 @@ def test_q_turns_left_e_turns_right():
 
 def test_left_stick_deadzone_rescales_effort_and_overrides_keys():
     # GLFW sticks: y is down, so pushing up is y = -1
-    np.testing.assert_allclose(action({"w"}, left=(0.1, -0.1)), [0, 0.5, 0])  # inside the deadzone: keys win
-    np.testing.assert_allclose(action({"w"}, left=(0.0, 1.0)), [0, -1.0, 0])
-    np.testing.assert_allclose(action(set(), left=(0.575, 0.0)), [0.5, 0, 0])  # (0.575 - 0.15) / 0.85 = 0.5
-    np.testing.assert_allclose(action(set(), left=(2.0, 0.0)), [1.0, 0, 0])  # capped at effort 1
+    np.testing.assert_allclose(action({"w"}, left=(0.1, -0.1)), [0, 0.5, 0, 0])  # inside the deadzone: keys win
+    np.testing.assert_allclose(action({"w"}, left=(0.0, 1.0)), [0, -1.0, 0, 0])
+    np.testing.assert_allclose(action(set(), left=(0.575, 0.0)), [0.5, 0, 0, 0])  # (0.575 - 0.15) / 0.85 = 0.5
+    np.testing.assert_allclose(action(set(), left=(2.0, 0.0)), [1.0, 0, 0, 0])  # capped at effort 1
 
 
 def test_right_stick_x_sets_cam_yaw_and_overrides_q_e():
@@ -144,7 +144,7 @@ def test_hud_at_reset_shows_time_progress_recording_effort_speed(level, task, pr
 
     env = HamsterballEnv([task], levels=[level], camera_action=True)
     env.reset(options={"task": task})
-    assert hud(env, np.zeros(3), recording=False) == [
+    assert hud(env, np.zeros(4), recording=False) == [
         "0.0 / 10.0 s" if task == "survive" else "0.0 s",  # no time limit for a human player, except survive's
         progress,
         "not recording",
@@ -159,7 +159,7 @@ def test_hud_tracks_sim_time_effort_and_the_unlock_goal_once_the_keys_are_in():
 
     env = HamsterballEnv(["unlock_goal"], levels=["locked_goal"], camera_action=True)
     env.reset()
-    a = np.array([0, 1.0, 0])
+    a = np.array([0, 1.0, 0, 0])
     for _ in range(60):
         env.step(a)
     lines = hud(env, a, recording=True)

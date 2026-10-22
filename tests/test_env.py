@@ -24,7 +24,7 @@ def level(spawn_yaw_deg=0.0, goal=None):
 
 
 def make(**kw):
-    return gym.make("Hamsterball-v0", tasks=["reach_goal"], **{"levels": ["first_goal"], **kw})
+    return gym.make("Hamsterball-v1", tasks=["reach_goal"], **{"levels": ["first_goal"], **kw})
 
 
 def toward_goal(obs, sign=1.0):
@@ -43,19 +43,20 @@ def run(env, policy, max_steps=5000):
     raise AssertionError("episode never ended")
 
 
-def test_observations_are_the_19_d_state_and_10_d_goal():
+def test_observations_are_the_21_d_state_and_10_d_goal():
     env = make()
     assert env.action_space.shape == (2,)
-    assert env.observation_space["state"].shape == (19,) and env.observation_space["goal"].shape == (10,)
+    assert env.observation_space["state"].shape == (21,) and env.observation_space["goal"].shape == (10,)
     obs, info = env.reset(seed=0)
     assert env.observation_space.contains(obs)
     s, g = obs["state"], obs["goal"]
     np.testing.assert_allclose(s[0:3], [0, 0, 0.5])  # shell position, world
     assert s[3] == pytest.approx(5.5)  # above the kill plane at -5
     np.testing.assert_allclose(s[4:6], [0, 1])  # sin, cos of camera yaw 0
-    np.testing.assert_allclose(s[6:12], 0, atol=1e-6)  # at rest
-    np.testing.assert_allclose(s[12:15], [0, 0, -0.34], atol=1e-6)  # hamster 1 cm above the bottom
-    assert s[18] == 1  # inside the airborne grace
+    np.testing.assert_allclose(s[6:8], [math.sin(math.radians(15)), math.cos(math.radians(15))])  # the default pitch
+    np.testing.assert_allclose(s[8:14], 0, atol=1e-6)  # at rest
+    np.testing.assert_allclose(s[14:17], [0, 0, -0.34], atol=1e-6)  # hamster 1 cm above the bottom
+    assert s[20] == 1  # inside the airborne grace
     np.testing.assert_allclose(g, [0, 8, 0, 1, 1, 1, 0, 0, 0, 0], atol=1e-6)
     assert {"core_state", "state", "goal"} <= info.keys()
     np.testing.assert_array_equal(info["state"], s)
@@ -72,9 +73,9 @@ def test_yaw_0_faces_plus_y_and_vectors_read_in_the_camera_yaw_frame():
         obs, *_ = env.step(np.array([0, 1], np.float32))  # run camera-forward for a second
     s = obs["state"]
     assert s[0] < -1 and abs(s[1]) < 0.3 * -s[0]  # world -x, give or take the chase yaw's drift
-    assert s[7] > 1 and abs(s[6]) < 0.05 * s[7]  # shell velocity: camera forward
-    assert s[9] < -1 and abs(s[10]) < 0.05 * -s[9]  # rolling forward spins the shell about camera -x
-    assert s[13] > 0.1  # the hamster leans forward
+    assert s[9] > 1 and abs(s[8]) < 0.05 * s[9]  # shell velocity: camera forward
+    assert s[11] < -1 and abs(s[12]) < 0.05 * -s[11]  # rolling forward spins the shell about camera -x
+    assert s[15] > 0.1  # the hamster leans forward
 
 
 def test_a_goal_crossed_within_one_env_step_triggers():
@@ -124,14 +125,18 @@ def test_truncate_false_runs_past_the_time_limit_with_the_time_penalty():
     assert reward == pytest.approx(-0.001) and obs["goal"][4] == 1  # the goal's fraction remaining ignores the limit
 
 
-def test_camera_action_adds_cam_yaw_and_orbits_at_120_deg_per_s():
+def test_camera_action_adds_cam_yaw_and_cam_pitch_turning_at_120_and_90_deg_per_s():
     env = make(camera_action=True)
-    assert env.action_space.shape == (3,)
+    assert env.action_space.shape == (4,)
     env.reset(seed=0)
     for _ in range(30):  # half a second at 60 Hz
-        obs, *_ = env.step(np.array([0, 0, 1], np.float32))
+        obs, *_ = env.step(np.array([0, 0, 1, 0], np.float32))
     sin, cos = obs["state"][4:6]
     assert math.degrees(math.atan2(sin, cos)) == pytest.approx(60, abs=1e-3)
+    for _ in range(10):  # a sixth of a second: 15 deg further down
+        obs, *_ = env.step(np.array([0, 0, 0, 1], np.float32))
+    sin, cos = obs["state"][6:8]
+    assert math.degrees(math.atan2(sin, cos)) == pytest.approx(30, abs=1e-3)
 
 
 def test_the_hamsterball_rolls_over_a_bundled_hfield_hill():

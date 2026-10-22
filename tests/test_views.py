@@ -1,5 +1,6 @@
 """Pixel views (spec §11): what each view sees, through the env's observation."""
 
+import math
 import os
 from importlib.resources import files
 import subprocess
@@ -52,6 +53,22 @@ def test_chase_and_first_person_face_the_camera_yaw():
     assert goal_x(obs["first_person"]) > 0.6
 
 
+def test_chase_and_first_person_tilt_with_the_camera_pitch_and_follow_keeps_its_own():
+    env = make(camera_action=True, views=VIEWS)
+    env.reset(seed=0)
+
+    def pitch(v):  # degrees below the horizon that the view's camera looks
+        d = env.unwrapped.core.data
+        fwd = -d.cam_xmat[d.model.camera(v).id].reshape(3, 3)[:, 2]  # a MuJoCo camera looks along its -z
+        return math.degrees(math.asin(-fwd[2]))
+
+    assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((15, 0, 35))
+    for _ in range(20):  # a third of a second at 90 deg/s: 30 deg further down
+        env.step(np.array([0, 0, 0, 1], np.float32))
+    assert (pitch("chase"), pitch("first_person"), pitch("follow")) == pytest.approx((45, 30, 35))
+    env.close()
+
+
 def test_follow_keeps_the_level_yaw():
     lv = level(30.0)  # follow_yaw_deg 0: the follow view still looks along +y, at the goal
     obs, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
@@ -96,21 +113,21 @@ def test_obs_state_false_returns_pixels_only_with_state_and_goal_in_info():
     env = make(views=("chase",), obs_state=False)
     obs, info = env.reset(seed=0)
     assert set(obs) == set(env.observation_space.spaces) == {"chase"}
-    assert info["state"].shape == (19,) and info["goal"].shape == (10,)
+    assert info["state"].shape == (21,) and info["goal"].shape == (10,)
     obs, *_, info = env.step(np.zeros(2, np.float32))
     assert set(obs) == {"chase"} and {"state", "goal"} <= info.keys()
 
 
 def test_first_person_sees_the_ground_at_its_feet_on_a_large_level():
     # the near clip plane scales with the model's extent; on a 30 m level it once cut the ground below the eye
-    env = gym.make("Hamsterball-v0", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
+    env = gym.make("Hamsterball-v1", tasks=["unlock_goal"], levels=["locked_goal"], views=("first_person",))
     obs, _ = env.reset(seed=0)
     assert obs["first_person"][-1].min() > 0
 
 
 def test_views_survive_model_cache_eviction():
     # model_cache=1: every switch evicts the other level's model and its renderer, and both come back on demand
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal", "unlock_goal"], levels=["first_goal", "locked_goal"], views=("chase",), model_cache=1)
     for name, task in [("first_goal", "reach_goal"), ("locked_goal", "unlock_goal"), ("first_goal", "reach_goal")]:
         obs, _ = env.reset(options={"level": Level.load(files("hamsterball") / f"levels/{name}.yaml"), "task": task})
         assert len(env.unwrapped._cores) == 1

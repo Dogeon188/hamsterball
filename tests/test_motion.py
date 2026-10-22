@@ -133,12 +133,12 @@ def test_a_spinning_box_region_turns_about_its_centre():
 
 
 def drift_env(**kw):
-    return gym.make("Hamsterball-v0", tasks=["survive"], levels=["survive_drift"], **kw)
+    return gym.make("Hamsterball-v1", tasks=["survive"], levels=["survive_drift"], **kw)
 
 
 def track(obs):
     """Steer the shell's velocity toward the region centre, in the camera yaw frame (tests/test_tasks.py's)."""
-    g, v = obs["goal"][:2], obs["state"][6:8]
+    g, v = obs["goal"][:2], obs["state"][8:10]
     want = g / max(np.linalg.norm(g), 1e-9) * min(3.0, np.linalg.norm(g))
     a = want - v
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)

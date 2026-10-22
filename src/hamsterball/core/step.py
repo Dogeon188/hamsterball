@@ -16,13 +16,16 @@ from .abstract_tier import AbstractTier
 from .level import Level
 from .motion import pose, quat
 from .model import (CORE_SLOTS, DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF,
-                    SHELL_QPOS, YAW, build)
+                    SHELL_QPOS, PITCH, YAW, build)
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
 CHASE_ALPHA = 1 - math.exp(-DT / 0.55)  # chase yaw, tau 0.55 s
 CHASE_MIN_SPEED2 = 0.8 ** 2  # (m/s)^2, horizontal shell speed below which the chase yaw holds
 ORBIT_RATE = math.radians(120)  # rad/s at cam_yaw = 1
+# camera pitch, below the horizon; needs play-test (see step.md)
+PITCH_DEFAULT, PITCH_MIN, PITCH_MAX = math.radians(15), math.radians(-10), math.radians(60)
+PITCH_RATE = math.radians(90)  # rad/s at cam_pitch = 1
 FIELD_START, FIELD_HARD = 0.005, 0.020  # m past the resting radius: containment starts, and stops hard
 MU = M_HAM * M_SHELL / (M_HAM + M_SHELL)  # the pair's reduced mass
 STATE = mujoco.mjtState.mjSTATE_INTEGRATION
@@ -86,6 +89,11 @@ def camera_yaw(data, cam):
     yaw = wrap(yaw + ORBIT_RATE * cam * DT)
     data.userdata[YAW] = yaw
     return yaw
+
+
+def camera_pitch(data, cam):
+    """Add the pitch input and clamp to [PITCH_MIN, PITCH_MAX]. Moves no physics."""
+    data.userdata[PITCH] = min(max(data.userdata[PITCH] + PITCH_RATE * cam * DT, PITCH_MIN), PITCH_MAX)
 
 
 def drag(data):
@@ -187,9 +195,9 @@ def touch_tiles(model, data, tiles):
             data.userdata[slot + i] = data.time
 
 
-def physics_step(model, data, tier, action, cam, bodies=(), tiles=None):
-    """One physics step. action is the tier's part; cam is the orbit input in [-1, 1]; bodies as `drive_bodies`,
-    tiles as `drive_tiles`."""
+def physics_step(model, data, tier, action, cam, bodies=(), tiles=None, cam_pitch=0.0):
+    """One physics step. action is the tier's part; cam and cam_pitch are the orbit and pitch inputs in [-1, 1];
+    bodies as `drive_bodies`, tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
     drive_tiles(data, tiles)
@@ -197,6 +205,7 @@ def physics_step(model, data, tier, action, cam, bodies=(), tiles=None):
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
     yaw = camera_yaw(data, cam)
+    camera_pitch(data, cam_pitch)
     drag(data)
     contain(model, data, tier.resting_radius)
     tier.drive(model, data, action, yaw)
@@ -238,18 +247,23 @@ class Core:
         box = self.tier.action_space()
         if not self.camera_action:
             return box
-        return gym.spaces.Box(np.append(box.low, -1).astype(box.dtype), np.append(box.high, 1).astype(box.dtype), dtype=box.dtype)
+        low, high = np.append(box.low, [-1, -1]), np.append(box.high, [1, 1])  # cam_yaw, cam_pitch
+        return gym.spaces.Box(low.astype(box.dtype), high.astype(box.dtype), dtype=box.dtype)
 
     @property
     def yaw(self):
         return float(self.data.userdata[YAW])
+
+    @property
+    def pitch(self):
+        return float(self.data.userdata[PITCH])
 
     def reset(self, spawn=(0.0, 0.0, R), yaw=0.0):
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
         self.tier.reset(m, d, spawn)
-        d.userdata[YAW] = yaw
+        d.userdata[YAW], d.userdata[PITCH] = yaw, PITCH_DEFAULT
         if self.tiles:
             d.userdata[self.tiles.slot:] = math.inf  # untouched
         drive_bodies(d, self.bodies)
@@ -259,11 +273,11 @@ class Core:
     def step(self, action, n=FRAME_SKIP):
         """Hold one action over n physics steps."""
         m, d, tier = self.model, self.data, self.tier
-        cam = 0.0
+        cam = cam_pitch = 0.0
         if self.camera_action:
-            action, cam = action[:-1], float(action[-1])
+            action, cam, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
         for _ in range(n):
-            physics_step(m, d, tier, action, cam, self.bodies, self.tiles)
+            physics_step(m, d, tier, action, cam, self.bodies, self.tiles, cam_pitch)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))

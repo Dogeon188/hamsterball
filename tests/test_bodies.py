@@ -119,7 +119,7 @@ def test_a_platform_moving_under_the_shell_carries_it_by_friction():
 
 
 def test_an_inputless_hamsterball_on_survive_pushers_is_shoved_out():
-    env = gym.make("HamsterballSurvive-v0", levels=["survive_pushers"])
+    env = gym.make("HamsterballSurvive-v1", levels=["survive_pushers"])
     env.reset(seed=0)
     for _ in range(1200):
         _, _, terminated, truncated, info = env.step(np.zeros(2, np.float32))

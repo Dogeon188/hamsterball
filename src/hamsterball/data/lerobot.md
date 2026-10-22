@@ -11,7 +11,7 @@ LeRobot export (spec §12): a one-way copy of a [re-rendered](rerender.md) Minar
 
 ## How it works
 
-- Features: `action`; `observation.state` (19) and `observation.goal` (10), float32; `observation.images.<view>` per view, `(H, W, 3)`; `next.reward` (float32) and `next.done` (bool, terminated or truncated), shape 1.
+- Features: `action`; `observation.state` (21) and `observation.goal` (10), float32; `observation.images.<view>` per view, `(H, W, 3)`; `next.reward` (float32) and `next.done` (bool, terminated or truncated), shape 1.
 - A LeRobot frame pairs observation t with action t, so each episode gives one frame per action and drops the last observation.
 - Each frame's task string is the episode's task (`options["task"]`).
 - `fps` is the env-step rate, `1 / (frame_skip · DT)`; LeRobot takes an int, so a `frame_skip` that doesn't divide 600 raises `ValueError`.
@@ -38,3 +38,4 @@ LeRobot export (spec §12): a one-way copy of a [re-rendered](rerender.md) Minar
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/09: added. Agent check: a `use_videos=True` export decodes back to `(3, H, W)` frames.
+- 2026-10-22, ticket mouse-camera/02: `observation.state` is 21 (the camera pitch's sin and cos).

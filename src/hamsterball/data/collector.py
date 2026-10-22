@@ -55,7 +55,7 @@ _inf = np.float32(np.inf)
 # what a dataset stores per step: spec §10's state and goal, never pixels. Keys in sorted order, the order Minari's
 # episode buffer writes them in, so add_to_dataset (which re-encodes in the space's order) writes the same Arrow schema
 OBSERVATION = gym.spaces.Dict(
-    goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32), state=gym.spaces.Box(-_inf, _inf, (19,), np.float32)
+    goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32), state=gym.spaces.Box(-_inf, _inf, (21,), np.float32)
 )
 # every env kwarg that shapes a space or the steps, so recover_environment() rebuilds an env with the same spaces and
 # the same episode ending (truncate, time_limit_s)

@@ -2,11 +2,11 @@
 
 ## Purpose
 
-The game's logic without a display (spec §13): input to the 3-D action, real-time pacing with overrun counting, the play/pause/result flow, and the HUD and result-card text. [window.py](window.md) is the shell that feeds it.
+The game's logic without a display (spec §13): input to the 4-D action, real-time pacing with overrun counting, the play/pause/result flow, and the HUD and result-card text. [window.py](window.md) is the shell that feeds it.
 
 ## Interface
 
-- `action(keys, left=(0, 0), right_x=0)`: `[run_x, run_y, cam_yaw]` (camera frame, x right, y forward) from the held key names (`w a s d shift ctrl q e`) and GLFW stick axes (y down).
+- `action(keys, left=(0, 0), right_x=0)`: `[run_x, run_y, cam_yaw, cam_pitch]` (camera frame, x right, y forward; `cam_pitch` 0 until ticket mouse-camera/03) from the held key names (`w a s d shift ctrl q e`) and GLFW stick axes (y down).
 - `Pacer(period, clock=perf_counter, sleep=time.sleep, slack=0.002)`: `wait()` before each env step sleeps to the frame's deadline; `overruns` counts late frames; `reset()` starts a fresh schedule (after a pause or at an episode start).
 - `Flow`: `state` is `"play"`, `"paused"`, `"result"` (then `"menu"` or `"quit"` once left); `end(outcome)` shows the result card; `press(name)` takes `esc`, `enter`, `r`, the pause buttons `resume retry menu quit`, or `close`, and returns the shell's command (`retry`, `next`, `menu`, `quit`) or `None`.
 - `outcome(terminated, truncated, info)`: the result card's headline (`Success`, `Failed: hazard`, `Failed: fell off`, `Failed: left the region`, `Time up`) or `None`.
@@ -47,3 +47,4 @@ The game's logic without a display (spec §13): input to the 3-D action, real-ti
 - 2026-10-22, code review of hamsterball-v1: the waypoint HUD read `waypoint 5/4` after a win; it now caps at `n/n`.
 - 2026-10-22, code review of hamsterball-v1: `Pacer.tick()` renamed `Pacer.wait()`, since GLOSSARY.md avoids "tick" (it means a physics step there).
 - 2026-10-22, user play-test request: no time-up for a human player, except in survive; the HUD drops the limit from the time line of every other task.
+- 2026-10-22, ticket mouse-camera/02: `action` returns 4-D with `cam_pitch` 0, matching the env's camera-flag action.

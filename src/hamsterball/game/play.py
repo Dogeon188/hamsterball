@@ -20,7 +20,8 @@ def _stick(m):
 
 
 def action(keys, left=(0.0, 0.0), right_x=0.0):
-    """The 3-D action [run_x, run_y, cam_yaw] (camera frame: x right, y forward) from held keys and stick axes.
+    """The 4-D action [run_x, run_y, cam_yaw, cam_pitch] (camera frame: x right, y forward) from held keys and stick
+    axes; cam_pitch stays 0 (no input drives it yet).
 
     keys: names held, from {"w", "a", "s", "d", "shift", "ctrl", "q", "e"}. Sticks are GLFW axes (y down).
     A stick outside its deadzone overrides the keys it stands for.
@@ -37,7 +38,7 @@ def action(keys, left=(0.0, 0.0), right_x=0.0):
         cam = -math.copysign(_stick(abs(right_x)), right_x)
     else:
         cam = ("q" in keys) - ("e" in keys)
-    return np.array([*run, cam], np.float32)
+    return np.array([*run, cam, 0.0], np.float32)
 
 
 class Pacer:

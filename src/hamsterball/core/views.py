@@ -5,12 +5,13 @@ import math
 import mujoco
 import numpy as np
 
-from .model import SHELL, YAW
+from .model import PITCH, SHELL, YAW
+from .step import PITCH_DEFAULT
 
 VIEWS = ("chase", "follow", "first_person")
 
 # Look constants, picked by eye and awaiting play-test (see views.md). They change pixels, not trajectories.
-CHASE_DIST, CHASE_PITCH = 3.0, math.radians(15)  # m from the shell centre; degrees below the horizon
+CHASE_DIST = 3.0  # m from the shell centre; the camera pitch tilts it
 FOLLOW_DIST, FOLLOW_PITCH = 6.0, math.radians(35)
 FOVY = {"chase": 60, "follow": 50, "first_person": 75}  # vertical, degrees
 
@@ -35,15 +36,15 @@ def _quat(yaw, pitch):
 
 def pose(model, data, follow_yaw):
     """Pose the view mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the cameras."""
-    yaw = float(data.userdata[YAW])
+    yaw, pitch = float(data.userdata[YAW]), float(data.userdata[PITCH])
     c = data.xpos[SHELL]
-    for v, at, yw, pitch, dist in (
-        ("chase", c, yaw, CHASE_PITCH, CHASE_DIST),
+    for v, at, yw, p, dist in (
+        ("chase", c, yaw, pitch, CHASE_DIST),
         ("follow", c, follow_yaw, FOLLOW_PITCH, FOLLOW_DIST),
-        ("first_person", data.site("hamster_eye").xpos, yaw, 0.0, 0.0),
+        ("first_person", data.site("hamster_eye").xpos, yaw, pitch - PITCH_DEFAULT, 0.0),  # level at the default
     ):
         mocap = model.body_mocapid[model.body(f"view_{v}").id]
-        q, fwd = _quat(yw, pitch)
+        q, fwd = _quat(yw, p)
         data.mocap_pos[mocap] = at - dist * np.array(fwd)
         data.mocap_quat[mocap] = q
 

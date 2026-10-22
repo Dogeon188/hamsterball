@@ -85,7 +85,7 @@ def test_a_moving_hazard_fails_reach_goal_and_is_drawn_where_it_is():
     # sweeps along x through the spawn; at t = 0 it is 3 m away, so the shell sits still until it arrives
     lv = goal_level({"type": "sphere", "pos": [0, 0, 0.5], "radius": 0.4,
                      "motion": {"type": "oscillate", "axis": [1, 0, 0], "amplitude": 3, "period": 4, "phase": 0.25}})
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=[lv])
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[lv])
     e = env.unwrapped
     env.reset(seed=0)
     g = e.core.model.geom("hazard0").id
@@ -103,7 +103,7 @@ def test_a_fast_hazard_cannot_skip_over_the_shell_between_env_steps():
     # 0.1 m radius, 30 m/s along x: 0.5 m per env step, five times its diameter
     lv = goal_level({"type": "sphere", "pos": [0, 0, 0.5], "radius": 0.1,
                      "motion": {"type": "path", "points": [[-15, 0, 0], [15, 0, 0]], "period": 2, "phase": 0.1}})
-    env = gym.make("Hamsterball-v0", tasks=["reach_goal"], levels=[lv])
+    env = gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=[lv])
     env.reset(seed=0)
     for _ in range(60):
         *_, terminated, _, info = env.step(STILL)
@@ -116,12 +116,12 @@ def test_a_fast_hazard_cannot_skip_over_the_shell_between_env_steps():
 
 
 def sweepers_env(**kw):
-    return gym.make("Hamsterball-v0", tasks=["survive"], levels=["survive_sweepers"], **kw)
+    return gym.make("Hamsterball-v1", tasks=["survive"], levels=["survive_sweepers"], **kw)
 
 
 def dodge(obs):
     """Roll to the corner at (2.5, 2.5), clear of both sweepers' lines and the spinning bar, and hold there."""
-    g, v = np.array([2.5, 2.5]) - obs["state"][:2], obs["state"][6:8]
+    g, v = np.array([2.5, 2.5]) - obs["state"][:2], obs["state"][8:10]
     a = g / max(np.linalg.norm(g), 1e-9) * min(3.0, np.linalg.norm(g)) - v
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
 

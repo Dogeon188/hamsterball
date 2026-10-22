@@ -150,6 +150,10 @@ _Avoid_: fixed first-person, eye camera
 The chase view's heading, which defines the frame of actions and observations.
 _Avoid_: heading, view angle
 
+**Camera pitch**:
+How far below the horizon the chase view looks; it tilts the chase and first-person views but moves no physics and leaves the frame of actions and observations alone.
+_Avoid_: tilt (a mover's rocking), elevation, view angle
+
 **Pose stream**:
 The sequence, one **pose** per env step, of what a front end needs to draw the scene without running physics: body poses, view poses, marker progress, and the outcome.
 _Avoid_: frame stream, render stream

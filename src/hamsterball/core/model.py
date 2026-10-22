@@ -19,8 +19,8 @@ SHELL, HAM = 1, 2
 SHELL_QPOS, HAM_QPOS = 0, 7
 SHELL_DOF, HAM_DOF = 0, 6
 # The core's userdata slots; the tier's follow them, then a level's collapsing tiles'.
-YAW = 0
-CORE_SLOTS = 1
+YAW, PITCH = 0, 1
+CORE_SLOTS = 2
 
 
 def _tile_normals():

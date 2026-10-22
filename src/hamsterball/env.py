@@ -21,7 +21,7 @@ from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TA
                          body_frame)
 from .core.marker import centre, crosses
 from .core.motion import pose, quat
-from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS, YAW
+from .core.model import DT, HAM, PITCH, SHELL, SHELL_DOF, SHELL_QPOS, YAW
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -104,7 +104,7 @@ class HamsterballEnv(gym.Env):
         inf = np.float32(np.inf)
         spaces = {}
         if obs_state:
-            spaces["state"] = gym.spaces.Box(-inf, inf, (19,), np.float32)
+            spaces["state"] = gym.spaces.Box(-inf, inf, (21,), np.float32)
             spaces["goal"] = gym.spaces.Box(-inf, inf, (10,), np.float32)
         for v in self.views:
             spaces[v] = gym.spaces.Box(0, 255, (*self.view_size, 3), np.uint8)
@@ -338,6 +338,8 @@ class HamsterballEnv(gym.Env):
                 c[2] - self.level.kill_plane_z,
                 sy,
                 cy,
+                math.sin(d.userdata[PITCH]),
+                math.cos(d.userdata[PITCH]),
                 *cam(v_shell),
                 *cam(w_shell),
                 *cam(d.subtree_com[HAM] - c),
