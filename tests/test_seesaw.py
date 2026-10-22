@@ -142,7 +142,7 @@ def seesaw_env(**kw):
 
 def test_an_inputless_hamsterball_tips_survive_seesaw_and_rolls_off():
     info = run(seesaw_env(), lambda obs: np.zeros(2, np.float32))
-    assert info["failure_reason"] == "left_region"  # measured: at env step 84, 1.4 s into the 30 s
+    assert info["failure_reason"] == "left_region"  # measured: at env step 183
 
 
 def test_steering_toward_the_region_centre_balances_survive_seesaw():
