@@ -68,7 +68,7 @@ SEGMENT = 5.0  # target length of one hill or valley segment (m)
 LANDING = 0.75  # flat radius around the spawn and each target (m)
 RIDGE_LENGTH = 8.0  # survive ridge, end to end (m)
 DRIFT_REACH = 0.5  # a drifting region's centre sweeps this fraction of the plateau radius or the ridge's half-length
-HAZARD_TRIES = 20
+HAZARD_TRIES = 100
 HAZARD_CLEAR = 2.0  # hazard centre to spawn or target, at least (m)
 MOVER_RADIUS = 0.4  # survive's moving hazards are spheres this size (m)
 MOVER_SWEEP = 3.0  # a moving hazard's amplitude (m)
@@ -118,7 +118,7 @@ class ProceduralGenerator:
     """Spec §8's generator. `ProceduralGenerator(climb_grade=(5, 10))` overrides a row of the endpoint table."""
 
     name = "procedural"
-    version = 5
+    version = 6
     tasks = TASKS
 
     def __init__(self, **overrides):
@@ -584,8 +584,11 @@ def _dodge(x, y, pts, top, region, movers, p, start):
 
 
 def _footprint(x, y, pos):
-    """Nodes a hazard blocks: its box plus one cell, as the marker test runs on the swept shell centre."""
-    return (np.abs(x - pos[0]) <= HAZARD_SIZE[0] + CELL) & (np.abs(y - pos[1]) <= HAZARD_SIZE[1] + CELL)
+    """Nodes a hazard blocks: within the shell radius (markers trigger when the shell touches them) plus half a cell's
+    diagonal of the box, so every point of an 8-neighbour step between free nodes keeps the shell clear of it."""
+    dx = np.maximum(np.abs(x - pos[0]) - HAZARD_SIZE[0], 0)
+    dy = np.maximum(np.abs(y - pos[1]) - HAZARD_SIZE[1], 0)
+    return dx**2 + dy**2 <= (SHELL_R + CELL * math.sqrt(0.5)) ** 2
 
 
 def _hazard(x, y, h, corridor, on_path, pts, seg, seg_len, s_vert, hw, total, targets, rng):

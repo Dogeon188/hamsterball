@@ -317,14 +317,59 @@ def test_hazards_appear_with_difficulty():
     assert len(GEN("reach_goal", 0, 1.0).hazards) == 5  # 1 per 8 m of a 40 m route
 
 
+
+def clear_of(boxes, x, y):
+    """Each point's horizontal distance to the nearest hazard box (the touch rule's distance, box grown by a sphere)."""
+    d = np.full(np.shape(x), np.inf)
+    for b in boxes:
+        dx = np.maximum(np.abs(x - b["pos"][0]) - b["size"][0], 0)
+        dy = np.maximum(np.abs(y - b["pos"][1]) - b["size"][1], 0)
+        d = np.minimum(d, np.hypot(dx, dy))
+    return d
+
+
+@pytest.mark.parametrize("task", ["reach_goal", "waypoint_race", "collect_items", "unlock_goal"])
+def test_a_generated_route_keeps_the_shell_clear_of_every_hazard(task):
+    from hamsterball.core.generator import CELL, SHELL_R, _cell, _reach
+
+    checked = 0
+    for d in (0.5, 0.75, 1.0):
+        for seed in range(8):
+            level = GEN(task, seed, d)
+            if not level.hazards:
+                continue
+            g, block = level.geoms[0], level.tasks[task]
+            h = heights(level)
+            nrow, ncol = h.shape
+            xs = g["pos"][0] - g["size"][0] + CELL * np.arange(ncol)
+            ys = g["pos"][1] + g["size"][1] - CELL * np.arange(nrow)
+            x, y = np.meshgrid(xs, ys)
+            # a node passes only if every point of a step from it stays a shell radius clear (a step is at most a
+            # diagonal, so its points lie within half a diagonal of a node)
+            ok = ~np.isnan(h) & (clear_of(level.hazards, x, y) > SHELL_R + CELL * np.sqrt(0.5))
+            marks = [m for k in ("keys", "waypoints", "items", "goal") if k in block
+                     for m in (block[k] if isinstance(block[k], list) else [block[k]])]
+            cells = [_cell(m["pos"], h.shape, g["pos"][:2]) for m in marks]
+            found = _reach(np.nan_to_num(h, nan=-1e9), ok, _cell(block["spawn"]["pos"], h.shape, g["pos"][:2]), cells,
+                           GEN.params(d)["cliff_height"])
+            assert found is not None, (task, seed, d)
+            nodes = np.array(found[1])
+            t = np.linspace(0, 1, 11)[:, None]
+            px = x[tuple(nodes[:-1].T)] * (1 - t) + x[tuple(nodes[1:].T)] * t
+            py = y[tuple(nodes[:-1].T)] * (1 - t) + y[tuple(nodes[1:].T)] * t
+            assert clear_of(level.hazards, px, py).min() > SHELL_R, (task, seed, d)
+            checked += 1
+    assert checked >= 16
+
+
 # sha256 over the space-joined level ids of the sweep, per task. A change here is a change to the generator's
 # output: bump ProceduralGenerator.version and update these (spec §8 Determinism).
 GOLDEN = {
-    "reach_goal": "3e68db6caef0d6d7a8fcfc033a471138cc0a7b987e6b08b77c6cfd399eee327c",
-    "waypoint_race": "31a1f415065ab273c48cf7e549f24e9448f11519fa606dded6f53c94f615eb88",
-    "collect_items": "a6fb23ae8ab049b31648c311217ce01d653bffbb3a1ded1747a84d2fb08a83eb",
-    "unlock_goal": "e0215270ccfe6510fa9a55abe83b13ad095c212704661782cc41886f097a6741",
-    "survive": "c0608a2993a5e7e3aa305f869365ce4d92cc6334b48790ef9c42522b51d1740e",
+    "reach_goal": "7703d16485e2ff12d3beb65eca314aca3a0bafc88205c91f765e0d4392bc4d59",
+    "waypoint_race": "615bacd038da259c4a97de3507daa9c7a9bd75563f73c342f8f7b61494ffeeb6",
+    "collect_items": "8dda0e40af1f194f1c5e5a752922808dc41c580ffc178bbb928dca442ddf7d32",
+    "unlock_goal": "dbad7d39d9f58f69260a824503ec182e84ac71a728e92819126023c2c33da102",
+    "survive": "efb341bbb7fba1ec420afc2c3e0a1da7dc7b4c59aae25d4cb0a3e056eee23bf9",
 }
 
 
