@@ -24,7 +24,7 @@ def level(spawn_yaw_deg=0.0, goal=None):
 
 
 def make(**kw):
-    return gym.make("Hamsterball-v1", tasks=["reach_goal"], **{"levels": ["first_goal"], **kw})
+    return gym.make("Hamsterball-v2", tasks=["reach_goal"], **{"levels": ["first_goal"], **kw})
 
 
 def toward_goal(obs, sign=1.0):

@@ -78,7 +78,7 @@ How hard a generated level is: a number from 0 (easiest) to 1 (hardest) that a l
 _Avoid_: level (as a difficulty grade), tier
 
 **Marker**:
-A volume in a level that a task reacts to when the hamsterball's centre enters it: a goal, waypoint, item, key, survive region, or hazard.
+A volume in a level that a task reacts to when the shell touches it: a goal, waypoint, item, key, or hazard. The survive region is the exception: it tests whether the hamsterball's centre is inside it.
 _Avoid_: trigger, checkpoint
 
 **Motion**:
@@ -110,7 +110,7 @@ Where a task in a level starts the hamsterball, together with the hamster's init
 _Avoid_: start point, respawn
 
 **Hazard**:
-A marker that ends the episode in failure when the hamsterball enters it. It may move by a **Motion**.
+A marker that ends the episode in failure when the shell touches it. It may move by a **Motion**.
 _Avoid_: trap, death zone
 
 **Cliff**:

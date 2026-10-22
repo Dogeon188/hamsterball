@@ -133,7 +133,7 @@ def test_a_spinning_box_region_turns_about_its_centre():
 
 
 def drift_env(**kw):
-    return gym.make("Hamsterball-v1", tasks=["survive"], levels=["survive_drift"], **kw)
+    return gym.make("Hamsterball-v2", tasks=["survive"], levels=["survive_drift"], **kw)
 
 
 def track(obs):

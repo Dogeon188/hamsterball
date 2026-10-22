@@ -13,7 +13,7 @@ from functools import partial  # noqa: E402
 from gymnasium.envs.registration import register  # noqa: E402
 from gymnasium.error import DeprecatedEnv  # noqa: E402
 
-ENV_VERSION = 1  # N of spec §2: bumps with every change that can alter a trajectory, as a major release
+ENV_VERSION = 2  # N of spec §2: bumps with every change that can alter a trajectory, as a major release
 PRESETS = {
     "Hamsterball": None,
     "HamsterballReachGoal": "reach_goal",
