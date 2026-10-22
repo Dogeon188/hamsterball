@@ -42,12 +42,12 @@ def test_views_render_wider_and_taller_than_the_games_window():
     env.close()
 
 
-def test_chase_and_first_person_face_the_camera_yaw():
-    # yaw 0 faces +y, where the goal is: centred
+def test_chase_and_first_person_face_the_facing():
+    # facing 0 faces +y, where the goal is: centred
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["chase"]) - 0.5) < 0.05
     assert abs(goal_x(obs["first_person"]) - 0.5) < 0.05
-    # yaw 30 deg turns the view left, so the goal sits right of centre
+    # facing 30 deg turns the view left, so the goal sits right of centre
     obs, _ = make(levels=[level(30.0)], views=VIEWS).reset(seed=0)
     assert goal_x(obs["chase"]) > 0.6
     assert goal_x(obs["first_person"]) > 0.6
@@ -73,7 +73,7 @@ def test_follow_keeps_the_level_yaw():
     lv = level(30.0)  # follow_yaw_deg 0: the follow view still looks along +y, at the goal
     obs, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["follow"]) - 0.5) < 0.05
-    lv.follow_yaw_deg = 30.0  # now the level turns the follow view left, whatever the camera yaw
+    lv.follow_yaw_deg = 30.0  # now the level turns the follow view left, whatever the facing
     obs, _ = make(levels=[level(0.0)], views=VIEWS).reset(seed=0)
     obs30, _ = make(levels=[lv], views=VIEWS).reset(seed=0)
     assert abs(goal_x(obs["follow"]) - 0.5) < 0.05 and goal_x(obs30["follow"]) > 0.6

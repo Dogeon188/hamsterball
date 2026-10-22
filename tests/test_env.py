@@ -28,7 +28,7 @@ def make(**kw):
 
 
 def toward_goal(obs, sign=1.0):
-    """A scripted controller: run straight at (or away from) the goal, read in the camera yaw frame."""
+    """A scripted controller: run straight at (or away from) the goal, read in the facing frame."""
     g = obs["goal"][:2]
     return (sign * g / np.linalg.norm(g)).astype(np.float32)
 
@@ -52,7 +52,7 @@ def test_observations_are_the_21_d_state_and_10_d_goal():
     s, g = obs["state"], obs["goal"]
     np.testing.assert_allclose(s[0:3], [0, 0, 0.5])  # shell position, world
     assert s[3] == pytest.approx(5.5)  # above the kill plane at -5
-    np.testing.assert_allclose(s[4:6], [0, 1])  # sin, cos of camera yaw 0
+    np.testing.assert_allclose(s[4:6], [0, 1])  # sin, cos of facing 0
     np.testing.assert_allclose(s[6:8], [math.sin(math.radians(15)), math.cos(math.radians(15))])  # the default pitch
     np.testing.assert_allclose(s[8:14], 0, atol=1e-6)  # at rest
     np.testing.assert_allclose(s[14:17], [0, 0, -0.34], atol=1e-6)  # hamster 1 cm above the bottom
@@ -62,7 +62,7 @@ def test_observations_are_the_21_d_state_and_10_d_goal():
     np.testing.assert_array_equal(info["state"], s)
 
 
-def test_yaw_0_faces_plus_y_and_vectors_read_in_the_camera_yaw_frame():
+def test_yaw_0_faces_plus_y_and_vectors_read_in_the_facing_frame():
     env = make(levels=[level(spawn_yaw_deg=90)])
     obs, _ = env.reset(seed=0)
     s = obs["state"]
@@ -125,7 +125,7 @@ def test_truncate_false_runs_past_the_time_limit_with_the_time_penalty():
     assert reward == pytest.approx(-0.001) and obs["goal"][4] == 1  # the goal's fraction remaining ignores the limit
 
 
-def test_camera_action_adds_cam_yaw_and_cam_pitch_turning_at_120_and_90_deg_per_s():
+def test_camera_action_adds_turn_and_cam_pitch_turning_at_120_and_90_deg_per_s():
     env = make(camera_action=True)
     assert env.action_space.shape == (4,)
     env.reset(seed=0)

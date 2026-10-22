@@ -130,9 +130,9 @@ def test_the_attached_region_tilts_with_the_seesaw(kind):
     mujoco.mj_kinematics(m, d)
     drawn = d.geom_xpos[m.geom("survive/region").id]
     assert abs(drawn[0]) > 0.05  # the 0.7 m-high region centre swings off the pivot as the seesaw tips
-    yaw = d.userdata[0]
+    facing = d.userdata[0]
     rel = drawn - d.xpos[SHELL]
-    cam = [rel[0] * math.cos(yaw) + rel[1] * math.sin(yaw), -rel[0] * math.sin(yaw) + rel[1] * math.cos(yaw), rel[2]]
+    cam = [rel[0] * math.cos(facing) + rel[1] * math.sin(facing), -rel[0] * math.sin(facing) + rel[1] * math.cos(facing), rel[2]]
     np.testing.assert_allclose(obs["goal"][:3], cam, atol=1e-5)
 
 

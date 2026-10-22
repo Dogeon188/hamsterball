@@ -19,7 +19,7 @@ FULL, HALF, IDLE = np.array([0.0, 1.0]), np.array([0.0, 0.5]), np.zeros(2)
 
 def new_core():
     core = Core()
-    core.reset(yaw=-math.pi / 2)  # camera forward is +x
+    core.reset(facing=-math.pi / 2)  # camera forward is +x
     return core
 
 

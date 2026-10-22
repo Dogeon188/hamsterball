@@ -38,10 +38,10 @@ class AbstractTier:
         data.qvel[HAM_DOF:HAM_DOF + 6] = 0
         data.userdata[LAST_TOUCH] = data.time
 
-    def obs(self, model, data, yaw):
+    def obs(self, model, data, facing):
         return {"wall_contact": data.time - data.userdata[LAST_TOUCH] <= GRACE}
 
-    def drive(self, model, data, action, yaw):
+    def drive(self, model, data, action, facing):
         """Foot force pair and grip couple into xfrc_applied. Needs fresh xpos/xmat/xipos for the current qpos."""
         cx, cy, cz = data.xpos[SHELL].tolist()
         hx, hy, hz = data.xipos[HAM].tolist()
@@ -57,9 +57,9 @@ class AbstractTier:
         ax, ay = float(action[0]), float(action[1])
         mag = math.hypot(ax, ay)
         e = min(mag, 1.0)
-        if mag > 0:  # camera frame -> world: rotate by the camera yaw
+        if mag > 0:  # camera frame -> world: rotate by the facing
             ax, ay = ax / mag, ay / mag
-            cyw, syw = math.cos(yaw), math.sin(yaw)
+            cyw, syw = math.cos(facing), math.sin(facing)
             ax, ay = ax * cyw - ay * syw, ax * syw + ay * cyw
         sl, cl = math.sin(LEAN * e), math.cos(LEAN * e)
         tx, ty, tz = sl * ax, sl * ay, -cl  # target lean

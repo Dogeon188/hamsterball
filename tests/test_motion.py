@@ -137,7 +137,7 @@ def drift_env(**kw):
 
 
 def track(obs):
-    """Steer the shell's velocity toward the region centre, in the camera yaw frame (tests/test_tasks.py's)."""
+    """Steer the shell's velocity toward the region centre, in the facing frame (tests/test_tasks.py's)."""
     g, v = obs["goal"][:2], obs["state"][8:10]
     want = g / max(np.linalg.norm(g), 1e-9) * min(3.0, np.linalg.norm(g))
     a = want - v
@@ -171,7 +171,7 @@ def test_the_goal_vector_and_drawn_region_follow_the_regions_pose_now():
     region = e.level.tasks["survive"]["region"]
     want = centre(region, t=1.0)
     np.testing.assert_allclose(e.core.data.time, 1.0)
-    np.testing.assert_allclose(obs["goal"][:3], want - obs["state"][:3], atol=1e-5)  # camera yaw is still 0
+    np.testing.assert_allclose(obs["goal"][:3], want - obs["state"][:3], atol=1e-5)  # the facing is still 0
     g = e.core.model.geom("survive/region").id
     np.testing.assert_allclose(e.core.data.geom_xpos[g], want, atol=1e-9)
     yaw = np.arctan2(e.core.data.geom_xmat[g][3], e.core.data.geom_xmat[g][0])

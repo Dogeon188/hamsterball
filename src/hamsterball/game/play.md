@@ -6,8 +6,8 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 
 ## Interface
 
-- `action(keys, left=(0, 0), right=(0, 0), mouse=(0, 0))`: `[run_x, run_y, cam_yaw, cam_pitch]` (camera frame, x right, y forward) from the held key names (`w a s d shift ctrl q e`), the GLFW stick axes (y down), and this frame's `Mouse.move` pair.
-- `Mouse(sens=MOUSE_SENS)`: `move(dx, dy)` turns pixels of motion into this frame's `(cam_yaw, cam_pitch)`; `clear()` drops the carried-over motion on both axes.
+- `action(keys, left=(0, 0), right=(0, 0), mouse=(0, 0))`: `[run_x, run_y, turn, cam_pitch]` (camera frame, x right, y forward) from the held key names (`w a s d shift ctrl q e`), the GLFW stick axes (y down), and this frame's `Mouse.move` pair.
+- `Mouse(sens=MOUSE_SENS)`: `move(dx, dy)` turns pixels of motion into this frame's `(turn, cam_pitch)`; `clear()` drops the carried-over motion on both axes.
 - `Pacer(period, clock=perf_counter, sleep=time.sleep, slack=0.002)`: `wait()` before each env step sleeps to the frame's deadline; `overruns` counts late frames; `reset()` starts a fresh schedule (after a pause or at an episode start).
 - `Flow`: `state` is `"play"`, `"paused"`, `"result"` (then `"menu"` or `"quit"` once left); `end(outcome)` shows the result card; `press(name)` takes `esc`, `enter`, `r`, the pause buttons `resume retry menu quit`, or `close`, and returns the shell's command (`retry`, `next`, `menu`, `quit`) or `None`.
 - `outcome(terminated, truncated, info)`: the result card's headline (`Success`, `Failed: hazard`, `Failed: fell off`, `Failed: left the region`, `Time up`) or `None`.
@@ -15,9 +15,9 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 
 ## How it works
 
-- Keys: WASD sum to a direction, normalised, at effort 0.5; Shift 0.25, Ctrl 1.0, both 0.25. Q gives `cam_yaw` +1 (the yaw rises, so the view turns left), E −1, both 0.
+- Keys: WASD sum to a direction, normalised, at effort 0.5; Shift 0.25, Ctrl 1.0, both 0.25. Q gives `turn` +1 (the facing rises, so the view turns left), E −1, both 0.
 - Sticks: a radial deadzone of 0.15, effort `(m − 0.15) / 0.85` capped at 1. The left stick outside its deadzone replaces the WASD run; the right stick's x outside its deadzone replaces Q/E, right turning right, and its y sets `cam_pitch`, pushing up looking up (GLFW y is down and the pitch is below the horizon, so y passes through unflipped). The right stick's deadzone is per axis, so each axis overrides only its own input. No keys drive the pitch.
-- Mouse: `move(dx, dy)` adds `(−dx, dy) · sens` to a two-axis carry (right turns right, up looks up), returns it clipped to ±1 per axis, and keeps the rest, so a flick turns at the full 120°/s orbit rate (or looks up and down at 90°/s) over as many frames as it takes, each axis on its own. A non-zero mouse yaw overrides the right stick's x and Q/E; a non-zero mouse pitch overrides the right stick's y. With no motion and nothing carried, an axis is 0 and the stick and keys work as before.
+- Mouse: `move(dx, dy)` adds `(−dx, dy) · sens` to a two-axis carry (right turns right, up looks up), returns it clipped to ±1 per axis, and keeps the rest, so a flick turns at the full 120°/s orbit rate (or looks up and down at 90°/s) over as many frames as it takes, each axis on its own. A non-zero mouse turn overrides the right stick's x and Q/E; a non-zero mouse pitch overrides the right stick's y. With no motion and nothing carried, an axis is 0 and the stick and keys work as before.
 - Pacer: deadlines follow an ideal 1/60 s schedule. A `wait` past its deadline by more than `slack` counts an overrun and restarts the schedule at now, so a slow machine slows the game and never bursts steps to catch up; an early `wait` sleeps.
 - Flow is a table `state → {input: (next state, command)}`. Esc toggles pause; R and Enter work only on the result card; `close` quits from anywhere. Leaving by retry, menu, quit, or close before the result is an abandoned run (ticket 12 discards it).
 - HUD progress: waypoint `passed+1 / n` (capped at `n/n` after a win), items and keys `collected / n` (then `keys n/n: reach the goal`), `reach the goal`, survive `limit − t` left. Speed is the shell's world speed (`qvel[0:3]`).
@@ -31,7 +31,7 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 - `progress` and `sim_time` read the env's private `_todo`, `_steps`, and `_max_steps`, to keep env.py untouched while tickets 08, 10, and 14 change it. A public accessor is the fix if a second reader appears.
 - `slack` 2 ms and the deadzone 0.15 need play-test; the slack keeps a late OS wake-up from counting as an overrun.
 - The gamepad has no walk or sprint buttons: the stick's deflection is the effort.
-- **Needs play-test:** `MOUSE_SENS` 0.05 `cam_yaw` per pixel, i.e. 0.1° per pixel (`cam_yaw` 1 turns 2° in one 1/60 s step). A guess from the plan. The pitch shares it: 0.075° per pixel at the 90°/s pitch rate.
+- **Needs play-test:** `MOUSE_SENS` 0.05 `turn` per pixel, i.e. 0.1° per pixel (`turn` 1 turns 2° in one 1/60 s step). A guess from the plan. The pitch shares it: 0.075° per pixel at the 90°/s pitch rate.
 - **Needs play-test:** the right stick's pitch direction (pushing up looks up, not the flight-style inverse); there is no invert option.
 
 ## Decisions
@@ -58,3 +58,4 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 - 2026-10-22, ticket mouse-camera/02: `action` returns 4-D with `cam_pitch` 0, matching the env's camera-flag action.
 - 2026-10-22, ticket mouse-camera/03: the mouse's y and the right stick's y drive `cam_pitch`, test-first; `action` takes `right` and `mouse` as pairs in place of `right_x` and `mouse_cam`.
 - 2026-10-22, code review of mouse-camera: doc wording only: the mouse "looks up and down" at 90°/s (was "tilts"; tilt is a mover's rocking in GLOSSARY.md).
+- 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): the action dim `cam_yaw` is `turn`.

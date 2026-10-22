@@ -5,7 +5,7 @@ import math
 import mujoco
 import numpy as np
 
-from .model import PITCH, PITCH_DEFAULT, SHELL, YAW
+from .model import FACING, PITCH, PITCH_DEFAULT, SHELL
 
 VIEWS = ("chase", "follow", "first_person")
 
@@ -19,7 +19,7 @@ FRAGMENT = "\n".join(f'<body name="view_{v}" mocap="true"><camera name="{v}" fov
 
 
 def _quat(yaw, pitch):
-    """Orientation of a camera facing yaw `yaw` (0 = +y, as the camera yaw) tilted `pitch` below the horizon.
+    """Orientation of a camera facing yaw `yaw` (0 = +y, as the facing) tilted `pitch` below the horizon.
 
     A MuJoCo camera looks along its -z with +y up.
     """
@@ -35,12 +35,12 @@ def _quat(yaw, pitch):
 
 def pose(model, data, follow_yaw):
     """Pose the view mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the cameras."""
-    yaw, pitch = float(data.userdata[YAW]), float(data.userdata[PITCH])
+    facing, pitch = float(data.userdata[FACING]), float(data.userdata[PITCH])
     c = data.xpos[SHELL]
     for v, at, yw, p, dist in (
-        ("chase", c, yaw, pitch, CHASE_DIST),
+        ("chase", c, facing, pitch, CHASE_DIST),
         ("follow", c, follow_yaw, FOLLOW_PITCH, FOLLOW_DIST),
-        ("first_person", data.site("hamster_eye").xpos, yaw, pitch - PITCH_DEFAULT, 0.0),  # level at the default
+        ("first_person", data.site("hamster_eye").xpos, facing, pitch - PITCH_DEFAULT, 0.0),  # level at the default
     ):
         mocap = model.body_mocapid[model.body(f"view_{v}").id]
         q, fwd = _quat(yw, p)

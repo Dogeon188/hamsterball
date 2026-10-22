@@ -175,7 +175,7 @@ def spiral_walk(obs, walk):
     if np.linalg.norm(pts[i] - p) < 0.4:
         walk[1] = i = i + 1
     w = pts[i] - p
-    g = np.array([w[0] * cy + w[1] * sy, -w[0] * sy + w[1] * cy])  # world -> camera yaw frame, as the goal vector
+    g = np.array([w[0] * cy + w[1] * sy, -w[0] * sy + w[1] * cy])  # world -> facing frame, as the goal vector
     a = g / max(np.linalg.norm(g), 1e-9) * 2.0 - obs["state"][8:10]
     return (a / max(1.0, np.linalg.norm(a))).astype(np.float32)
 

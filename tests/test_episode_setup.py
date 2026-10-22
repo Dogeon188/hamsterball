@@ -201,4 +201,4 @@ def test_discrete_action_is_a_no_op_plus_8_directions_by_3_efforts():
     env.reset(seed=0)
     env.step(17)
     cam = DiscreteAction(gym.make("HamsterballReachGoal-v1", camera_action=True))
-    np.testing.assert_allclose(cam.action(1), [0, 0.25, 0, 0], atol=1e-7)  # cam_yaw and cam_pitch held at 0
+    np.testing.assert_allclose(cam.action(1), [0, 0.25, 0, 0], atol=1e-7)  # turn and cam_pitch held at 0

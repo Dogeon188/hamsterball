@@ -15,15 +15,15 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 
 ## How it works
 
-- `chase`: `CHASE_DIST` back from the shell centre along the camera yaw, pitched down by the camera pitch (`userdata[PITCH]`, see [step.md](step.md)), looking at the shell centre.
-- `follow`: the same construction at `FOLLOW_DIST` and `FOLLOW_PITCH`, with the level's `follow_yaw_deg` in place of the camera yaw.
-- `first_person`: at the `hamster_eye` site, facing the camera yaw, pitched by the camera pitch minus `PITCH_DEFAULT`, so level with the horizon at the default.
-- A MuJoCo camera looks along its −z with +y up, so the mocap's rotation matrix has columns right, up, −forward, with forward `(−sin yaw·cos pitch, cos yaw·cos pitch, −sin pitch)` (yaw 0 faces +y, as the camera yaw frame).
+- `chase`: `CHASE_DIST` back from the shell centre along the facing, pitched down by the camera pitch (`userdata[PITCH]`, see [step.md](step.md)), looking at the shell centre.
+- `follow`: the same construction at `FOLLOW_DIST` and `FOLLOW_PITCH`, with the level's `follow_yaw_deg` in place of the facing.
+- `first_person`: at the `hamster_eye` site, looking along the facing, pitched by the camera pitch minus `PITCH_DEFAULT`, so level with the horizon at the default.
+- A MuJoCo camera looks along its −z with +y up, so the mocap's rotation matrix has columns right, up, −forward, with forward `(−sin yaw·cos pitch, cos yaw·cos pitch, −sin pitch)` (yaw 0 faces +y, as the facing frame).
 
 ## Invariants and checks
 
 - The mocaps carry no geoms, so they add no mass or contacts and never change a trajectory. They do add 21 numbers (`mocap_pos`, `mocap_quat`) to the core state, so the env poses them every env step, views or not, and `core_state` doesn't depend on the `views` kwarg.
-- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the camera yaw and pitched by the camera pitch (the follow view not), follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720.
+- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the facing and pitched by the camera pitch (the follow view not), follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720.
 
 ## Known quirks
 
@@ -61,3 +61,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, user play-test request: waypoints after the next render in the locked grey, renamed `LOCKED_RGBA` (was `LOCKED_GOAL_RGBA`).
 - 2026-10-22, ticket mouse-camera/02: `CHASE_PITCH` is gone; the chase view reads the camera pitch from the core state, and the first-person view tilts by it minus its 15° default (the old chase pitch), so neither view changes at the default. The follow view keeps `FOLLOW_PITCH`.
 - 2026-10-22, code review of mouse-camera: `PITCH_DEFAULT` comes from `model.py` (was `step.py`), so this module imports only from `model.py`. No behaviour change.
+- 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): `pose` reads the facing from `userdata[FACING]`.

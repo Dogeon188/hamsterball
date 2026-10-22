@@ -21,7 +21,7 @@ from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TA
                          body_frame)
 from .core.marker import centre, crosses
 from .core.motion import pose, quat
-from .core.model import DT, HAM, PITCH, SHELL, SHELL_DOF, SHELL_QPOS, YAW
+from .core.model import DT, HAM, FACING, PITCH, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
 
@@ -322,10 +322,10 @@ class HamsterballEnv(gym.Env):
         mujoco.mj_subtreeVel(m, d)
         # posed even without views, so core_state (which holds the mocap poses) doesn't depend on the views kwarg
         V.pose(m, d, math.radians(self.level.follow_yaw_deg))
-        yaw = float(d.userdata[YAW])
-        cy, sy = math.cos(yaw), math.sin(yaw)
+        facing = float(d.userdata[FACING])
+        cy, sy = math.cos(facing), math.sin(facing)
 
-        def cam(v):  # world -> camera yaw frame: rotate by -yaw about z
+        def cam(v):  # world -> facing frame: rotate by -facing about z
             return v[0] * cy + v[1] * sy, -v[0] * sy + v[1] * cy, v[2]
 
         c = d.xpos[SHELL]
@@ -344,7 +344,7 @@ class HamsterballEnv(gym.Env):
                 *cam(w_shell),
                 *cam(d.subtree_com[HAM] - c),
                 *cam(d.subtree_linvel[HAM] - v_shell),
-                float(self.core.tier.obs(m, d, yaw)["wall_contact"]),
+                float(self.core.tier.obs(m, d, facing)["wall_contact"]),
             ],
             np.float32,
         )
@@ -405,7 +405,7 @@ class HamsterballEnv(gym.Env):
 class DiscreteAction(gym.ActionWrapper):
     """Spec §5: action 0 is a no-op; 1 + 8·e + k runs toward k·45° clockwise from camera forward at effort EFFORTS[e].
 
-    Under the camera flag, cam_yaw and cam_pitch stay 0.
+    Under the camera flag, turn and cam_pitch stay 0.
     """
 
     EFFORTS = (0.25, 0.5, 1.0)

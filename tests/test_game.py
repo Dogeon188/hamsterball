@@ -24,7 +24,7 @@ def test_shift_walks_ctrl_sprints_both_walk():
 
 
 def test_q_turns_left_e_turns_right():
-    # +cam_yaw raises the yaw, turning camera forward from +y toward -x: left
+    # +turn raises the facing, turning camera forward from +y toward -x: left
     assert action({"q"})[2] == 1
     assert action({"e"})[2] == -1
     assert action({"q", "e"})[2] == 0
@@ -38,7 +38,7 @@ def test_left_stick_deadzone_rescales_effort_and_overrides_keys():
     np.testing.assert_allclose(action(set(), left=(2.0, 0.0)), [1.0, 0, 0, 0])  # capped at effort 1
 
 
-def test_right_stick_x_sets_cam_yaw_and_overrides_q_e():
+def test_right_stick_x_sets_turn_and_overrides_q_e():
     assert action({"q"}, right=(0.1, 0.0))[2] == 1  # inside the deadzone
     assert action({"q"}, right=(1.0, 0.0))[2] == pytest.approx(-1.0)  # right stick right turns right
     assert action(set(), right=(-0.575, 0.0))[2] == pytest.approx(0.5)
@@ -65,7 +65,7 @@ def test_mouse_up_looks_up_and_each_axis_carries_on_its_own():
     # screen y is down; the pitch is below the horizon, so moving up (dy < 0) lowers it
     assert [m.move(0, dy)[1] for dy in (-15, 0, 0)] == pytest.approx([-1, -0.5, 0])
     assert [m.move(d, 0) for d in (25, 0)] == [pytest.approx((-1, 0)), pytest.approx((-1, 0))]
-    assert m.move(0, 25) == pytest.approx((-0.5, 1))  # the yaw carry spends on while the pitch's starts
+    assert m.move(0, 25) == pytest.approx((-0.5, 1))  # the turn carry spends on while the pitch's starts
 
 
 def test_mouse_motion_overrides_only_its_own_stick_axis_and_keys():

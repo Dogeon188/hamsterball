@@ -1,7 +1,7 @@
-"""The core step (spec §4): camera yaw, shell drag, containment, then the tier's drive, once per physics step.
+"""The core step (spec §4): facing, shell drag, containment, then the tier's drive, once per physics step.
 
 Every per-step function is a pure function of model and data fields plus the action (and a level's constant body
-motions). All state lives in time, qpos, qvel and userdata (the core's slots, `model.YAW` first, then the tier's, then
+motions). All state lives in time, qpos, qvel and userdata (the core's slots, `model.FACING` first, then the tier's, then
 a level's collapsing tiles'), so one mj_getState(mjSTATE_INTEGRATION) vector is the core state.
 """
 
@@ -16,13 +16,13 @@ from .abstract_tier import AbstractTier
 from .level import Level
 from .motion import pose, quat
 from .model import (CORE_SLOTS, DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF,
-                    SHELL_QPOS, PITCH, PITCH_DEFAULT, YAW, build)
+                    SHELL_QPOS, FACING, PITCH, PITCH_DEFAULT, build)
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
 CHASE_ALPHA = 1 - math.exp(-DT / 0.55)  # chase yaw, tau 0.55 s
 CHASE_MIN_SPEED2 = 0.8 ** 2  # (m/s)^2, horizontal shell speed below which the chase yaw holds
-ORBIT_RATE = math.radians(120)  # rad/s at cam_yaw = 1
+ORBIT_RATE = math.radians(120)  # rad/s at turn = 1
 # camera pitch, below the horizon; needs play-test (see step.md)
 PITCH_MIN, PITCH_MAX = math.radians(-10), math.radians(60)  # PITCH_DEFAULT is in model.py
 PITCH_RATE = math.radians(90)  # rad/s at cam_pitch = 1
@@ -70,8 +70,8 @@ class Tier(Protocol):
 
     def action_space(self) -> gym.spaces.Box: ...
     def reset(self, model, data, spawn) -> None: ...
-    def drive(self, model, data, action, yaw: float) -> None: ...
-    def obs(self, model, data, yaw: float) -> dict: ...
+    def drive(self, model, data, action, facing: float) -> None: ...
+    def obs(self, model, data, facing: float) -> dict: ...
 
 
 def wrap(a):
@@ -80,15 +80,15 @@ def wrap(a):
     return math.pi if a == -math.pi else a
 
 
-def camera_yaw(data, cam):
-    """Turn toward the shell's direction of travel, add the orbit input, store and return the yaw."""
-    yaw = data.userdata[YAW]
+def turn_facing(data, turn):
+    """Turn toward the shell's direction of travel, add the turn input, store and return the facing."""
+    facing = data.userdata[FACING]
     vx, vy = data.qvel[SHELL_DOF], data.qvel[SHELL_DOF + 1]
     if vx * vx + vy * vy > CHASE_MIN_SPEED2:
-        yaw += CHASE_ALPHA * wrap(math.atan2(-vx, vy) - yaw)
-    yaw = wrap(yaw + ORBIT_RATE * cam * DT)
-    data.userdata[YAW] = yaw
-    return yaw
+        facing += CHASE_ALPHA * wrap(math.atan2(-vx, vy) - facing)
+    facing = wrap(facing + ORBIT_RATE * turn * DT)
+    data.userdata[FACING] = facing
+    return facing
 
 
 def camera_pitch(data, cam):
@@ -195,8 +195,8 @@ def touch_tiles(model, data, tiles):
             data.userdata[slot + i] = data.time
 
 
-def physics_step(model, data, tier, action, cam_yaw, cam_pitch, bodies=(), tiles=None):
-    """One physics step. action is the tier's part; cam_yaw and cam_pitch are the orbit and pitch inputs in [-1, 1];
+def physics_step(model, data, tier, action, turn, cam_pitch, bodies=(), tiles=None):
+    """One physics step. action is the tier's part; turn and cam_pitch are the turn and pitch inputs in [-1, 1];
     bodies as `drive_bodies`, tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
@@ -204,11 +204,11 @@ def physics_step(model, data, tier, action, cam_yaw, cam_pitch, bodies=(), tiles
     # mj_step leaves positions computed for the state before it, so refresh them: the step then reads only the state
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
-    yaw = camera_yaw(data, cam_yaw)
+    facing = turn_facing(data, turn)
     camera_pitch(data, cam_pitch)
     drag(data)
     contain(model, data, tier.resting_radius)
-    tier.drive(model, data, action, yaw)
+    tier.drive(model, data, action, facing)
     mujoco.mj_step(model, data)
     touch_tiles(model, data, tiles)
 
@@ -247,23 +247,23 @@ class Core:
         box = self.tier.action_space()
         if not self.camera_action:
             return box
-        low, high = np.append(box.low, [-1, -1]), np.append(box.high, [1, 1])  # cam_yaw, cam_pitch
+        low, high = np.append(box.low, [-1, -1]), np.append(box.high, [1, 1])  # turn, cam_pitch
         return gym.spaces.Box(low.astype(box.dtype), high.astype(box.dtype), dtype=box.dtype)
 
     @property
-    def yaw(self):
-        return float(self.data.userdata[YAW])
+    def facing(self):
+        return float(self.data.userdata[FACING])
 
     @property
     def pitch(self):
         return float(self.data.userdata[PITCH])
 
-    def reset(self, spawn=(0.0, 0.0, R), yaw=0.0):
+    def reset(self, spawn=(0.0, 0.0, R), facing=0.0):
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
         self.tier.reset(m, d, spawn)
-        d.userdata[YAW], d.userdata[PITCH] = yaw, PITCH_DEFAULT
+        d.userdata[FACING], d.userdata[PITCH] = facing, PITCH_DEFAULT
         if self.tiles:
             d.userdata[self.tiles.slot:] = math.inf  # untouched
         drive_bodies(d, self.bodies)
@@ -273,11 +273,11 @@ class Core:
     def step(self, action, n=FRAME_SKIP):
         """Hold one action over n physics steps."""
         m, d, tier = self.model, self.data, self.tier
-        cam_yaw = cam_pitch = 0.0
+        turn = cam_pitch = 0.0
         if self.camera_action:
-            action, cam_yaw, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
+            action, turn, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
         for _ in range(n):
-            physics_step(m, d, tier, action, cam_yaw, cam_pitch, self.bodies, self.tiles)
+            physics_step(m, d, tier, action, turn, cam_pitch, self.bodies, self.tiles)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))

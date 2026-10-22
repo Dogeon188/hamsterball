@@ -19,7 +19,7 @@ SHELL, HAM = 1, 2
 SHELL_QPOS, HAM_QPOS = 0, 7
 SHELL_DOF, HAM_DOF = 0, 6
 # The core's userdata slots; the tier's follow them, then a level's collapsing tiles'.
-YAW, PITCH = 0, 1
+FACING, PITCH = 0, 1
 CORE_SLOTS = 2
 PITCH_DEFAULT = math.radians(15)  # the camera pitch at reset, below the horizon; see step.md
 

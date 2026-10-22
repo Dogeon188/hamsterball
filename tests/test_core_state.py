@@ -28,12 +28,12 @@ def test_setting_a_stored_core_state_reproduces_the_run_bit_for_bit():
     replay = Core(camera_action=True)
     replay.set_state(states[49])
     assert np.array_equal(drive(replay, 50, 120)[-1], states[-1])
-    # yaw, pitch and the airborne-cut timer ride along in the state
-    assert replay.yaw == core.yaw != 0
+    # facing, pitch and the airborne-cut timer ride along in the state
+    assert replay.facing == core.facing != 0
     assert replay.pitch == core.pitch != Core().pitch
 
 
-def test_camera_flag_appends_cam_yaw_and_cam_pitch_to_the_tier_action_space():
+def test_camera_flag_appends_turn_and_cam_pitch_to_the_tier_action_space():
     assert Core().action_space.shape == (2,)
     space = Core(camera_action=True).action_space
     assert space.shape == (4,) and (space.low == -1).all() and (space.high == 1).all()

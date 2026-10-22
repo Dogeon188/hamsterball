@@ -2,18 +2,18 @@
 
 ## Purpose
 
-The core step of spec §4: the per-physics-step code (camera yaw, shell drag, containment, the tier's drive) around `mj_step`, the `Tier` protocol of spec §6, and `Core`, which holds a compiled model and its data.
+The core step of spec §4: the per-physics-step code (facing, shell drag, containment, the tier's drive) around `mj_step`, the `Tier` protocol of spec §6, and `Core`, which holds a compiled model and its data.
 
 ## Interface
 
 - `Core(tier=None, level=FLAT, camera_action=False, view_size=GAME_SIZE)`: compiles the model (`view_size` sizes its offscreen buffer, see [model.md](model.md)) (default tier: `AbstractTier`) and resets. `level` is a `Level` (its kinematic bodies compiled and driven) or MJCF as `model.build` takes it, such as `Level.mjcf()` (no bodies). `Core.bodies` holds a `Body(qpos, dof, pos, motion)` NamedTuple per body, constants; a seesaw's motion is `None` and its addresses are its joint's. `Core.tiles` is `None`, or `Tiles(slot, body, delay, tiles)` for a level's collapsing tiles (the first trigger-time slot, the first tile's body id, and a `Tile(qpos, dof, pos, bottom)` per tile), constants.
-- `Core.reset(spawn=(0, 0, 0.5), yaw=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.yaw`, `Core.pitch`, `Core.action_space` (the tier's, plus `cam_yaw` and `cam_pitch` under the camera flag).
-- `physics_step(model, data, tier, action, cam_yaw, cam_pitch, bodies=(), tiles=None)` and its parts `drive_bodies`, `drive_tiles`, `touch_tiles`, `camera_yaw`, `camera_pitch`, `drag`, `contain`, `wrap`.
+- `Core.reset(spawn=(0, 0, 0.5), facing=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.facing`, `Core.pitch`, `Core.action_space` (the tier's, plus `turn` and `cam_pitch` under the camera flag).
+- `physics_step(model, data, tier, action, turn, cam_pitch, bodies=(), tiles=None)` and its parts `drive_bodies`, `drive_tiles`, `touch_tiles`, `turn_facing`, `camera_pitch`, `drag`, `contain`, `wrap`.
 - `Tier`: `fragment`, `nuserdata`, `resting_radius`, `action_space()`, `reset()`, `drive()`, `obs()`. The core touches a tier only through these.
 
 ## How it works
 
-Each physics step: clear `xfrc_applied`; pose the kinematic bodies (`drive_bodies`) and the collapsing tiles (`drive_tiles`); refresh positions (`mj_kinematics`, `mj_comPos`); camera yaw into `userdata[YAW]`; camera pitch into `userdata[PITCH]` (`clip(pitch + PITCH_RATE·cam_pitch·DT, PITCH_MIN, PITCH_MAX)`, read only by the views, so it moves no physics); drag `−k|v|v` on the shell; containment on the hamster root's free joint (an inelastic impulse from 5 mm past the resting radius, a position stop and `mj_forward` past 20 mm); `tier.drive()`; `mj_step`; record the tiles the shell touched (`touch_tiles`).
+Each physics step: clear `xfrc_applied`; pose the kinematic bodies (`drive_bodies`) and the collapsing tiles (`drive_tiles`); refresh positions (`mj_kinematics`, `mj_comPos`); facing into `userdata[FACING]`; camera pitch into `userdata[PITCH]` (`clip(pitch + PITCH_RATE·cam_pitch·DT, PITCH_MIN, PITCH_MAX)`, read only by the views, so it moves no physics); drag `−k|v|v` on the shell; containment on the hamster root's free joint (an inelastic impulse from 5 mm past the resting radius, a position stop and `mj_forward` past 20 mm); `tier.drive()`; `mj_step`; record the tiles the shell touched (`touch_tiles`).
 
 The position refresh is what makes the core state complete. `mj_step` leaves `xpos` and friends computed for the state before it, so code that read them directly would depend on the previous step, and a restored state would step differently. Refreshing costs two cheap kinematics passes and means every step reads only `qpos`, `qvel`, `userdata`, and `time`.
 
@@ -83,3 +83,4 @@ See the prototype's doc for containment by solimp, a spring-damper field, and a 
 - 2026-10-22, ticket mouse-camera/02 (prefactor, no behaviour change): the core's userdata slots are named in `model.py` (`YAW`, `CORE_SLOTS`); the per-step code reads the yaw at `YAW`, and the tiles' first slot is `CORE_SLOTS + tier.nuserdata`.
 - 2026-10-22, ticket mouse-camera/02: `CORE_SLOTS` = 2 with `PITCH` = 1; under the camera flag `Core.step` splits `[cam_yaw, cam_pitch]` off the action, and `camera_pitch` integrates and clamps the pitch each physics step after the yaw. `Core.reset` sets it to `PITCH_DEFAULT`. The core state grows by one number (110 → 111 on a level without bodies). Two runs that differ only in `cam_pitch` have identical qpos, qvel and time.
 - 2026-10-22, code review of mouse-camera: `physics_step` takes `cam_yaw, cam_pitch` side by side (was `cam, bodies=(), tiles=None, cam_pitch=0.0`); `PITCH_DEFAULT` moved to `model.py`, the other pitch constants stay here. No behaviour change.
+- 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): the userdata slot `YAW` is `FACING`, `Core.yaw` is `Core.facing`, `Core.reset` takes `facing=`, `camera_yaw` is `turn_facing`, and the action dim `cam_yaw` is `turn`.

@@ -12,7 +12,7 @@ from ..core.model import DT
 
 DEADZONE = 0.15  # radial, both sticks
 WALK, RUN, SPRINT = 0.25, 0.5, 1.0
-MOUSE_SENS = 0.05  # cam_yaw per pixel: 0.1 deg/px, since cam_yaw 1 turns 2 deg in one env step
+MOUSE_SENS = 0.05  # turn per pixel: 0.1 deg/px, since turn 1 turns 2 deg in one env step
 
 
 def _stick(m):
@@ -21,7 +21,7 @@ def _stick(m):
 
 
 class Mouse:
-    """Mouse motion to (cam_yaw, cam_pitch): right turns right and up looks up, each at most ±1 per frame; the rest
+    """Mouse motion to (turn, cam_pitch): right turns right and up looks up, each at most ±1 per frame; the rest
     carries to later frames, each axis on its own."""
 
     def __init__(self, sens=MOUSE_SENS):
@@ -33,7 +33,7 @@ class Mouse:
         self.carry = np.zeros(2)
 
     def move(self, dx, dy):
-        """This frame's (cam_yaw, cam_pitch) from (dx, dy) pixels of motion plus what's carried. Screen y is down and
+        """This frame's (turn, cam_pitch) from (dx, dy) pixels of motion plus what's carried. Screen y is down and
         the pitch is below the horizon, so dy adds to it as is."""
         self.carry += np.array([-dx, dy]) * self.sens
         cam = np.clip(self.carry, -1.0, 1.0)
@@ -47,12 +47,12 @@ def _axis(v):
 
 
 def action(keys, left=(0.0, 0.0), right=(0.0, 0.0), mouse=(0.0, 0.0)):
-    """The 4-D action [run_x, run_y, cam_yaw, cam_pitch] (camera frame: x right, y forward) from held keys, stick
+    """The 4-D action [run_x, run_y, turn, cam_pitch] (camera frame: x right, y forward) from held keys, stick
     axes, and this frame's Mouse.move value.
 
     keys: names held, from {"w", "a", "s", "d", "shift", "ctrl", "q", "e"}. Sticks are GLFW axes (y down).
     A stick outside its deadzone overrides the keys it stands for; non-zero mouse motion on an axis overrides that
-    axis of the right stick (and Q/E for the yaw). No keys drive the pitch.
+    axis of the right stick (and Q/E for the turn). No keys drive the pitch.
     """
     m = math.hypot(*left)
     if m > DEADZONE:
