@@ -29,6 +29,7 @@ lerobot = [
 hamsterball-play = "hamsterball.game.window:main"
 hamsterball-bench = "hamsterball.bench:main"
 hamsterball-baseline = "hamsterball.baseline:main"
+hamsterball-data = "hamsterball.datacli:main"
 
 [dependency-groups]
 dev = ["pytest"]
