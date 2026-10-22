@@ -18,12 +18,12 @@ The abstract control tier of spec §5: the hamster is one 2.4 kg sphere, and a r
 
 ## How it works
 
-`drive()` follows spec §5 step by step, in hand-written scalar maths: the wall gap over the 320 tile normals (one NumPy mat-vec), the target lean `sin(70°·e)·d + cos(70°·e)·down`, the PD foot force with its normal part removed and its size capped, the pair applied at the foot as forces plus torques about each centre of mass, and the grip couple on the world-frame angular velocities. Velocities come straight from the free joints' `qvel`; positions from `xpos`, `xipos`, and `xmat`, which the core refreshes before calling it.
+`drive()` follows spec §5 step by step, in hand-written scalar maths: the wall gap over the 320 tile normals (one NumPy mat-vec), the effort scaled by direction (`k = u_y²·(1 or BACK) + u_x²·SIDE` in the facing frame, `SIDE = 0.7`, `BACK = 0.5`), the target lean `sin(70°·e)·d + cos(70°·e)·down`, the PD foot force with its normal part removed and its size capped, the pair applied at the foot as forces plus torques about each centre of mass, and the grip couple on the world-frame angular velocities. Velocities come straight from the free joints' `qvel`; positions from `xpos`, `xipos`, and `xmat`, which the core refreshes before calling it.
 
 ## Invariants and checks
 
 - The pair adds no net force and no net torque about any point.
-- `uv run pytest tests/test_feel.py` checks the §5 feel reference.
+- `uv run pytest tests/test_feel.py` checks the §5 feel reference, and that running sideways and backward leans less than forward (measured 53.9° / 36.2° / 25.2° at full effort).
 
 ## Known quirks
 
@@ -35,6 +35,7 @@ The abstract control tier of spec §5: the hamster is one 2.4 kg sphere, and a r
 
 - 2026-10-21, issue 13 verdict (play-tested 2026-10-20), recorded in `prototypes/honest_drive.md` on `prototype/honest-physics`: `foot+grip` pair, 2.4 / 0.8 kg, 70° lean ceiling, no feed-forward, gains and cap scaled by hamster mass.
 - 2026-10-21, issue 16: the constants hold at 1/600 s unchanged.
+- 2026-10-23, user request on `mouse-camera`: running backward and sideways drives with less torque than forward. The effort, and so the target lean, scales by 0.5 backward and 0.7 sideways, blended by cos²/sin² so the scale is continuous in direction. Scaling the effort over `F_MAX`, because the lean sets the steady torque and the cap only the catch-up push.
 
 ## Tried and rejected
 
@@ -47,3 +48,4 @@ See the prototype's doc (`prototypes/honest_drive.md`, branch `prototype/honest-
 - 2026-10-22, ticket mouse-camera/02 (prefactor, no behaviour change): the core's userdata slots are named in `model.py` (`YAW`, `CORE_SLOTS`); `LAST_TOUCH` is `CORE_SLOTS`, not a literal 1.
 - 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): `drive` and `obs` take `facing` (was `yaw`).
 - 2026-10-23, code review of mouse-camera tickets 04–05 (no behaviour change): the Interface named `drive` and `obs`'s last argument `yaw`; it reads `facing`, as the code has since the rename.
+- 2026-10-23, `mouse-camera`: direction-scaled effort (Decisions, 2026-10-23); forward is unchanged, so the §5 feel rows hold.

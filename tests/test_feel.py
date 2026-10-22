@@ -120,3 +120,15 @@ def test_drive_feels_like_the_play_tested_prototype(feel, key, expected):
 @pytest.mark.parametrize("vr, expected_mm", [(0, 14), (4, 17), (8, 20), (12, 23)])
 def test_containment_holds_a_thrown_hamster_like_the_prototype(feel, vr, expected_mm):
     assert feel[f"sink{vr}"] * 1000 == pytest.approx(expected_mm, abs=1.5)
+
+
+def test_backward_and_sideways_lean_less_than_forward():
+    def mean_lean(action):
+        core = new_core()
+        leans = []
+        run(core, 3.0, np.array(action), lambda: core.data.time > 2.0 and leans.append(lean_deg(core)))
+        return float(np.mean(leans))
+
+    forward, side, back = mean_lean([0.0, 1.0]), mean_lean([1.0, 0.0]), mean_lean([0.0, -1.0])
+    print(round(forward, 1), round(side, 1), round(back, 1))
+    assert back < side < forward - 5

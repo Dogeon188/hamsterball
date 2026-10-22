@@ -13,6 +13,7 @@ S = M_HAM / 2.0  # gains below are per 2 kg of hamster
 KP, KD, F_MAX = 200.0 * S, 28.0 * S, 30.0 * S
 K_GRIP = 2.0 * S  # N m s/rad: damps hamster spin relative to the shell
 LEAN = math.radians(70)  # lean ceiling at full effort
+SIDE, BACK = 0.7, 0.5  # effort scale running sideways and backward; forward is 1, between blends by cos^2/sin^2
 TOUCH = 0.002 + 0.003  # wall gap (m) that counts as touching: the 2 mm margin + 3 mm
 GRACE = 0.045  # s after the last touch before the foot force cuts out
 LAST_TOUCH = CORE_SLOTS  # userdata slot, the first after the core's
@@ -59,6 +60,7 @@ class AbstractTier:
         e = min(mag, 1.0)
         if mag > 0:  # camera frame -> world: rotate by the facing
             ax, ay = ax / mag, ay / mag
+            e *= ay * ay * (1.0 if ay >= 0 else BACK) + ax * ax * SIDE
             cyw, syw = math.cos(facing), math.sin(facing)
             ax, ay = ax * cyw - ay * syw, ax * syw + ay * cyw
         sl, cl = math.sin(LEAN * e), math.cos(LEAN * e)
