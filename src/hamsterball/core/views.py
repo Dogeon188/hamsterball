@@ -16,11 +16,12 @@ FOVY = {"chase": 60, "follow": 50, "first_person": 75}  # vertical, degrees
 TAIL_OFFSET, TAIL_LEN, TAIL_R = 0.13, 0.17, 0.06  # m: base behind the hamster centre, cone length, base radius
 TAIL_RGBA = ".35 .18 .08 1"
 
-# Mocap bodies with no geoms: no mass and no contacts, so they never touch the physics.
+# A mocap body per view, holding only its camera: no mass and no contacts, so they never touch the physics.
 FRAGMENT = "\n".join(f'<body name="view_{v}" mocap="true"><camera name="{v}" fovy="{FOVY[v]}"/></body>' for v in VIEWS)
 # The tail: a cone (a mesh, as MuJoCo has no cone primitive) along its body's -y, base at the origin. A mocap body,
 # massless and contactless like the views; group 2, the hamster's, so first person hides it.
-_RING = " ".join(f"{TAIL_R * math.cos(a)!r} 0 {TAIL_R * math.sin(a)!r}" for a in np.linspace(0, 2 * math.pi, 8, endpoint=False))
+_RING = " ".join(f"{TAIL_R * math.cos(a)!r} 0 {TAIL_R * math.sin(a)!r}"
+                 for a in np.linspace(0, 2 * math.pi, 8, endpoint=False))
 ASSET = f'<asset><mesh name="tail" vertex="{_RING} 0 {-TAIL_LEN} 0"/></asset>'
 FRAGMENT += (f'\n<body name="tail" mocap="true"><geom name="tail" type="mesh" mesh="tail" mass="0" contype="0" '
              f'conaffinity="0" group="2" rgba="{TAIL_RGBA}"/></body>')
@@ -42,7 +43,8 @@ def _quat(yaw, pitch):
 
 
 def pose(model, data, follow_yaw):
-    """Pose the view and tail mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the cameras."""
+    """Pose the view and tail mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the
+    cameras."""
     facing, pitch = float(data.userdata[FACING]), float(data.userdata[PITCH])
     c = data.xpos[SHELL]
     for v, at, yw, p, dist in (

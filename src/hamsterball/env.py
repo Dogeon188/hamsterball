@@ -325,7 +325,7 @@ class HamsterballEnv(gym.Env):
         facing = float(d.userdata[FACING])
         cy, sy = math.cos(facing), math.sin(facing)
 
-        def cam(v):  # world -> facing frame: rotate by -facing about z
+        def to_facing(v):  # world -> facing frame: rotate by -facing about z
             return v[0] * cy + v[1] * sy, -v[0] * sy + v[1] * cy, v[2]
 
         c = d.xpos[SHELL]
@@ -340,10 +340,10 @@ class HamsterballEnv(gym.Env):
                 cy,
                 math.sin(d.userdata[PITCH]),
                 math.cos(d.userdata[PITCH]),
-                *cam(v_shell),
-                *cam(w_shell),
-                *cam(d.subtree_com[HAM] - c),
-                *cam(d.subtree_linvel[HAM] - v_shell),
+                *to_facing(v_shell),
+                *to_facing(w_shell),
+                *to_facing(d.subtree_com[HAM] - c),
+                *to_facing(d.subtree_linvel[HAM] - v_shell),
                 float(self.core.tier.obs(m, d, facing)["wall_contact"]),
             ],
             np.float32,
@@ -351,7 +351,7 @@ class HamsterballEnv(gym.Env):
         goal = np.zeros(10, np.float32)
         goal[5 + TASKS.index(self.task)] = 1
         if not self._success:
-            goal[:3] = cam(self._target(c) - c)
+            goal[:3] = to_facing(self._target(c) - c)
             goal[3] = 1  # active target
             # fraction remaining; survive's is time left over the time limit, in env steps
             goal[4] = 1 - self._steps / self._max_steps if self.task == "survive" else len(self._todo) / self._n_targets

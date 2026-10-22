@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from hamsterball.game.play import PITCH, TURN, Mouse, action
+from hamsterball.game.play import STICK_PITCH, STICK_TURN, Mouse, action
 
 
 def test_keys_run_in_the_camera_frame_at_half_effort():
@@ -25,8 +25,8 @@ def test_shift_walks_ctrl_sprints_both_walk():
 
 def test_q_turns_left_e_turns_right():
     # +turn raises the facing, turning camera forward from +y toward -x: left
-    assert action({"q"})[2] == pytest.approx(TURN)
-    assert action({"e"})[2] == pytest.approx(-TURN)
+    assert action({"q"})[2] == pytest.approx(STICK_TURN)
+    assert action({"e"})[2] == pytest.approx(-STICK_TURN)
     assert action({"q", "e"})[2] == 0
 
 
@@ -39,16 +39,16 @@ def test_left_stick_deadzone_rescales_effort_and_overrides_keys():
 
 
 def test_right_stick_x_sets_turn_and_overrides_q_e():
-    assert action({"q"}, right=(0.1, 0.0))[2] == pytest.approx(TURN)  # inside the deadzone
-    assert action({"q"}, right=(1.0, 0.0))[2] == pytest.approx(-TURN)  # right stick right turns right
-    assert action(set(), right=(-0.575, 0.0))[2] == pytest.approx(0.5 * TURN)
+    assert action({"q"}, right=(0.1, 0.0))[2] == pytest.approx(STICK_TURN)  # inside the deadzone
+    assert action({"q"}, right=(1.0, 0.0))[2] == pytest.approx(-STICK_TURN)  # right stick right turns right
+    assert action(set(), right=(-0.575, 0.0))[2] == pytest.approx(0.5 * STICK_TURN)
 
 
 def test_right_stick_y_sets_cam_pitch_up_looks_up():
-    assert action(set(), right=(0.0, -1.0))[3] == pytest.approx(-PITCH)  # GLFW y down: pushed up lowers the pitch
-    assert action(set(), right=(0.0, 0.575))[3] == pytest.approx(0.5 * PITCH)
+    assert action(set(), right=(0.0, -1.0))[3] == pytest.approx(-STICK_PITCH)  # GLFW y down: pushed up lowers the pitch
+    assert action(set(), right=(0.0, 0.575))[3] == pytest.approx(0.5 * STICK_PITCH)
     assert action(set(), right=(0.1, 0.1))[2:] == pytest.approx([0, 0])  # radial deadzone covers both axes
-    assert action({"q"}, right=(0.0, 1.0))[2:] == pytest.approx([TURN, PITCH])  # y alone leaves Q's turn
+    assert action({"q"}, right=(0.0, 1.0))[2:] == pytest.approx([STICK_TURN, STICK_PITCH])  # y alone leaves Q's turn
 
 
 def test_q_e_and_the_full_right_stick_turn_120_and_pitch_90_deg_per_s_at_60_hz():
@@ -85,11 +85,11 @@ def test_mouse_up_looks_up_and_each_axis_carries_on_its_own():
 
 def test_mouse_motion_overrides_only_its_own_stick_axis_and_keys():
     assert action({"q"}, right=(1.0, 0.0), mouse=(0.3, 0.0))[2] == pytest.approx(0.3)
-    assert action({"q"}, mouse=(0.0, 0.0))[2] == pytest.approx(TURN)  # no motion and nothing carried: the keys win
-    assert action(set(), right=(1.0, 0.0), mouse=(0.0, 0.0))[2] == pytest.approx(-TURN)
+    assert action({"q"}, mouse=(0.0, 0.0))[2] == pytest.approx(STICK_TURN)  # no motion and nothing carried: the keys win
+    assert action(set(), right=(1.0, 0.0), mouse=(0.0, 0.0))[2] == pytest.approx(-STICK_TURN)
     assert action(set(), right=(0.0, 1.0), mouse=(0.0, -0.4))[3] == pytest.approx(-0.4)
-    assert action({"q"}, right=(0.0, 1.0), mouse=(0.0, -0.4))[2] == pytest.approx(TURN)  # a pitch flick leaves Q's turn
-    assert action(set(), right=(1.0, 1.0), mouse=(0.3, 0.0))[2:] == pytest.approx([0.3, PITCH])  # and the stick's pitch
+    assert action({"q"}, right=(0.0, 1.0), mouse=(0.0, -0.4))[2] == pytest.approx(STICK_TURN)  # a pitch flick leaves Q's turn
+    assert action(set(), right=(1.0, 1.0), mouse=(0.3, 0.0))[2:] == pytest.approx([0.3, STICK_PITCH])  # and the stick's pitch
 
 
 class FakeClock:

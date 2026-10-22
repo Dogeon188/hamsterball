@@ -1,8 +1,8 @@
 """The core step (spec §4): facing, shell drag, containment, then the tier's drive, once per physics step.
 
 Every per-step function is a pure function of model and data fields plus the action (and a level's constant body
-motions). All state lives in time, qpos, qvel and userdata (the core's slots, `model.FACING` first, then the tier's, then
-a level's collapsing tiles'), so one mj_getState(mjSTATE_INTEGRATION) vector is the core state.
+motions). All state lives in time, qpos, qvel and userdata (the core's slots, `model.FACING` first, then the tier's,
+then a level's collapsing tiles'), so one mj_getState(mjSTATE_INTEGRATION) vector is the core state.
 """
 
 import math
@@ -189,17 +189,17 @@ def touch_tiles(model, data, tiles):
             data.userdata[slot + i] = data.time
 
 
-def physics_step(model, data, tier, action, turn, pitch, bodies=(), tiles=None):
-    """One physics step. action is the tier's part; turn and pitch are this step's change of facing and pitch (rad);
-    bodies as `drive_bodies`, tiles as `drive_tiles`."""
+def physics_step(model, data, tier, action, d_facing, d_pitch, bodies=(), tiles=None):
+    """One physics step. action is the tier's part; d_facing and d_pitch are this step's change of facing and pitch
+    (rad); bodies as `drive_bodies`, tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
     drive_tiles(data, tiles)
     # mj_step leaves positions computed for the state before it, so refresh them: the step then reads only the state
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
-    facing = turn_facing(data, turn)
-    camera_pitch(data, pitch)
+    facing = turn_facing(data, d_facing)
+    camera_pitch(data, d_pitch)
     drag(data)
     contain(model, data, tier.resting_radius)
     tier.drive(model, data, action, facing)
@@ -270,9 +270,9 @@ class Core:
         turn = cam_pitch = 0.0
         if self.camera_action:
             action, turn, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
-        turn, pitch = TURN_STEP * turn / n, PITCH_STEP * cam_pitch / n  # per physics step
+        d_facing, d_pitch = TURN_STEP * turn / n, PITCH_STEP * cam_pitch / n  # rad per physics step
         for _ in range(n):
-            physics_step(m, d, tier, action, turn, pitch, self.bodies, self.tiles)
+            physics_step(m, d, tier, action, d_facing, d_pitch, self.bodies, self.tiles)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))

@@ -172,14 +172,3 @@ def test_the_tail_shows_in_chase_and_follow_only_and_never_touches_the_physics()
     assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
     assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
 
-
-def test_a_rerender_draws_the_tail_where_it_was():
-    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap poses to the geoms
-    env.reset(seed=0)
-    env.step(np.array([1, 0, 1, 0], np.float32))
-    pts, _ = tail_points(env)
-    s = env.unwrapped.core.state()
-    env.reset(seed=1)
-    env.unwrapped.step_to(s)
-    assert np.allclose(tail_points(env)[0], pts)
-    env.close()

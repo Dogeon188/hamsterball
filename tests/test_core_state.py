@@ -9,7 +9,7 @@ from hamsterball.core import Core
 
 
 def drive(core, start, stop):
-    """Env steps start..stop of a run that turns and orbits the camera."""
+    """Env steps start..stop of a run that turns the facing and pitches the camera."""
     out = []
     for i in range(start, stop):
         a = np.array([np.sin(i / 20), 1.0, 1 / 15 if i % 60 < 20 else 0.0, np.cos(i / 15)], np.float32)  # turn 2 deg
