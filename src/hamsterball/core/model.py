@@ -13,7 +13,8 @@ SOLREF = "0.04 2"  # shell tiles and the abstract hamster
 TORSION, ROLL = 0.05, 0.04  # outer sphere's torsional and rolling friction (m)
 
 # Fixed ids: the compiler puts the shell first and the hamster second, each a free body, so the per-step code
-# can hard-code them (as a GPU kernel would). Level geoms add no bodies; later bodies (view mocaps) come after.
+# can hard-code them (as a GPU kernel would). Level geoms add no bodies; later bodies (view mocaps, then a level's
+# kinematic bodies) come after.
 SHELL, HAM = 1, 2
 SHELL_QPOS, HAM_QPOS = 0, 7
 SHELL_DOF, HAM_DOF = 0, 6
@@ -49,14 +50,16 @@ def _shell_xml():
 GAME_SIZE = (720, 1280)  # (height, width) of the game window, the smallest offscreen buffer a model gets
 
 
-def build(tier, level=FLAT, view_size=GAME_SIZE):
+def build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0):
     """Compile the shell, the tier's fragment, the view mocaps, and the level (top-level MJCF sections: assets,
-    worldbody geoms), with an offscreen buffer that holds both the game window and `view_size` (height, width)."""
+    worldbody geoms), with an offscreen buffer that holds both the game window and `view_size` (height, width).
+    `bodies` (top-level MJCF sections too, from `Level.body_mjcf()`) goes last, so its bodies follow the view mocaps.
+    `slots` more userdata slots go after the tier's (a level's collapsing tiles)."""
     from .views import FRAGMENT as VIEWS  # views imports this module's ids
 
     h, w = max(view_size[0], GAME_SIZE[0]), max(view_size[1], GAME_SIZE[1])
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
-<size nuserdata="{1 + tier.nuserdata}"/>
+<size nuserdata="{1 + tier.nuserdata + slots}"/>
 <visual><global offwidth="{w}" offheight="{h}"/><map znear="0.001"/></visual>
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}
@@ -64,7 +67,8 @@ def build(tier, level=FLAT, view_size=GAME_SIZE):
 {_shell_xml()}
 {tier.fragment}
 {VIEWS}
-</worldbody></mujoco>"""
+</worldbody>
+{bodies}</mujoco>"""
     m = mujoco.MjModel.from_xml_string(xml)
     assert m.body("shell").id == SHELL and m.body("hamster").id == HAM
     assert m.jnt_qposadr[m.body_jntadr[HAM]] == HAM_QPOS and m.jnt_dofadr[m.body_jntadr[HAM]] == HAM_DOF

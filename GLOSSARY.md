@@ -73,6 +73,26 @@ _Avoid_: level (as a difficulty grade), tier
 A volume in a level that a task reacts to when the hamsterball's centre enters it: a goal, waypoint, item, key, survive region, or hazard.
 _Avoid_: trigger, checkpoint
 
+**Motion**:
+A scripted movement of a part of a level over sim time: a closed **path** walked at constant speed or a sine **oscillation** along an axis, either with a constant spin about the vertical, and for a kinematic body optionally a **tilt** (a rocking about a horizontal axis). A mover's pose is a function of its motion and the sim time alone.
+_Avoid_: animation, trajectory (a trajectory is a recorded episode)
+
+**Mover**:
+A part of a level that has a motion, such as a drifting survive region.
+_Avoid_: dynamic object, moving marker (alone)
+
+**Kinematic body**:
+A solid part of a level, a group of geoms that collides with the shell and moves by a motion that nothing pushes back on, such as a sweeping bar. It is a mover. A survive region can **attach** to one and ride it, as on a raft.
+_Avoid_: mocap, moving platform (alone), obstacle (for any solid)
+
+**Seesaw**:
+A solid platform of a level on a passive hinge or ball joint at a pivot, which the hamsterball's weight tips against a spring back to level, up to a tilt limit. It is not a mover: nothing scripts it. A survive region can attach to it as to a kinematic body.
+_Avoid_: tilting platform (for a kinematic body's scripted tilt), passive body
+
+**Collapsing tile**:
+A floor tile of a level that starts to fall a fixed delay after the shell first touches it, and drops under the kill plane. It is a kinematic body.
+_Avoid_: trap tile, crumbling floor
+
 **Kill plane**:
 A height below which the hamsterball counts as fallen off the level.
 _Avoid_: floor, death height
@@ -82,7 +102,7 @@ Where a task in a level starts the hamsterball, together with the initial camera
 _Avoid_: start point, respawn
 
 **Hazard**:
-A marker that ends the episode in failure when the hamsterball enters it.
+A marker that ends the episode in failure when the hamsterball enters it. It may move by a **Motion**.
 _Avoid_: trap, death zone
 
 **Cliff**:

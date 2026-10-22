@@ -1,0 +1,15 @@
+# Balance on a 6 m square seesaw for 30 s. It sits on a ball joint at its centre, a spring pulling it back to level,
+# and tips up to 10 degrees toward wherever the hamsterball's weight is. Nothing is under it: the hamsterball spawns
+# 0.6 m off the pivot, so with no input it tips the seesaw and rolls off the low edge. The region rides the seesaw.
+version: 1
+kill_plane_z: -5
+geoms: []
+bodies:
+  - pos: [0, 0, -0.1]
+    geoms: [{type: box, size: [3, 3, 0.1], rgba: [0.55, 0.4, 0.25, 1]}]
+    joint: {type: ball, stiffness: 250, damping: 40, range: 10, mass: 20}
+tasks:
+  survive:
+    spawn: {pos: [0.5, 0.3, 0.5], yaw_deg: 0}
+    region: {type: box, pos: [0, 0, 0.6], size: [3, 3, 0.5], attach: 0}
+    time_limit_s: 30

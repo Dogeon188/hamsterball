@@ -1,0 +1,18 @@
+# Stay on a 4 m square raft for 30 s as it drifts round a 6 m square loop at 0.75 m/s and rocks up to 8 degrees
+# about a diagonal. Nothing is under it: an inputless hamsterball rolls off the low edge. The region rides the raft.
+version: 1
+kill_plane_z: -5
+geoms: []
+bodies:
+  - pos: [0, 0, -0.1]
+    geoms: [{type: box, size: [2, 2, 0.1], rgba: [0.55, 0.4, 0.25, 1]}]
+    motion:
+      type: path
+      points: [[0, 0, 0], [6, 0, 0], [6, 6, 0], [0, 6, 0]]
+      period: 32
+      tilt: {axis: [1, 1, 0], amplitude: 8, period: 7}
+tasks:
+  survive:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    region: {type: box, pos: [0, 0, 0.6], size: [2, 2, 0.5], attach: 0}
+    time_limit_s: 30

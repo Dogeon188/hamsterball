@@ -15,7 +15,7 @@ dependencies = [
 # Minari 0.5's DataCollector imports jax, which only its `create` extra installs.
 data = [
     "av",
-    "minari[arrow,create]==0.5.*",
+    "minari[arrow,create]==0.5.4",  # exact: data/collector.py patches a Minari internal
     "pillow",
 ]
 # the game records every finished episode (spec §13), so it needs the data extra

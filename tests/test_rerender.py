@@ -7,7 +7,11 @@ import pytest
 minari = pytest.importorskip("minari")
 
 import hamsterball  # noqa: F401  registers the env ids
-from hamsterball.data import Collector, rerender, to_lerobot, to_video
+from hamsterball.data import Collector, replay, rerender, to_lerobot, to_video
+from test_motion import drift_env, run, track
+from test_moving_hazards import dodge, sweepers_env
+from test_platforms import raft_env
+from test_seesaw import seesaw_env
 from test_tasks import toward_target
 
 
@@ -95,3 +99,88 @@ def test_to_lerobot_exports_a_rerendered_dataset(tmp_path):
     img = (last["observation.images.chase"].numpy() * 255).round().astype(np.uint8).transpose(1, 2, 0)
     np.testing.assert_array_equal(img, ep.observations["chase"][n - 1])
     assert last["next.reward"].item() == pytest.approx(ep.rewards[-1]) and last["next.done"].item()
+
+
+def test_a_survive_drift_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(drift_env())
+    assert run(env, track)["success"]
+    src = env.create_dataset("test/drift-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/drift-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_sweepers_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(sweepers_env())
+    assert run(env, dodge)["success"]
+    src = env.create_dataset("test/sweepers-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/sweepers-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.rewards, a.rewards)
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_pushers_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(gym.make("HamsterballSurvive-v0", levels=["survive_pushers"]))
+    env.reset(seed=0)
+    while not any(env.step(np.array([0.3, 0.2], np.float32))[2:4]):
+        pass
+    src = env.create_dataset("test/pushers-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/pushers-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["state"], a.observations["state"])
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_raft_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(raft_env())
+    assert run(env, track)["success"]
+    src = env.create_dataset("test/raft-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/raft-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.rewards, a.rewards)
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_collapse_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(gym.make("HamsterballSurvive-v0", levels=["survive_collapse"]))
+    env.reset(seed=0)
+    while not any(env.step(np.array([0.3, 0.6], np.float32))[2:4]):  # rolls over several tiles, then off the floor
+        pass
+    src = env.create_dataset("test/collapse-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/collapse-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["state"], a.observations["state"])
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))
+
+
+def test_a_survive_seesaw_episode_replays_and_rerenders_bit_for_bit(monkeypatch):
+    env = Collector(seesaw_env())
+    assert run(env, track)["success"]
+    src = env.create_dataset("test/seesaw-v0", algorithm_name="scripted")
+    replay(src)
+    with monkeypatch.context() as m:
+        m.setattr("hamsterball.core.step.physics_step", no_physics)
+        out = rerender(src, ("chase",), (24, 32), "test/seesaw-rerendered-v0")
+    a, b = next(src.iterate_episodes()), next(out.iterate_episodes())
+    np.testing.assert_array_equal(b.observations["goal"], a.observations["goal"])
+    np.testing.assert_array_equal(b.rewards, a.rewards)
+    np.testing.assert_array_equal(b.observations["chase"], live_frames(src, "chase", (24, 32)))

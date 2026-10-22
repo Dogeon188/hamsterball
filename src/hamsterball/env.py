@@ -5,7 +5,7 @@ import math
 import os
 import sys
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
@@ -17,8 +17,10 @@ import numpy as np
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
 from .core.generator import LevelGenerator
-from .core.level import LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, Level
+from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, TILE_WARN_RGBA, Level,
+                         body_frame)
 from .core.marker import centre, crosses
+from .core.motion import pose, quat
 from .core.model import DT, HAM, SHELL, SHELL_DOF, SHELL_QPOS
 from .core.step import FRAME_SKIP, Core
 from .core import views as V
@@ -42,6 +44,8 @@ class _Cached:
 
     core: Core
     renderer: "mujoco.Renderer | None" = None
+    movers: list = field(default_factory=list)  # (geom id, motion, authored geom_pos, authored geom_quat) per moving marker
+    tile_rgba: list = field(default_factory=list)  # each collapsing tile's authored colour
 
 
 def _levels(x):
@@ -111,7 +115,15 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            self._cores[level.id] = _Cached(Core(AbstractTier(), level.mjcf(), self.camera_action, self.view_size))
+            core = Core(AbstractTier(), level, self.camera_action, self.view_size)
+            m = core.model
+            movers = [(g, mk["motion"], m.geom_pos[g].copy(), m.geom_quat[g].copy())
+                      for g, mk in ((m.geom(name).id, mk) for name, mk in level.movers())]
+            for g, *_ in movers:  # the compiler marks a geom whose frame matches its body's, and kinematics then
+                m.geom_sameframe[g] = mujoco.mjtSameFrame.mjSAMEFRAME_NONE  # skips its geom_quat: posing needs both
+            tiles = core.tiles
+            tile_rgba = [m.geom_rgba[m.body_geomadr[tiles.body + i]].copy() for i in range(len(tiles.tiles))] if tiles else []
+            self._cores[level.id] = _Cached(core, movers=movers, tile_rgba=tile_rgba)
             if len(self._cores) > self.model_cache:
                 evicted = self._cores.popitem(last=False)[1]
                 if evicted.renderer is not None:
@@ -149,6 +161,7 @@ class HamsterballEnv(gym.Env):
                 self._look(t, LOCKED_RGBA)
         obs, vec = self._observe()
         self._prev = vec["state"][:3].astype(float)  # at reset the swept segment is a point
+        self._prev_t = self.core.data.time
         self._phi = self._potential(self._prev)
         reset_options = {"level": self.level.canonical(), "level_id": self.level.id, "task": self.task}
         if self.level.generator is not None:  # a generated level's difficulty is in its provenance
@@ -216,10 +229,12 @@ class HamsterballEnv(gym.Env):
         """The env step after the physics: marker tests, outcome, reward, observation, info."""
         self._steps += 1
         pos = self.core.data.qpos[SHELL_QPOS : SHELL_QPOS + 3].copy()
+        now = self.core.data.time
         event = 0.0
         survive = self.task == "survive"
         if survive:  # a point test on the current centre: the region means "stay inside"
-            inside = crosses(self._marker(("region", None)), pos, pos)
+            region = self._marker(("region", None))
+            inside = crosses(region, pos, pos, t=now, frame=self._frame(region))
             if inside and self._steps >= self._max_steps:
                 self._todo.clear()
         # rerun until nothing new triggers, so one step can complete several targets in task order
@@ -237,14 +252,14 @@ class HamsterballEnv(gym.Env):
                 self._look(self._todo[0], MARKER_RGBA["waypoints"])
         if not self._todo:  # success wins over failure
             self._success, event = True, event + 1.0
-        elif any(crosses(h, self._prev, pos) for h in self.level.hazards):
+        elif any(crosses(h, self._prev, pos, t=now, t0=self._prev_t) for h in self.level.hazards):
             self._failure, event = "hazard", event - 1.0
         elif pos[2] < self.level.kill_plane_z:
             self._failure, event = "kill_plane", event - 1.0
         elif survive and not inside:
             self._failure, event = "left_region", event - 1.0
         time = 0.0 if survive else TIME_PENALTY  # survive has no time penalty
-        self._prev = pos
+        self._prev, self._prev_t = pos, now
         terminated = self._success or self._failure is not None
         truncated = self.truncate and not terminated and self._steps >= self._max_steps
         obs, vec = self._observe()
@@ -279,14 +294,27 @@ class HamsterballEnv(gym.Env):
         return self._todo
 
     def _target(self, pos):
-        """The current target's centre: the nearest live target (spec §9)."""
-        return min((centre(self._marker(t)) for t in self._live()), key=lambda c: np.linalg.norm(c - pos))
+        """The current target's centre at the current sim time: the nearest live target (spec §9)."""
+        now = self.core.data.time
+        return min((centre(m, now, self._frame(m)) for m in map(self._marker, self._live())),
+                   key=lambda c: np.linalg.norm(c - pos))
+
+    def _frame(self, marker):
+        """The world pose (pos, quat) of the body an attached marker rides, from the core state's qpos (a driven
+        body's is its motion's pose; a seesaw's turns about its fixed pivot by its joint's angle or quaternion); None
+        for a marker that rides none."""
+        if "attach" not in marker:
+            return None
+        i = marker["attach"]
+        return body_frame(self.level.bodies[i], self.core.data.qpos[self.core.bodies[i].qpos:])
 
     def _potential(self, pos):
         return PHI_SCALE * float(np.linalg.norm(self._target(pos) - pos))
 
     def _observe(self):
         m, d = self.core.model, self.core.data
+        self._pose_movers()
+        self._look_tiles()
         # mj_step leaves derived quantities at the state before it; recompute them (derived only: the state is untouched)
         mujoco.mj_kinematics(m, d)
         mujoco.mj_comPos(m, d)
@@ -335,6 +363,27 @@ class HamsterballEnv(gym.Env):
                 r.update_scene(d, camera=v, scene_option=V.option(v))
                 obs[v] = r.render(out=np.empty((*self.view_size, 3), np.uint8))
         return obs, vec
+
+    def _pose_movers(self):
+        """Place each moving marker's geom at its pose at the current sim time: the model is the look, not the state
+        (the geoms have no contact), so every view and the game window draw it there."""
+        m = self.core.model
+        for g, motion, pos0, quat0 in self._cores[self.level.id].movers:
+            t = self.core.data.time
+            m.geom_pos[g] = pos0 + pose(motion, t)[0]
+            mujoco.mju_mulQuat(m.geom_quat[g], quat(motion, t), quat0)
+
+    def _look_tiles(self):
+        """Blend each touched tile's colour toward TILE_WARN_RGBA over its delay: a look derived from the core state
+        (each tile's trigger time), so it needs no reset and a re-render draws it the same."""
+        tiles = self.core.tiles
+        if tiles is None:
+            return
+        m, d = self.core.model, self.core.data
+        slot, b0, delay, _ = tiles
+        for i, rgba in enumerate(self._cores[self.level.id].tile_rgba):
+            f = min(1.0, (d.time - d.userdata[slot + i]) / delay) if delay else 1.0
+            m.geom_rgba[m.body_geomadr[b0 + i]] = rgba + max(0.0, f) * (np.array(TILE_WARN_RGBA) - rgba)
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""

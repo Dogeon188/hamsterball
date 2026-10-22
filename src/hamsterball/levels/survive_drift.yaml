@@ -1,0 +1,14 @@
+# Stay inside a box region (3 m square) that drifts round a 6 m square loop and turns as it goes, for 20 s.
+version: 1
+kill_plane_z: -5
+geoms:
+  - {type: box, pos: [0, 0, -0.5], size: [10, 10, 0.5]}
+tasks:
+  survive:
+    spawn: {pos: [0, 0, 0.5], yaw_deg: 0}
+    region:
+      type: box
+      pos: [0, 0, 0.5]
+      size: [1.5, 1.5, 1]
+      motion: {type: path, points: [[0, 0, 0], [3, 0, 0], [3, 6, 0], [-3, 6, 0], [-3, 0, 0]], period: 20, spin: 18}
+    time_limit_s: 20
