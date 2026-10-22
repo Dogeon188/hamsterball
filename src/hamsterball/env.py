@@ -405,7 +405,7 @@ class HamsterballEnv(gym.Env):
 class DiscreteAction(gym.ActionWrapper):
     """Spec §5: action 0 is a no-op; 1 + 8·e + k runs toward k·45° clockwise from camera forward at effort EFFORTS[e].
 
-    Under the camera flag, cam_yaw stays 0.
+    Under the camera flag, cam_yaw and cam_pitch stay 0.
     """
 
     EFFORTS = (0.25, 0.5, 1.0)

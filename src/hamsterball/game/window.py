@@ -209,9 +209,9 @@ def _play(window, session):
                 held = {n for n, ks in KEYS.items() if any(imgui.is_key_down(k) for k in ks)}
                 left, right = _sticks()
                 xy = glfw.get_cursor_pos(window)
-                cam = mouse.move(*((0.0, 0.0) if cursor is None else (xy[0] - cursor[0], xy[1] - cursor[1])))
+                moved = (0.0, 0.0) if cursor is None else (xy[0] - cursor[0], xy[1] - cursor[1])
                 cursor = xy
-                act = action(held, left, right, cam)
+                act = action(held, left, right, mouse=mouse.move(*moved))
                 pacer.wait()
                 _, _, terminated, truncated, info = session.step(act, pacer.overruns)
                 if text := outcome(terminated, truncated, info):
@@ -289,7 +289,7 @@ def run(settings, levels_dir, record, skip_menu):
 @click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
 @click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
 def main(levels_dir, player, no_record, task, level, seed, difficulty):
-    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and tilt, or gamepad, Esc to pause."""
+    """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and look up and down, or gamepad, Esc to pause."""
     flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
     settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
     record = not no_record

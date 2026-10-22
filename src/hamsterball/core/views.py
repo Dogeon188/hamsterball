@@ -5,13 +5,12 @@ import math
 import mujoco
 import numpy as np
 
-from .model import PITCH, SHELL, YAW
-from .step import PITCH_DEFAULT
+from .model import PITCH, PITCH_DEFAULT, SHELL, YAW
 
 VIEWS = ("chase", "follow", "first_person")
 
 # Look constants, picked by eye and awaiting play-test (see views.md). They change pixels, not trajectories.
-CHASE_DIST = 3.0  # m from the shell centre; the camera pitch tilts it
+CHASE_DIST = 3.0  # m from the shell centre; the camera pitch sets its angle below the horizon
 FOLLOW_DIST, FOLLOW_PITCH = 6.0, math.radians(35)
 FOVY = {"chase": 60, "follow": 50, "first_person": 75}  # vertical, degrees
 

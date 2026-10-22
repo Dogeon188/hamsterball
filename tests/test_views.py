@@ -53,7 +53,7 @@ def test_chase_and_first_person_face_the_camera_yaw():
     assert goal_x(obs["first_person"]) > 0.6
 
 
-def test_chase_and_first_person_tilt_with_the_camera_pitch_and_follow_keeps_its_own():
+def test_chase_and_first_person_follow_the_camera_pitch_and_follow_keeps_its_own():
     env = make(camera_action=True, views=VIEWS)
     env.reset(seed=0)
 

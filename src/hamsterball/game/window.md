@@ -27,7 +27,7 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 
 ## Known quirks
 
-- **Needs play-test:** the whole window behaviour: feel of the keys, sticks, and mouse (the vertical tilt included; cursor lock and release on pause and the result card), pacing and tearing without vsync, the HUD and cards' placement, mouse clicks on the pause buttons, retina scaling, resizing, and the shadow's jagged edge at the default shadow map size.
+- **Needs play-test:** the whole window behaviour: feel of the keys, sticks, and mouse (looking up and down included; cursor lock and release on pause and the result card), pacing and tearing without vsync, the HUD and cards' placement, mouse clicks on the pause buttons, retina scaling, resizing, and the shadow's jagged edge at the default shadow map size.
 - **Needs play-test (ticket 12):** the menu screen: its layout, typing in the name and seed fields, the combos, the disabled Play button, Menu → menu → Play again, and the REC indicator. A level file that fails to compile with `--task`/`--level` raises out of the window rather than showing an error.
 - No vsync: vsync on top of the Pacer's schedule would beat against it and count false overruns; the cost is possible tearing.
 
@@ -55,3 +55,4 @@ The game's window (spec §13): one resizable GLFW window on the main thread, the
 - 2026-10-22, user play-test report: on the result card, the text was grey and hard to read and some characters didn't render. Agent finding: the HUD and the result card drew every glyph as a dim solid block, and the card background was nearly transparent; the strings are all ASCII, and the style's text colour is white. Cause: `mjr_render` leaves texture unit 1 active. A screenshot with the unit reset showed crisp white text on an opaque card; `test_the_result_card_text_draws_white_over_the_chase_view` covers it.
 - 2026-10-22, ticket mouse-camera/01: added the mouse turn and cursor lock; `--help` mentions the mouse. Agent finding (scratch script, M-series Mac): after 10 imgui frames a `CURSOR_DISABLED` window stayed disabled, and `CURSOR_NORMAL` restored normally.
 - 2026-10-22, ticket mouse-camera/03: vertical mouse motion and the right stick's y tilt the view; `--help` says the mouse turns and tilts.
+- 2026-10-22, code review of mouse-camera: `--help` says the mouse turns and looks up and down (was "turn and tilt"; tilt is a mover's rocking in GLOSSARY.md), and `_play` passes `mouse=mouse.move(...)` as `action`'s `mouse` in place of a local `cam`.

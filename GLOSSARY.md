@@ -151,7 +151,7 @@ The chase view's heading, which defines the frame of actions and observations.
 _Avoid_: heading, view angle
 
 **Camera pitch**:
-How far below the horizon the chase view looks; it tilts the chase and first-person views but moves no physics and leaves the frame of actions and observations alone.
+How far below the horizon the chase view looks; it pitches the chase and first-person views but moves no physics and leaves the frame of actions and observations alone.
 _Avoid_: tilt (a mover's rocking), elevation, view angle
 
 **Pose stream**:

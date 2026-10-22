@@ -73,7 +73,7 @@ def test_rerender_recomputes_progress_and_adds_lossless_views(monkeypatch):
 def test_rerender_reproduces_the_camera_pitch():
     env = Collector(gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
     env.reset(seed=0)
-    for i in range(45):  # tilt down, then back up past the default
+    for i in range(45):  # pitch down, then back up past the default
         env.step(np.array([0, 1, 0, 1 if i < 20 else -1], np.float32))
     src = env.create_dataset("test/pitch-v0", algorithm_name="scripted")
     out = rerender(src, ("chase", "first_person"), (24, 32), "test/pitch-rerendered-v0")

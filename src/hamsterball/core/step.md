@@ -8,7 +8,7 @@ The core step of spec §4: the per-physics-step code (camera yaw, shell drag, co
 
 - `Core(tier=None, level=FLAT, camera_action=False, view_size=GAME_SIZE)`: compiles the model (`view_size` sizes its offscreen buffer, see [model.md](model.md)) (default tier: `AbstractTier`) and resets. `level` is a `Level` (its kinematic bodies compiled and driven) or MJCF as `model.build` takes it, such as `Level.mjcf()` (no bodies). `Core.bodies` holds a `Body(qpos, dof, pos, motion)` NamedTuple per body, constants; a seesaw's motion is `None` and its addresses are its joint's. `Core.tiles` is `None`, or `Tiles(slot, body, delay, tiles)` for a level's collapsing tiles (the first trigger-time slot, the first tile's body id, and a `Tile(qpos, dof, pos, bottom)` per tile), constants.
 - `Core.reset(spawn=(0, 0, 0.5), yaw=0.0)`, `Core.step(action, n=FRAME_SKIP)` (one action held over `n` physics steps), `Core.state()` and `Core.set_state(s)` (the `mjSTATE_INTEGRATION` vector), `Core.yaw`, `Core.pitch`, `Core.action_space` (the tier's, plus `cam_yaw` and `cam_pitch` under the camera flag).
-- `physics_step(model, data, tier, action, cam, bodies=(), tiles=None, cam_pitch=0.0)` and its parts `drive_bodies`, `drive_tiles`, `touch_tiles`, `camera_yaw`, `camera_pitch`, `drag`, `contain`, `wrap`.
+- `physics_step(model, data, tier, action, cam_yaw, cam_pitch, bodies=(), tiles=None)` and its parts `drive_bodies`, `drive_tiles`, `touch_tiles`, `camera_yaw`, `camera_pitch`, `drag`, `contain`, `wrap`.
 - `Tier`: `fragment`, `nuserdata`, `resting_radius`, `action_space()`, `reset()`, `drive()`, `obs()`. The core touches a tier only through these.
 
 ## How it works
@@ -38,7 +38,7 @@ Tilt (ticket survive-movers/04): `drive_bodies` writes `motion.quat` (yaw then t
 
 - Containment is a step-level state edit, not a MuJoCo constraint, so one step can still carry the hamster past the 20 mm stop by that step's travel. Measured worst sinks for throws at 0 / 4 / 8 / 12 m/s are 14 / 17 / 20 / 23 mm, under spec §5's 16 / 21 / 30 / 36 mm, because this core reads fresh positions (see History, 2026-10-22).
 - The chase yaw follows any shell motion above 0.8 m/s, backwards included. Driving up a 20° slope from rest, the shell first rolls back at up to 1.4 m/s, and the yaw swings about 56° toward downhill, which turns a held "forward" off the slope: the climb drops from 5.17 m to 4.34 m in 3 s. The feel test turns the chase off to measure the drive alone.
-- Camera pitch constants, **needing play-test**: `PITCH_DEFAULT` 15° below the horizon (the old chase pitch), `PITCH_MIN`/`PITCH_MAX` −10°/60°, `PITCH_RATE` 90°/s at `cam_pitch` = 1. The pitch is in the core state and the observation, so changing them bumps N.
+- Camera pitch constants, **needing play-test**: `PITCH_DEFAULT` 15° below the horizon (the old chase pitch, defined in [model.py](model.md)), `PITCH_MIN`/`PITCH_MAX` −10°/60°, `PITCH_RATE` 90°/s at `cam_pitch` = 1. The pitch is in the core state and the observation, so changing them bumps N.
 - The Fibonacci tiles aren't isotropic: the uncapped 1–3 s acceleration is 4.05 m/s² along +x and 4.16 along +y. The feel test runs along +x, as the prototype did.
 
 ## Decisions
@@ -82,3 +82,4 @@ See the prototype's doc for containment by solimp, a spring-damper field, and a 
 - 2026-10-22, code review of survive-movers: `Core.bodies` and `Core.tiles` hold NamedTuples (`Body`, `Tiles`, `Tile`) in place of plain tuples read by index; the same values, so every bundled level's core states are byte-identical.
 - 2026-10-22, ticket mouse-camera/02 (prefactor, no behaviour change): the core's userdata slots are named in `model.py` (`YAW`, `CORE_SLOTS`); the per-step code reads the yaw at `YAW`, and the tiles' first slot is `CORE_SLOTS + tier.nuserdata`.
 - 2026-10-22, ticket mouse-camera/02: `CORE_SLOTS` = 2 with `PITCH` = 1; under the camera flag `Core.step` splits `[cam_yaw, cam_pitch]` off the action, and `camera_pitch` integrates and clamps the pitch each physics step after the yaw. `Core.reset` sets it to `PITCH_DEFAULT`. The core state grows by one number (110 → 111 on a level without bodies). Two runs that differ only in `cam_pitch` have identical qpos, qvel and time.
+- 2026-10-22, code review of mouse-camera: `physics_step` takes `cam_yaw, cam_pitch` side by side (was `cam, bodies=(), tiles=None, cam_pitch=0.0`); `PITCH_DEFAULT` moved to `model.py`, the other pitch constants stay here. No behaviour change.

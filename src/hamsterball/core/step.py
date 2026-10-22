@@ -16,7 +16,7 @@ from .abstract_tier import AbstractTier
 from .level import Level
 from .motion import pose, quat
 from .model import (CORE_SLOTS, DT, FLAT, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, M_HAM, M_SHELL, R, SHELL, SHELL_DOF,
-                    SHELL_QPOS, PITCH, YAW, build)
+                    SHELL_QPOS, PITCH, PITCH_DEFAULT, YAW, build)
 
 FRAME_SKIP = 10  # physics steps per env step: 60 Hz
 DRAG_K = 0.059  # N s^2/m^2 on the shell: sets the full-effort top speed
@@ -24,7 +24,7 @@ CHASE_ALPHA = 1 - math.exp(-DT / 0.55)  # chase yaw, tau 0.55 s
 CHASE_MIN_SPEED2 = 0.8 ** 2  # (m/s)^2, horizontal shell speed below which the chase yaw holds
 ORBIT_RATE = math.radians(120)  # rad/s at cam_yaw = 1
 # camera pitch, below the horizon; needs play-test (see step.md)
-PITCH_DEFAULT, PITCH_MIN, PITCH_MAX = math.radians(15), math.radians(-10), math.radians(60)
+PITCH_MIN, PITCH_MAX = math.radians(-10), math.radians(60)  # PITCH_DEFAULT is in model.py
 PITCH_RATE = math.radians(90)  # rad/s at cam_pitch = 1
 FIELD_START, FIELD_HARD = 0.005, 0.020  # m past the resting radius: containment starts, and stops hard
 MU = M_HAM * M_SHELL / (M_HAM + M_SHELL)  # the pair's reduced mass
@@ -195,8 +195,8 @@ def touch_tiles(model, data, tiles):
             data.userdata[slot + i] = data.time
 
 
-def physics_step(model, data, tier, action, cam, bodies=(), tiles=None, cam_pitch=0.0):
-    """One physics step. action is the tier's part; cam and cam_pitch are the orbit and pitch inputs in [-1, 1];
+def physics_step(model, data, tier, action, cam_yaw, cam_pitch, bodies=(), tiles=None):
+    """One physics step. action is the tier's part; cam_yaw and cam_pitch are the orbit and pitch inputs in [-1, 1];
     bodies as `drive_bodies`, tiles as `drive_tiles`."""
     data.xfrc_applied.fill(0)
     drive_bodies(data, bodies)
@@ -204,7 +204,7 @@ def physics_step(model, data, tier, action, cam, bodies=(), tiles=None, cam_pitc
     # mj_step leaves positions computed for the state before it, so refresh them: the step then reads only the state
     mujoco.mj_kinematics(model, data)
     mujoco.mj_comPos(model, data)
-    yaw = camera_yaw(data, cam)
+    yaw = camera_yaw(data, cam_yaw)
     camera_pitch(data, cam_pitch)
     drag(data)
     contain(model, data, tier.resting_radius)
@@ -273,11 +273,11 @@ class Core:
     def step(self, action, n=FRAME_SKIP):
         """Hold one action over n physics steps."""
         m, d, tier = self.model, self.data, self.tier
-        cam = cam_pitch = 0.0
+        cam_yaw = cam_pitch = 0.0
         if self.camera_action:
-            action, cam, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
+            action, cam_yaw, cam_pitch = action[:-2], float(action[-2]), float(action[-1])
         for _ in range(n):
-            physics_step(m, d, tier, action, cam, self.bodies, self.tiles, cam_pitch)
+            physics_step(m, d, tier, action, cam_yaw, cam_pitch, self.bodies, self.tiles)
 
     def state(self):
         s = np.empty(mujoco.mj_stateSize(self.model, STATE))
