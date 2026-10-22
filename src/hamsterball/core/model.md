@@ -12,7 +12,7 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 ## How it works
 
 - The shell is a free body whose origin is the shell centre: 320 box tiles on a Fibonacci sphere carry its 0.8 kg (contype and conaffinity 2, group 3), and a massless outer sphere (contype 1, `condim 6`, friction `1 0.05 0.04`, group 1) touches the level.
-- The tier's `fragment` goes in the worldbody after the shell, then the view and tail mocaps of [views.md](views.md) (whose mesh asset, `views.ASSET`, goes before the level), and `nuserdata` is `CORE_SLOTS` (the core's slots) plus the tier's slots plus `slots` (a level's tiles).
+- The tier's `fragment` goes in the worldbody after the shell, then the view and feature mocaps of [views.md](views.md), and `nuserdata` is `CORE_SLOTS` (the core's slots) plus the tier's slots plus `slots` (a level's tiles).
 - Floats go into the MJCF with `repr` of plain Python floats (NumPy 2's `repr` of `np.float64` isn't valid MJCF), so tile poses match the spec's formulas to full precision.
 - Integrator `implicitfast`, as in the prototype that set the feel.
 - `<visual><map znear="0.001"/>`: the near clip plane is a fraction of the model's extent, which large levels grow; the default 0.01 cut the ground below the first-person eye on a 30 m level. It changes pixels only.
@@ -48,3 +48,4 @@ Builds the hamsterball model of spec §3: the shell, a control tier's hamster fr
 - 2026-10-22, code review of mouse-camera: this doc had missed ticket mouse-camera/02's `PITCH` slot and `CORE_SLOTS` = 2; it lists them now. `PITCH_DEFAULT` moved here from `step.py`, so `views.py` imports only from `model.py`.
 - 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): the userdata slot `YAW` is `FACING`.
 - 2026-10-23, ticket mouse-camera/05: `build` places `views.ASSET` (the tail's mesh) before the level, and the tail mocap body follows the view mocaps.
+- 2026-10-23, user request: the tail's mesh asset is gone (the hamster's features are spheres), so `build` no longer places `views.ASSET`.

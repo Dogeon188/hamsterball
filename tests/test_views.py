@@ -137,38 +137,40 @@ def test_views_survive_model_cache_eviction():
     env.close()
 
 
-def tail_points(env):
-    """The tail mesh's vertices in world coordinates, and the hamster centre."""
+PARTS = ("tail", "ear_left", "ear_right")
+
+
+def part_offsets(env, facing):
+    """Each part's centre from the hamster centre, as (right, forward, up) in the facing frame."""
     m, d = env.unwrapped.core.model, env.unwrapped.core.data
-    g = m.geom("tail").id
-    mesh = m.geom_dataid[g]
-    v = m.mesh_vert[m.mesh_vertadr[mesh] : m.mesh_vertadr[mesh] + m.mesh_vertnum[mesh]]
-    return d.geom_xpos[g] + v @ d.geom_xmat[g].reshape(3, 3).T, d.xpos[HAM]
+    right = np.array([math.cos(facing), math.sin(facing), 0.0])
+    fwd = np.array([-math.sin(facing), math.cos(facing), 0.0])  # facing 0 faces +y
+    return {p: (lambda r: (r @ right, r @ fwd, r[2]))(d.geom_xpos[m.geom(p).id] - d.xpos[HAM]) for p in PARTS}
 
 
-def test_the_tail_points_away_from_the_facing_from_just_behind_the_hamster():
-    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap poses to the geoms
+def test_the_tail_sits_behind_and_the_ears_on_top_whatever_the_facing():
+    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap pose to the geoms
     env.reset(seed=0)
     for facing in (0.0, math.radians(60)):  # 60 deg: after two full turns left
-        pts, ham = tail_points(env)
-        back = np.array([math.sin(facing), -math.cos(facing), 0.0])  # -facing; facing 0 faces +y
-        along = (pts - ham) @ back
-        assert 0.12 <= along.min() < 0.2  # its base just behind the hamster (radius 0.12)
-        tip = pts[along.argmax()] - ham
-        assert np.allclose(tip / np.linalg.norm(tip), back, atol=1e-6)
+        o = part_offsets(env, facing)
+        assert abs(o["tail"][0]) < 1e-9 and o["tail"][1] < -0.12  # straight behind, out past the hamster's radius
+        (lx, ly, lz), (rx, ry, rz) = o["ear_left"], o["ear_right"]
+        assert lx < 0 < rx and abs(lx + rx) < 1e-9  # one each side
+        assert ly == pytest.approx(ry) and ly > 0 and lz == pytest.approx(rz) and lz > 0.08  # forward, on top
         for _ in range(2):
             env.step(np.array([0, 0, 1, 0], np.float32))
     env.close()
 
 
-def test_the_tail_shows_in_chase_and_follow_only_and_never_touches_the_physics():
+def test_the_tail_and_ears_show_in_chase_and_follow_only_and_never_touch_the_physics():
     env = make()
     env.reset(seed=0)
     m = env.unwrapped.core.model
-    g = m.geom("tail").id
-    group = m.geom_group[g]
-    assert views.option("chase").geomgroup[group] and views.option("follow").geomgroup[group]
-    assert not views.option("first_person").geomgroup[group]
-    assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
-    assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
+    for p in PARTS:
+        g = m.geom(p).id
+        group = m.geom_group[g]
+        assert views.option("chase").geomgroup[group] and views.option("follow").geomgroup[group]
+        assert not views.option("first_person").geomgroup[group]
+        assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
+        assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
 

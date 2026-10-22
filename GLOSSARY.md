@@ -31,8 +31,8 @@ _Avoid_: steering, heading (alone)
 The direction the hamster faces, which sets the frame of actions and observations and the yaw of the chase and first-person views. Only the controller turns it.
 _Avoid_: camera yaw, heading (alone), view angle
 
-**Tail**:
-A small cone behind the hamster pointing away from its facing, so the chase and follow views show which way the hamster faces. It is a look only: no mass, no contacts.
+**Features**:
+The hamster's tail, a small ball behind it, and its two ears, small balls on top: they turn with the facing, so the chase and follow views show which way the hamster faces. They are a look only: no mass, no contacts.
 _Avoid_: arrow, heading marker
 
 **Effort**:

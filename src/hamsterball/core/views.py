@@ -13,18 +13,20 @@ VIEWS = ("chase", "follow", "first_person")
 CHASE_DIST = 3.0  # m from the shell centre; the camera pitch sets its angle below the horizon
 FOLLOW_DIST, FOLLOW_PITCH = 6.0, math.radians(35)
 FOVY = {"chase": 60, "follow": 50, "first_person": 75}  # vertical, degrees
-TAIL_OFFSET, TAIL_LEN, TAIL_R = 0.13, 0.17, 0.06  # m: base behind the hamster centre, cone length, base radius
-TAIL_RGBA = ".35 .18 .08 1"
+# The hamster's features, as (right, forward, up) from its centre (its radius is 0.12) and a radius, in m
+TAIL = (0.0, -0.13, 0.0), 0.04
+EARS = (0.07, 0.04, 0.10), 0.035  # the right ear; the left mirrors it
+FEATURE_RGBA = "1 .6 .2 1"  # the hamster's orange
 
 # A mocap body per view, holding only its camera: no mass and no contacts, so they never touch the physics.
 FRAGMENT = "\n".join(f'<body name="view_{v}" mocap="true"><camera name="{v}" fovy="{FOVY[v]}"/></body>' for v in VIEWS)
-# The tail: a cone (a mesh, as MuJoCo has no cone primitive) along its body's -y, base at the origin. A mocap body,
-# massless and contactless like the views; group 2, the hamster's, so first person hides it.
-_RING = " ".join(f"{TAIL_R * math.cos(a)!r} 0 {TAIL_R * math.sin(a)!r}"
-                 for a in np.linspace(0, 2 * math.pi, 8, endpoint=False))
-ASSET = f'<asset><mesh name="tail" vertex="{_RING} 0 {-TAIL_LEN} 0"/></asset>'
-FRAGMENT += (f'\n<body name="tail" mocap="true"><geom name="tail" type="mesh" mesh="tail" mass="0" contype="0" '
-             f'conaffinity="0" group="2" rgba="{TAIL_RGBA}"/></body>')
+# The features: spheres on one mocap body (the hamster rolls, so they can't ride it), massless and contactless like
+# the views; group 2, the hamster's, so first person hides them.
+_SPHERES = (("tail", *TAIL), ("ear_left", (-EARS[0][0], *EARS[0][1:]), EARS[1]), ("ear_right", *EARS))
+FRAGMENT += ('\n<body name="features" mocap="true">'
+             + "".join(f'<geom name="{n}" type="sphere" size="{r!r}" pos="{x!r} {y!r} {z!r}" mass="0" contype="0" '
+                       f'conaffinity="0" group="2" rgba="{FEATURE_RGBA}"/>' for n, (x, y, z), r in _SPHERES)
+             + "</body>")
 
 
 def _quat(yaw, pitch):
@@ -43,7 +45,7 @@ def _quat(yaw, pitch):
 
 
 def pose(model, data, follow_yaw):
-    """Pose the view and tail mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the
+    """Pose the view and feature mocaps from fresh positions (after mj_kinematics); a later mj_kinematics moves the
     cameras."""
     facing, pitch = float(data.userdata[FACING]), float(data.userdata[PITCH])
     c = data.xpos[SHELL]
@@ -56,9 +58,9 @@ def pose(model, data, follow_yaw):
         q, fwd = _quat(yw, p)
         data.mocap_pos[mocap] = at - dist * np.array(fwd)
         data.mocap_quat[mocap] = q
-    # the tail: TAIL_OFFSET behind the hamster centre, its body's -y turned to -facing
-    mocap = model.body_mocapid[model.body("tail").id]
-    data.mocap_pos[mocap] = data.xpos[HAM] + TAIL_OFFSET * np.array([math.sin(facing), -math.cos(facing), 0.0])
+    # the features: at the hamster centre, their body's +y turned to the facing
+    mocap = model.body_mocapid[model.body("features").id]
+    data.mocap_pos[mocap] = data.xpos[HAM]
     data.mocap_quat[mocap] = (math.cos(facing / 2), 0.0, 0.0, math.sin(facing / 2))
 
 

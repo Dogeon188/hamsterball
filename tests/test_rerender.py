@@ -87,10 +87,10 @@ def test_rerender_reproduces_the_camera_pitch():
 def test_rerender_draws_the_tail_where_it_was():
     env = Collector(gym.make("Hamsterball-v1", tasks=["reach_goal"], levels=["first_goal"], camera_action=True))
     env.reset(seed=0)
-    for i in range(12):  # turn, so the tail swings off its reset pose
+    for i in range(12):  # turn, so the features swing off their reset pose
         env.step(np.array([0, 1, 1 if i < 6 else 0, 0], np.float32))
     src = env.create_dataset("test/tail-v0", algorithm_name="scripted")
-    out = rerender(src, ("chase",), (48, 64), "test/tail-rerendered-v0")  # the tail covers a few of these pixels
+    out = rerender(src, ("chase",), (48, 64), "test/tail-rerendered-v0")  # the features cover a few of these pixels
     frames = next(out.iterate_episodes()).observations["chase"]
     np.testing.assert_array_equal(frames, live_frames(src, "chase", (48, 64)))
 
