@@ -249,7 +249,7 @@ def test_the_region_drifts_faster_with_difficulty_and_its_centre_stays_on_the_fl
 
 @pytest.mark.parametrize("d, count", [(0.25, 1), (0.5, 2), (1.0, 3)])
 def test_survive_hazards_move_more_and_faster_with_difficulty_and_start_clear_of_the_spawn(d, count):
-    from hamsterball.core.generator import SHELL_R
+    from hamsterball.core.model import R as SHELL_R
     from hamsterball.core.marker import crosses
 
     for level in survive_levels(d):
@@ -331,7 +331,8 @@ def clear_of(boxes, x, y):
 
 @pytest.mark.parametrize("task", ["reach_goal", "waypoint_race", "collect_items", "unlock_goal"])
 def test_a_generated_route_keeps_the_shell_clear_of_every_hazard(task):
-    from hamsterball.core.generator import CELL, SHELL_R, _cell, _reach
+    from hamsterball.core.generator import CELL, _cell, _reach
+    from hamsterball.core.model import R as SHELL_R
 
     checked = 0
     for d in (0.5, 0.75, 1.0):
