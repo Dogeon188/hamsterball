@@ -31,6 +31,10 @@ _Avoid_: steering, heading (alone)
 The hamster's heading, which sets the frame of actions and observations and the yaw of the chase and first-person views. Only the controller turns it.
 _Avoid_: camera yaw, heading (alone), view angle
 
+**Tail**:
+A small cone behind the hamster pointing away from its facing, so the chase and follow views show which way the hamster faces. It is a look only: no mass, no contacts.
+_Avoid_: arrow, heading marker
+
 **Effort**:
 How hard the hamster runs in the abstract tier: together with a run direction, it sets the hamster's target lean.
 _Avoid_: throttle, speed command

@@ -153,5 +153,5 @@ def test_one_dataset_holds_levels_whose_core_states_differ_in_size():
     env.add_to_dataset(ds)
     assert len(sizes) == 2
     ds = minari.load_dataset("test/mixed-v0")
-    assert [ep.infos["core_state"].shape[1] for ep in ds.iterate_episodes()] == [111, max(sizes), max(sizes)]
+    assert [ep.infos["core_state"].shape[1] for ep in ds.iterate_episodes()] == [124, max(sizes), max(sizes)]
     replay(ds)

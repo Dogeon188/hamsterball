@@ -2,13 +2,14 @@
 
 ## Purpose
 
-The three views of spec §11 (`chase`, `follow`, `first_person`): a model `<camera>` per view on a mocap body, posed from the core state once per env step, and the `MjvOption` each view renders with.
+The three views of spec §11 (`chase`, `follow`, `first_person`): a model `<camera>` per view on a mocap body, posed from the core state once per env step, and the `MjvOption` each view renders with. Also the **tail** (GLOSSARY.md), a small cone on its own mocap body, posed the same way, that shows the facing in the chase and follow views.
 
 ## Interface
 
 - `VIEWS`: the view names, in that order.
-- `FRAGMENT`: MJCF for the three mocap bodies (`view_chase`, `view_follow`, `view_first_person`), each holding a camera named after its view. `model.build` appends it after the tier's fragment.
-- `pose(model, data, follow_yaw)`: writes `mocap_pos` and `mocap_quat` from fresh positions (after `mj_kinematics`). The cameras move only on the next `mj_kinematics` plus `mj_camlight`.
+- `FRAGMENT`: MJCF for the three mocap bodies (`view_chase`, `view_follow`, `view_first_person`), each holding a camera named after its view, then the `tail` mocap body holding the `tail` mesh geom. `model.build` appends it after the tier's fragment.
+- `ASSET`: the `<asset>` with the tail's mesh; `model.build` places it before the level.
+- `pose(model, data, follow_yaw)`: writes the views' and the tail's `mocap_pos` and `mocap_quat` from fresh positions (after `mj_kinematics`). The cameras move only on the next `mj_kinematics` plus `mj_camlight`.
 - `option(view)`: a fresh `MjvOption`. Groups 0 to 2 shown and 3 to 5 hidden for `chase` and `follow`; only group 0 for `first_person`.
 
 The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
@@ -18,12 +19,13 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - `chase`: `CHASE_DIST` back from the shell centre along the facing, pitched down by the camera pitch (`userdata[PITCH]`, see [step.md](step.md)), looking at the shell centre.
 - `follow`: the same construction at `FOLLOW_DIST` and `FOLLOW_PITCH`, with the level's `follow_yaw_deg` in place of the facing.
 - `first_person`: at the `hamster_eye` site, looking along the facing, pitched by the camera pitch minus `PITCH_DEFAULT`, so level with the horizon at the default.
+- The tail: a cone mesh from a vertex list (MuJoCo has no cone primitive; the compiler takes the convex hull of an 8-point ring and an apex) along its body's −y, base at the body origin. `pose` puts the body `TAIL_OFFSET` behind the hamster centre along −facing and turns it by the facing about z, so the cone points along −facing whatever the hamster's roll. It is in group 2, the hamster's, so `first_person` hides it with no change to `option`.
 - A MuJoCo camera looks along its −z with +y up, so the mocap's rotation matrix has columns right, up, −forward, with forward `(−sin yaw·cos pitch, cos yaw·cos pitch, −sin pitch)` (yaw 0 faces +y, as the facing frame).
 
 ## Invariants and checks
 
-- The mocaps carry no geoms, so they add no mass or contacts and never change a trajectory. They do add 21 numbers (`mocap_pos`, `mocap_quat`) to the core state, so the env poses them every env step, views or not, and `core_state` doesn't depend on the `views` kwarg.
-- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the facing and pitched by the camera pitch (the follow view not), follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720.
+- The view mocaps carry no geoms, and the tail's geom has `mass="0"` and `contype`/`conaffinity` 0, so none adds mass or contacts and none changes a trajectory (a mocap body is welded to the world anyway). They do add 13 numbers each to the core state (3 of `mocap_pos`, 4 of `mocap_quat`, and 6 of `xfrc_applied`, which `mjSTATE_INTEGRATION` holds for every body), so the env poses them every env step, views or not, and `core_state` doesn't depend on the `views` kwarg.
+- `uv run pytest tests/test_views.py`: shapes and dtype, chase and first person centred on the facing and pitched by the camera pitch (the follow view not), follow on the level's yaw, the geom groups, `obs_state=False`, rendering on a worker thread, the `MUJOCO_GL` default, the first-person near ground, rendering across `model_cache` eviction, a `view_size` larger than 1280×720, the tail along −facing just behind the hamster after reset and after turning, its group and physics-free flags, and a re-render drawing it where it was.
 
 ## Known quirks
 
@@ -37,10 +39,13 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
   | Marker colours (`MARKER_RGBA` in [level.py](level.md)) | goal `0.2 0.9 0.3 0.4` green, waypoints `0.2 0.5 1.0 0.4` blue, items `1.0 0.85 0.1 0.4` yellow, keys `1.0 0.4 0.1 0.4` orange, survive region `0.6 0.3 0.9 0.25` purple |
   | `HAZARD_RGBA`, `LOCKED_RGBA` | `0.9 0.1 0.1 0.5` red; `0.5 0.5 0.5 0.15` faint grey |
   | `PASSED_RGBA` (a passed waypoint) | `0.2 0.9 0.3 0.2` dim green |
+  | `TAIL_OFFSET`, `TAIL_LEN`, `TAIL_R` | 0.13 m behind the hamster centre (its radius is 0.12), 0.17 m long, 0.06 m base radius |
+  | `TAIL_RGBA` | `.35 .18 .08 1` dark brown |
 
 - The chase and follow cameras aim at the shell centre, so at 84×84 the shell covers the near part of the goal when the goal is straight ahead.
 - Pixels can't show the `first_person` group hiding: from inside, back-face culling already drops the shell sphere and the hamster. The test checks the option itself.
 - Keys (orange) and hazards (red) are close in hue, and the locked goal (faint grey) almost vanishes against the black sky; worth a look in play-test.
+- The chase view looks along the facing, so it sees the tail end-on, a dark nub on the hamster; the follow view sees it side-on unless the facing matches `follow_yaw_deg`. Worth a look in play-test.
 - The background is the clear colour, black: a skybox needs a texture, and spec §11 rules textures out.
 
 ## Decisions
@@ -62,3 +67,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, ticket mouse-camera/02: `CHASE_PITCH` is gone; the chase view reads the camera pitch from the core state, and the first-person view tilts by it minus its 15° default (the old chase pitch), so neither view changes at the default. The follow view keeps `FOLLOW_PITCH`.
 - 2026-10-22, code review of mouse-camera: `PITCH_DEFAULT` comes from `model.py` (was `step.py`), so this module imports only from `model.py`. No behaviour change.
 - 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): `pose` reads the facing from `userdata[FACING]`.
+- 2026-10-23, ticket mouse-camera/05: added the tail. First pick 0.15 m long, 0.05 m base, `.55 .3 .1` brown; in a sample chase frame it read as a faint nub against the orange hamster, so it went to 0.17 m, 0.06 m, and a darker brown. A test caught that `geom_xpos` lags `mocap_pos` until the next `mj_kinematics`, which the env runs only when rendering; the core state holds the mocap pose, so a re-render still draws the tail where it was.

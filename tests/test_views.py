@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from hamsterball.core import views
+from hamsterball.core.model import HAM
 from hamsterball.core.level import Level
 from test_env import level, make
 
@@ -133,4 +134,52 @@ def test_views_survive_model_cache_eviction():
         assert len(env.unwrapped._cores) == 1
         if name == "first_goal":
             assert abs(goal_x(obs["chase"]) - 0.5) < 0.05
+    env.close()
+
+
+def tail_points(env):
+    """The tail mesh's vertices in world coordinates, and the hamster centre."""
+    m, d = env.unwrapped.core.model, env.unwrapped.core.data
+    g = m.geom("tail").id
+    mesh = m.geom_dataid[g]
+    v = m.mesh_vert[m.mesh_vertadr[mesh] : m.mesh_vertadr[mesh] + m.mesh_vertnum[mesh]]
+    return d.geom_xpos[g] + v @ d.geom_xmat[g].reshape(3, 3).T, d.xpos[HAM]
+
+
+def test_the_tail_points_away_from_the_facing_from_just_behind_the_hamster():
+    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap poses to the geoms
+    env.reset(seed=0)
+    for facing in (0.0, math.radians(60)):  # 60 deg: after two full turns left
+        pts, ham = tail_points(env)
+        back = np.array([math.sin(facing), -math.cos(facing), 0.0])  # -facing; facing 0 faces +y
+        along = (pts - ham) @ back
+        assert 0.12 <= along.min() < 0.2  # its base just behind the hamster (radius 0.12)
+        tip = pts[along.argmax()] - ham
+        assert np.allclose(tip / np.linalg.norm(tip), back, atol=1e-6)
+        for _ in range(2):
+            env.step(np.array([0, 0, 1, 0], np.float32))
+    env.close()
+
+
+def test_the_tail_shows_in_chase_and_follow_only_and_never_touches_the_physics():
+    env = make()
+    env.reset(seed=0)
+    m = env.unwrapped.core.model
+    g = m.geom("tail").id
+    group = m.geom_group[g]
+    assert views.option("chase").geomgroup[group] and views.option("follow").geomgroup[group]
+    assert not views.option("first_person").geomgroup[group]
+    assert (m.geom_contype[g], m.geom_conaffinity[g], m.body_mass[m.geom_bodyid[g]]) == (0, 0, 0)
+    assert m.body_mocapid[m.geom_bodyid[g]] >= 0  # a mocap body: welded to the world, so nothing pushes it
+
+
+def test_a_rerender_draws_the_tail_where_it_was():
+    env = make(camera_action=True, views=("chase",))  # rendering carries the mocap poses to the geoms
+    env.reset(seed=0)
+    env.step(np.array([1, 0, 1, 0], np.float32))
+    pts, _ = tail_points(env)
+    s = env.unwrapped.core.state()
+    env.reset(seed=1)
+    env.unwrapped.step_to(s)
+    assert np.allclose(tail_points(env)[0], pts)
     env.close()
