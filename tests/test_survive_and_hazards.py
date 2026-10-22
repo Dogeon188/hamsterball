@@ -153,6 +153,22 @@ def test_an_item_is_collected_on_touch():
     assert not terminated and info["reward_terms"]["event"] == 1.0
 
 
+def no_event(steps):
+    return not any(s[2] for s in steps) and all(s[4]["reward_terms"]["event"] == 0 for s in steps)
+
+
+def test_a_waypoint_passes_on_touch_and_not_a_hair_clear():
+    (_, _, terminated, _, info), *_ = first_steps("waypoint_race", touch_level("waypoint_race", waypoints=[TOUCH, FAR]), 1)
+    assert not terminated and info["reward_terms"]["event"] == 1.0
+    assert no_event(first_steps("waypoint_race", touch_level("waypoint_race", waypoints=[CLEAR, FAR])))
+
+
+def test_a_key_is_collected_on_touch_and_not_a_hair_clear():
+    (_, _, terminated, _, info), *_ = first_steps("unlock_goal", touch_level("unlock_goal", keys=[TOUCH, FAR], goal=FAR), 1)
+    assert not terminated and info["reward_terms"]["event"] == 1.0
+    assert no_event(first_steps("unlock_goal", touch_level("unlock_goal", keys=[CLEAR, FAR], goal=FAR)))
+
+
 def test_a_locked_goal_touched_does_nothing():
     steps = first_steps("unlock_goal", touch_level("unlock_goal", keys=[FAR], goal=TOUCH))
     assert not any(s[2] for s in steps) and all(s[4]["reward_terms"]["event"] == 0 for s in steps)
