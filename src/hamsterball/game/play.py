@@ -12,6 +12,7 @@ from ..core.model import DT
 
 DEADZONE = 0.15  # radial, both sticks
 WALK, RUN, SPRINT = 0.25, 0.5, 1.0
+MOUSE_SENS = 0.05  # cam_yaw per pixel: 0.1 deg/px, since cam_yaw 1 turns 2 deg in one env step
 
 
 def _stick(m):
@@ -19,11 +20,31 @@ def _stick(m):
     return min((m - DEADZONE) / (1 - DEADZONE), 1.0)
 
 
-def action(keys, left=(0.0, 0.0), right_x=0.0):
+class Mouse:
+    """Horizontal mouse motion to cam_yaw: right turns right, at most ±1 per frame; the rest carries to later frames."""
+
+    def __init__(self, sens=MOUSE_SENS):
+        self.sens = sens
+        self.clear()
+
+    def clear(self):
+        """Drop carried motion (the cursor was released, or an episode starts)."""
+        self.carry = 0.0
+
+    def move(self, dx):
+        """This frame's cam_yaw from dx pixels of motion plus what's carried."""
+        self.carry -= dx * self.sens
+        cam = min(max(self.carry, -1.0), 1.0)
+        self.carry -= cam
+        return cam
+
+
+def action(keys, left=(0.0, 0.0), right_x=0.0, mouse_cam=None):
     """The 3-D action [run_x, run_y, cam_yaw] (camera frame: x right, y forward) from held keys and stick axes.
 
     keys: names held, from {"w", "a", "s", "d", "shift", "ctrl", "q", "e"}. Sticks are GLFW axes (y down).
-    A stick outside its deadzone overrides the keys it stands for.
+    A stick outside its deadzone overrides the keys it stands for; a non-zero mouse_cam (from Mouse.move) overrides
+    the right stick and Q/E.
     """
     m = math.hypot(*left)
     if m > DEADZONE:
@@ -33,7 +54,9 @@ def action(keys, left=(0.0, 0.0), right_x=0.0):
         n = np.linalg.norm(d)
         effort = WALK if "shift" in keys else SPRINT if "ctrl" in keys else RUN
         run = d / n * effort if n else d
-    if abs(right_x) > DEADZONE:
+    if mouse_cam:
+        cam = mouse_cam
+    elif abs(right_x) > DEADZONE:
         cam = -math.copysign(_stick(abs(right_x)), right_x)
     else:
         cam = ("q" in keys) - ("e" in keys)

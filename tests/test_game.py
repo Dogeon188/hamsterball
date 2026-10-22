@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from hamsterball.game.play import action
+from hamsterball.game.play import Mouse, action
 
 
 def test_keys_run_in_the_camera_frame_at_half_effort():
@@ -42,6 +42,21 @@ def test_right_stick_x_sets_cam_yaw_and_overrides_q_e():
     assert action({"q"}, right_x=0.1)[2] == 1  # inside the deadzone
     assert action({"q"}, right_x=1.0)[2] == pytest.approx(-1.0)  # right stick right turns right
     assert action(set(), right_x=-0.575)[2] == pytest.approx(0.5)
+
+
+def test_a_mouse_flick_turns_at_the_max_rate_over_frames_until_spent():
+    m = Mouse(sens=0.1)
+    assert [m.move(d) for d in (25, 0, 0, 0)] == pytest.approx([-1, -1, -0.5, 0])  # right turns right; 2.5 carried
+    assert m.move(-4) == pytest.approx(0.4)
+    m.move(30)
+    m.clear()
+    assert m.move(0) == 0
+
+
+def test_mouse_motion_overrides_the_right_stick_and_q_e():
+    assert action({"q"}, right_x=1.0, mouse_cam=0.3)[2] == pytest.approx(0.3)
+    assert action({"q"}, mouse_cam=0.0)[2] == 1  # no motion and nothing carried: the keys win
+    assert action(set(), right_x=1.0, mouse_cam=0.0)[2] == pytest.approx(-1.0)
 
 
 class FakeClock:
@@ -204,6 +219,7 @@ def test_the_window_module_imports_and_the_cli_prints_help():
 
     r = CliRunner().invoke(main, ["--help"])
     assert r.exit_code == 0
+    assert "mouse" in r.output
     for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty"):
         assert flag in r.output
 
