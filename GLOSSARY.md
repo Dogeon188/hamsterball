@@ -78,8 +78,12 @@ How hard a generated level is: a number from 0 (easiest) to 1 (hardest) that a l
 _Avoid_: level (as a difficulty grade), tier
 
 **Marker**:
-A volume in a level that a task reacts to when the shell touches it: a goal, waypoint, item, key, or hazard. The survive region is the exception: it tests whether the hamsterball's centre is inside it.
+A volume in a level that a task reacts to: a goal, waypoint, item, key, hazard, or the survive region. When one triggers follows the **Touch rule**.
 _Avoid_: trigger, checkpoint
+
+**Touch rule**:
+When a marker triggers: every marker but the survive region triggers once the shell touches it, at any point of the shell's outer sphere. The survive region and the kill plane test the hamsterball's centre instead, since being inside the region or fallen off is about where the hamsterball is, not what it grazes.
+_Avoid_: hit test, centre rule
 
 **Motion**:
 A scripted movement of a part of a level over sim time: a closed **path** walked at constant speed or a sine **oscillation** along an axis, either with a constant spin about the vertical, and for a kinematic body optionally a **tilt** (a rocking about a horizontal axis). A mover's pose is a function of its motion and the sim time alone.
@@ -110,7 +114,7 @@ Where a task in a level starts the hamsterball, together with the hamster's init
 _Avoid_: start point, respawn
 
 **Hazard**:
-A marker that ends the episode in failure when the shell touches it. It may move by a **Motion**.
+A marker that ends the episode in failure when it triggers, by the **Touch rule** when the shell touches it. It may move by a **Motion**.
 _Avoid_: trap, death zone
 
 **Cliff**:
@@ -159,7 +163,7 @@ How far below the horizon the chase view looks; it pitches the chase and first-p
 _Avoid_: tilt (a mover's rocking), elevation, view angle
 
 **Hitbox view**:
-A debug overlay on the game's view that draws what the normal view leaves out: the kill plane as a translucent sheet at its height, which the game window adds to its scene (the model holds no such geom), and a dot at the shell centre, the point the kill plane and the survive region test. Only the game shows it; pixel observations never do.
+A debug overlay on the game's view that draws what the normal view leaves out: the kill plane as a translucent sheet at its height, which the game window adds to its scene (the model holds no such geom), and a dot at the shell centre, the point the kill plane and the survive region test under the **Touch rule**. Only the game shows it; pixel observations never do.
 _Avoid_: debug view, collision view
 
 **Pose stream**:
