@@ -16,7 +16,7 @@ def pose_stream(dataset, episode):
             if i == 0:
                 yield {
                     "pose_format": POSE_FORMAT, "level": env.level.canonical(), "level_id": env.level.id,
-                    "task": env.task, "rate": 1 / (env.frame_skip * DT), "step_limit": env._max_steps,
+                    "task": env.task, "rate": 1 / (env.frame_skip * DT), "step_limit": env.step_limit,
                 }
             yield env.pose()
     finally:

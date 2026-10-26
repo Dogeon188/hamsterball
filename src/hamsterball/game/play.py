@@ -153,7 +153,7 @@ def sim_time(env):
     """(elapsed, limit) in sim seconds."""
     e = env.unwrapped
     dt = e.frame_skip * DT
-    return e._steps * dt, e._max_steps * dt
+    return e._steps * dt, e.step_limit * dt
 
 
 def progress(env):

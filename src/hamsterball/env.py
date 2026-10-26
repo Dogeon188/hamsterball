@@ -279,12 +279,22 @@ class HamsterballEnv(gym.Env):
         }
         return obs, event + time + shaping, terminated, truncated, info
 
+    @property
+    def step_limit(self):
+        """The episode's limit in env steps (set at reset)."""
+        return self._max_steps
+
     def pose(self):
         """The current env step's pose as plain Python data (json.dumps takes it): bodies, facing and pitch, views,
         marker states, the target's key, and, on the episode's last pose only, the outcome. Writes nothing; read it
         after reset, step, or step_to (see env.md)."""
         m, d = self.core.model, self.core.data
-        pq = lambda pos, quat: {"pos": [float(x) for x in pos], "quat": [float(x) for x in quat]}  # noqa: E731
+
+        def pq(pos, quat):
+            return {"pos": [float(x) for x in pos], "quat": [float(x) for x in quat]}
+
+        def key(t):  # the canonical YAML's spelling
+            return t[0] if t[1] is None else f"{t[0]}[{t[1]}]"
 
         def in_hamster(b):  # the shell, and the hamster body with its subtree
             while b > HAM:
@@ -297,14 +307,13 @@ class HamsterballEnv(gym.Env):
         for v in V.VIEWS:  # each camera sits at its mocap body's origin
             mocap = m.body_mocapid[m.body(f"view_{v}").id]
             views[v] = {**pq(d.mocap_pos[mocap], d.mocap_quat[mocap]), "fovy": float(m.cam_fovy[m.camera(v).id])}
-        key = lambda t: t[0] if t[1] is None else f"{t[0]}[{t[1]}]"  # noqa: E731  the canonical YAML's spelling
         live = self._live()
         # survive's region never completes: it stays active, success included
         markers = {key(t): {"state": "active" if self.task == "survive" or t in live
                             else "locked" if t in self._todo else "done"} for t in self._all_targets}
         markers.update({f"hazards[{i}]": {"state": "active"} for i in range(len(self.level.hazards))})
         # a moving or attached marker carries its drawn geom's world pose (the geom's name is the compiled one)
-        geoms = [(key(t), self._marker(t), f"{self.task}/{t[0]}" + ("" if t[1] is None else f"/{t[1]}")) for t in self._all_targets]
+        geoms = [(key(t), self._marker(t), self._geom_name(t)) for t in self._all_targets]
         geoms += [(f"hazards[{i}]", h, f"hazard{i}") for i, h in enumerate(self.level.hazards)]
         for k, mk, name in geoms:
             if "motion" in mk or "attach" in mk:
@@ -326,10 +335,14 @@ class HamsterballEnv(gym.Env):
         m = self.level.tasks[self.task][k]
         return m if i is None else m[i]
 
-    def _look(self, target, rgba):
+    def _geom_name(self, target):
+        """The compiled name of a target's drawn geom."""
         k, i = target
+        return f"{self.task}/{k}" + ("" if i is None else f"/{i}")
+
+    def _look(self, target, rgba):
         m = self.core.model
-        m.geom_rgba[m.geom(f"{self.task}/{k}" + ("" if i is None else f"/{i}")).id] = rgba
+        m.geom_rgba[m.geom(self._geom_name(target)).id] = rgba
 
     def _live(self):
         """The targets that can trigger now: only the next waypoint; the unlock goal only once every key is in."""
@@ -439,10 +452,14 @@ class HamsterballEnv(gym.Env):
 
     def _tile_fractions(self):
         """Per tile, the fraction of its delay elapsed since the shell first touched it, in [0, 1]: the one source of
-        the tile look and the pose's `tiles` (untouched tiles hold +inf in their slot, so 0)."""
-        slot, _, delay, adrs = self.core.tiles
-        d = self.core.data
-        return [min(1.0, max(0.0, (d.time - d.userdata[slot + i]) / delay)) if delay else 1.0 for i in range(len(adrs))]
+        the tile look and the pose's `tiles` (untouched tiles hold +inf in their slot: 0 whatever the delay; a touched
+        tile with delay 0 is 1)."""
+        tiles, d = self.core.tiles, self.core.data
+        out = []
+        for i in range(len(tiles.tiles)):
+            elapsed = d.time - d.userdata[tiles.slot + i]
+            out.append(0.0 if math.isinf(elapsed) else min(1.0, max(0.0, elapsed / tiles.delay)) if tiles.delay else 1.0)
+        return out
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""

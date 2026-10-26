@@ -19,7 +19,6 @@ Recovers the env with no views, then drives it with [rerender.md](rerender.md)'s
 
 ## Known quirks
 
-- `step_limit` reads the env's `_max_steps`, which is private; there is no public accessor.
 - An unknown episode id raises, as the other data functions do.
 
 ## Decisions
@@ -32,3 +31,4 @@ Recovers the env with no views, then drives it with [rerender.md](rerender.md)'s
 ## History
 
 - 2026-10-27, ticket pose-stream/03: added.
+- 2026-10-27, code review of pose-stream: `step_limit` reads the env's public `step_limit` property (was the private `_max_steps`).

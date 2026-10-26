@@ -23,7 +23,8 @@ A `--size` that doesn't parse as `HxW` is a usage error (exit 2). Other errors, 
 
 ## Invariants and checks
 
-- `uv run --all-extras pytest tests/test_datacli.py`: replay passes a clean dataset and counts its episodes, exits 1 naming the diverging step on a recording made under another drag constant, a bad `--size` is a usage error, `poses` writes a header line and n + 1 pose lines equal to `pose_stream` (`tests/test_pose_stream.py`), rerender then video then lerobot run end to end (the lerobot half skips without its extra, so on Python 3.11), and a missing Minari names the extra.
+- `uv run --all-extras pytest tests/test_datacli.py`: replay passes a clean dataset and counts its episodes, exits 1 naming the diverging step on a recording made under another drag constant, a bad `--size` is a usage error, rerender then video then lerobot run end to end (the lerobot half skips without its extra, so on Python 3.11), and a missing Minari names the extra.
+- `uv run --all-extras pytest tests/test_pose_stream.py`: `poses` writes a header line and n + 1 pose lines equal to `pose_stream`.
 
 ## Known quirks
 
@@ -31,11 +32,11 @@ A `--size` that doesn't parse as `HxW` is a usage error (exit 2). Other errors, 
 
 ## Decisions
 
-- 2026-10-23, ticket data-clis/01: one group with its subcommands (four at first), not four scripts, so one module holds the Minari check and one `[project.scripts]` entry covers them.
+- 2026-10-23, ticket data-clis/01: one group with four subcommands, not four scripts, so one module holds the Minari check and one `[project.scripts]` entry covers them.
 - 2026-10-23, ticket data-clis/01: a top-level module, not inside `hamsterball.data`, for the reason [baseline.md](baseline.md) logs: the CLI must name the extra when Minari is missing.
 - 2026-10-23, ticket data-clis/01: `replay` keeps stopping at the first mismatch, so `data/replay.py` stays unchanged.
 
-- 2026-10-27, ticket pose-stream/03: `poses` added; it writes the function's dicts with `json.dumps` and adds nothing.
+- 2026-10-27, ticket pose-stream/03: `poses` added; it writes the function's dicts with `json.dumps` and adds nothing. Supersedes the 2026-10-23 "four subcommands" entry's count: the group now has five.
 
 ## Tried and rejected
 
@@ -43,3 +44,4 @@ A `--size` that doesn't parse as `HxW` is a usage error (exit 2). Other errors, 
 
 - 2026-10-23, ticket data-clis/01: added.
 - 2026-10-27, ticket pose-stream/03: added `poses`.
+- 2026-10-27, code review of pose-stream: the Invariants line named `tests/test_datacli.py` for the `poses` check, which lives in `tests/test_pose_stream.py`; the line now names that command. The 2026-10-23 Decisions entry's "four subcommands" had been reworded in place; restored, and the count change is recorded in the pose-stream/03 entry.
