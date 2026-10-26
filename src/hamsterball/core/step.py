@@ -103,7 +103,7 @@ def drag(data):
 def contain(model, data, resting_radius):
     """Keep the hamster inside: an inelastic impulse past FIELD_START, a position stop at FIELD_HARD.
 
-    Conserves momentum, angular momentum, and the pair's centre of mass. Needs fresh xpos and subtree_com.
+    Conserves momentum, angular momentum, and the pair's centre of mass. Needs fresh xpos, subtree_com and cdof.
     """
     cx, cy, cz = data.xpos[SHELL].tolist()
     hx, hy, hz = data.subtree_com[HAM].tolist()
@@ -114,7 +114,10 @@ def contain(model, data, resting_radius):
         return
     ux, uy, uz = rx / dist, ry / dist, rz / dist
     qv = data.qvel
-    w = (qv[HAM_DOF] - qv[SHELL_DOF]) * ux + (qv[HAM_DOF + 1] - qv[SHELL_DOF + 1]) * uy + (qv[HAM_DOF + 2] - qv[SHELL_DOF + 2]) * uz
+    mujoco.mj_comVel(model, data)  # the hamster subtree's centre-of-mass velocity, so swinging limbs count
+    mujoco.mj_subtreeVel(model, data)
+    vx, vy, vz = data.subtree_linvel[HAM].tolist()
+    w = (vx - qv[SHELL_DOF]) * ux + (vy - qv[SHELL_DOF + 1]) * uy + (vz - qv[SHELL_DOF + 2]) * uz
     if w > 0:
         j = min(1.0, depth / (FIELD_HARD - FIELD_START)) * MU * w
         jh, js = j / M_HAM, j / M_SHELL
