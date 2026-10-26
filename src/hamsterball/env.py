@@ -3,6 +3,7 @@
 import glob
 import math
 import os
+import re
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -290,7 +291,8 @@ class HamsterballEnv(gym.Env):
                 b = m.body_parentid[b]
             return b == HAM
 
-        bodies = {m.body(b).name: pq(d.xpos[b], d.xquat[b]) for b in range(m.nbody) if b == SHELL or in_hamster(b)}
+        bodies = {m.body(b).name: pq(d.xpos[b], d.xquat[b]) for b in range(m.nbody)
+                  if b == SHELL or in_hamster(b) or re.fullmatch(r"(body|tile)\d+", m.body(b).name)}
         views = {}
         for v in V.VIEWS:  # each camera sits at its mocap body's origin
             mocap = m.body_mocapid[m.body(f"view_{v}").id]
@@ -301,10 +303,20 @@ class HamsterballEnv(gym.Env):
         markers = {key(t): {"state": "active" if self.task == "survive" or t in live
                             else "locked" if t in self._todo else "done"} for t in self._all_targets}
         markers.update({f"hazards[{i}]": {"state": "active"} for i in range(len(self.level.hazards))})
+        # a moving or attached marker carries its drawn geom's world pose (the geom's name is the compiled one)
+        geoms = [(key(t), self._marker(t), f"{self.task}/{t[0]}" + ("" if t[1] is None else f"/{t[1]}")) for t in self._all_targets]
+        geoms += [(f"hazards[{i}]", h, f"hazard{i}") for i, h in enumerate(self.level.hazards)]
+        for k, mk, name in geoms:
+            if "motion" in mk or "attach" in mk:
+                g, q = m.geom(name).id, np.zeros(4)
+                mujoco.mju_mat2Quat(q, d.geom_xmat[g])
+                markers[k].update(pq(d.geom_xpos[g], q))
         pose = {"step": self._steps, "time": float(d.time), "bodies": bodies, "facing": float(d.userdata[FACING]),
                 "pitch": float(d.userdata[PITCH]), "views": views, "markers": markers,
                 "target": None if self._success else key(self._nearest(d.qpos[SHELL_QPOS : SHELL_QPOS + 3]))}
         outcome = "success" if self._success else self._failure or ("truncated" if self._truncated else None)
+        if self.core.tiles is not None:
+            pose["tiles"] = self._tile_fractions()
         if outcome:
             pose["outcome"] = outcome
         return pose
@@ -421,11 +433,16 @@ class HamsterballEnv(gym.Env):
         tiles = self.core.tiles
         if tiles is None:
             return
-        m, d = self.core.model, self.core.data
-        slot, b0, delay, _ = tiles
-        for i, rgba in enumerate(self._cores[self.level.id].tile_rgba):
-            f = min(1.0, (d.time - d.userdata[slot + i]) / delay) if delay else 1.0
-            m.geom_rgba[m.body_geomadr[b0 + i]] = rgba + max(0.0, f) * (np.array(TILE_WARN_RGBA) - rgba)
+        m = self.core.model
+        for i, (rgba, f) in enumerate(zip(self._cores[self.level.id].tile_rgba, self._tile_fractions())):
+            m.geom_rgba[m.body_geomadr[tiles.body + i]] = rgba + f * (np.array(TILE_WARN_RGBA) - rgba)
+
+    def _tile_fractions(self):
+        """Per tile, the fraction of its delay elapsed since the shell first touched it, in [0, 1]: the one source of
+        the tile look and the pose's `tiles` (untouched tiles hold +inf in their slot, so 0)."""
+        slot, _, delay, adrs = self.core.tiles
+        d = self.core.data
+        return [min(1.0, max(0.0, (d.time - d.userdata[slot + i]) / delay)) if delay else 1.0 for i in range(len(adrs))]
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""
