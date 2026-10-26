@@ -3,6 +3,7 @@
 import glob
 import math
 import os
+import re
 import sys
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -141,11 +142,12 @@ class HamsterballEnv(gym.Env):
         # the epsilon keeps a whole number of env steps (30 s at 60 Hz) from rounding up to one more
         self._max_steps = math.ceil(limit / (self.frame_skip * DT) - 1e-9)
         self._steps = 0
-        self._success, self._failure = False, None
+        self._success, self._failure, self._truncated = False, None, False
         # targets left, in task order, each (marker key, index or None): keys before the goal, waypoint i before i + 1
         self._todo = [
             (k, i) for k in TASK_MARKERS[self.task] for i in (range(len(block[k])) if k in MARKER_LISTS else [None])
         ]
+        self._all_targets = list(self._todo)
         self._n_targets = len(self._todo)
         # marker looks: the episode task's markers in their kind's colour, the unlock goal locked, other tasks' hidden
         m = self.core.model
@@ -263,6 +265,7 @@ class HamsterballEnv(gym.Env):
         self._prev, self._prev_t = pos, now
         terminated = self._success or self._failure is not None
         truncated = self.truncate and not terminated and self._steps >= self._max_steps
+        self._truncated = truncated
         obs, vec = self._observe()
         phi = 0.0 if terminated else self._potential(pos)  # Φ = 0 at terminal states
         shaping = self.shaping_gamma * phi - self._phi if self.shaped else 0.0
@@ -276,15 +279,70 @@ class HamsterballEnv(gym.Env):
         }
         return obs, event + time + shaping, terminated, truncated, info
 
+    @property
+    def step_limit(self):
+        """The episode's limit in env steps (set at reset)."""
+        return self._max_steps
+
+    def pose(self):
+        """The current env step's pose as plain Python data (json.dumps takes it): bodies, facing and pitch, views,
+        marker states, the target's key, and, on the episode's last pose only, the outcome. Writes nothing; read it
+        after reset, step, or step_to (see env.md)."""
+        m, d = self.core.model, self.core.data
+
+        def pq(pos, quat):
+            return {"pos": [float(x) for x in pos], "quat": [float(x) for x in quat]}
+
+        def key(t):  # the canonical YAML's spelling
+            return t[0] if t[1] is None else f"{t[0]}[{t[1]}]"
+
+        def in_hamster(b):  # the shell, and the hamster body with its subtree
+            while b > HAM:
+                b = m.body_parentid[b]
+            return b == HAM
+
+        bodies = {m.body(b).name: pq(d.xpos[b], d.xquat[b]) for b in range(m.nbody)
+                  if b == SHELL or in_hamster(b) or re.fullmatch(r"(body|tile)\d+", m.body(b).name)}
+        views = {}
+        for v in V.VIEWS:  # each camera sits at its mocap body's origin
+            mocap = m.body_mocapid[m.body(f"view_{v}").id]
+            views[v] = {**pq(d.mocap_pos[mocap], d.mocap_quat[mocap]), "fovy": float(m.cam_fovy[m.camera(v).id])}
+        live = self._live()
+        # survive's region never completes: it stays active, success included
+        markers = {key(t): {"state": "active" if self.task == "survive" or t in live
+                            else "locked" if t in self._todo else "done"} for t in self._all_targets}
+        markers.update({f"hazards[{i}]": {"state": "active"} for i in range(len(self.level.hazards))})
+        # a moving or attached marker carries its drawn geom's world pose (the geom's name is the compiled one)
+        geoms = [(key(t), self._marker(t), self._geom_name(t)) for t in self._all_targets]
+        geoms += [(f"hazards[{i}]", h, f"hazard{i}") for i, h in enumerate(self.level.hazards)]
+        for k, mk, name in geoms:
+            if "motion" in mk or "attach" in mk:
+                g, q = m.geom(name).id, np.zeros(4)
+                mujoco.mju_mat2Quat(q, d.geom_xmat[g])
+                markers[k].update(pq(d.geom_xpos[g], q))
+        pose = {"step": self._steps, "time": float(d.time), "bodies": bodies, "facing": float(d.userdata[FACING]),
+                "pitch": float(d.userdata[PITCH]), "views": views, "markers": markers,
+                "target": None if self._success else key(self._nearest(d.qpos[SHELL_QPOS : SHELL_QPOS + 3]))}
+        outcome = "success" if self._success else self._failure or ("truncated" if self._truncated else None)
+        if self.core.tiles is not None:
+            pose["tiles"] = self._tile_fractions()
+        if outcome:
+            pose["outcome"] = outcome
+        return pose
+
     def _marker(self, target):
         k, i = target
         m = self.level.tasks[self.task][k]
         return m if i is None else m[i]
 
-    def _look(self, target, rgba):
+    def _geom_name(self, target):
+        """The compiled name of a target's drawn geom."""
         k, i = target
+        return f"{self.task}/{k}" + ("" if i is None else f"/{i}")
+
+    def _look(self, target, rgba):
         m = self.core.model
-        m.geom_rgba[m.geom(f"{self.task}/{k}" + ("" if i is None else f"/{i}")).id] = rgba
+        m.geom_rgba[m.geom(self._geom_name(target)).id] = rgba
 
     def _live(self):
         """The targets that can trigger now: only the next waypoint; the unlock goal only once every key is in."""
@@ -294,11 +352,17 @@ class HamsterballEnv(gym.Env):
             return self._todo[:-1]
         return self._todo
 
-    def _target(self, pos):
-        """The current target's centre at the current sim time: the nearest live target (spec §9)."""
+    def _nearest(self, pos):
+        """The current target (marker key, index): the live target whose centre is nearest `pos` at the current sim
+        time (spec §9)."""
         now = self.core.data.time
-        return min((centre(m, now, self._frame(m)) for m in map(self._marker, self._live())),
-                   key=lambda c: np.linalg.norm(c - pos))
+        return min(self._live(), key=lambda t: np.linalg.norm(
+            centre(m := self._marker(t), now, self._frame(m)) - pos))
+
+    def _target(self, pos):
+        """The current target's centre at the current sim time."""
+        m = self._marker(self._nearest(pos))
+        return centre(m, self.core.data.time, self._frame(m))
 
     def _frame(self, marker):
         """The world pose (pos, quat) of the body an attached marker rides, from the core state's qpos (a driven
@@ -382,11 +446,20 @@ class HamsterballEnv(gym.Env):
         tiles = self.core.tiles
         if tiles is None:
             return
-        m, d = self.core.model, self.core.data
-        slot, b0, delay, _ = tiles
-        for i, rgba in enumerate(self._cores[self.level.id].tile_rgba):
-            f = min(1.0, (d.time - d.userdata[slot + i]) / delay) if delay else 1.0
-            m.geom_rgba[m.body_geomadr[b0 + i]] = rgba + max(0.0, f) * (np.array(TILE_WARN_RGBA) - rgba)
+        m = self.core.model
+        for i, (rgba, f) in enumerate(zip(self._cores[self.level.id].tile_rgba, self._tile_fractions())):
+            m.geom_rgba[m.body_geomadr[tiles.body + i]] = rgba + f * (np.array(TILE_WARN_RGBA) - rgba)
+
+    def _tile_fractions(self):
+        """Per tile, the fraction of its delay elapsed since the shell first touched it, in [0, 1]: the one source of
+        the tile look and the pose's `tiles` (untouched tiles hold +inf in their slot: 0 whatever the delay; a touched
+        tile with delay 0 is 1)."""
+        tiles, d = self.core.tiles, self.core.data
+        out = []
+        for i in range(len(tiles.tiles)):
+            elapsed = d.time - d.userdata[tiles.slot + i]
+            out.append(0.0 if math.isinf(elapsed) else min(1.0, max(0.0, elapsed / tiles.delay)) if tiles.delay else 1.0)
+        return out
 
     def _renderer(self):
         """The current level's renderer, made lazily, so on the thread and in the process that steps the env."""

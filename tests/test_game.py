@@ -223,7 +223,8 @@ def test_waypoint_progress_stops_at_the_last_waypoint_after_a_win():
 
     env = HamsterballEnv(["waypoint_race"], levels=["waypoint_loop"], camera_action=True)
     env.reset()
-    env.unwrapped._todo.clear()  # every waypoint passed
+    env.unwrapped._todo.clear()  # every waypoint passed: a win
+    env.unwrapped._success = True
     assert progress(env) == "waypoint 4/4"
 
 

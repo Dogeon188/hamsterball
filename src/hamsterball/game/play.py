@@ -153,27 +153,30 @@ def sim_time(env):
     """(elapsed, limit) in sim seconds."""
     e = env.unwrapped
     dt = e.frame_skip * DT
-    return e._steps * dt, e._max_steps * dt
+    return e._steps * dt, e.step_limit * dt
 
 
 def progress(env):
-    """Task progress: waypoint 2/5, items 3/7, keys 1/2, or survive time left."""
-    e = env.unwrapped  # ponytail: reads the env's private target list; a public progress accessor if a second reader needs it
-    block = e.level.tasks[e.task]
-    left = [k for k, _ in e._todo]
+    """Task progress: waypoint 2/5, items 3/7, keys 1/2, or survive time left. Counts marker states from `pose()`."""
+    e = env.unwrapped
     if e.task == "survive":
         t, limit = sim_time(env)
         return f"survive: {limit - t:.1f} s left"
+    states = {k: v["state"] for k, v in e.pose()["markers"].items()}
+
+    def count(kind):  # (done, total) of the markers keyed `kind[i]`
+        s = [v for k, v in states.items() if k.startswith(kind + "[")]
+        return s.count("done"), len(s)
+
     if e.task == "waypoint_race":
-        n = len(block["waypoints"])
-        return f"waypoint {min(n - len(left) + 1, n)}/{n}"  # n/n after a win
+        done, n = count("waypoints")
+        return f"waypoint {min(done + 1, n)}/{n}"  # n/n after a win
     if e.task == "collect_items":
-        n = len(block["items"])
-        return f"items {n - len(left)}/{n}"
+        done, n = count("items")
+        return f"items {done}/{n}"
     if e.task == "unlock_goal":
-        n = len(block["keys"])
-        got = n - left.count("keys")
-        return f"keys {got}/{n}" + (": reach the goal" if got == n else "")
+        done, n = count("keys")
+        return f"keys {done}/{n}" + (": reach the goal" if done == n else "")
     return "reach the goal"
 
 
