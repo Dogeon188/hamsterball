@@ -493,3 +493,4 @@ pyrightconfig.json
 MUJOCO_LOG.TXT
 .DS_Store
 __MACOSX
+.claude
