@@ -491,3 +491,5 @@ pyrightconfig.json
 
 # MuJoCo crash logs
 MUJOCO_LOG.TXT
+.DS_Store
+__MACOSX
