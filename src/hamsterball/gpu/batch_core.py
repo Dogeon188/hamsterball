@@ -116,7 +116,7 @@ class BatchCore:
     """`num_envs` worlds of `core.Core`, stepped together. Like `Core` it holds constants (the model) plus the state in
     `data`; a world's state is read and written in the CPU core-state layout of its level."""
 
-    def __init__(self, tier=None, levels=(FLAT,), num_envs=1, camera_action=False, device="cpu"):
+    def __init__(self, tier=None, levels=(FLAT,), num_envs=1, camera_action=False, device="cpu", graph=True):
         """`levels`: the bank, each a `Level` or MJCF sections as `core.model.build` takes them. This slice batches only
         levels that compile to one model (a plane, no bodies). `device`: "cpu" or "cuda:N"."""
         tier = tier or AbstractTier()
@@ -128,6 +128,7 @@ class BatchCore:
         wp.config.quiet = True
         self.device = wp.get_device(device)  # raises RuntimeError for a CUDA device that doesn't exist
         self.tier, self.num_envs, self.camera_action = tier, num_envs, camera_action
+        self.graph = graph and self.device.is_cuda
         self.nlevels = len(sections)
         self.level_index = np.zeros(num_envs, np.int32)
         self.cpu_model = build(tier, sections[0], GAME_SIZE)
@@ -186,7 +187,7 @@ class BatchCore:
         torch_tensor = type(action).__module__.split(".")[0] == "torch"
         with wp.ScopedDevice(self.device):
             wp.copy(self.action, wp.from_torch(action.detach()) if torch_tensor else wp.array(action, dtype=float))
-            if self.device.is_cuda:
+            if self.graph:
                 if n not in self._graphs:
                     with wp.ScopedCapture() as capture:
                         self._launch(n)

@@ -1,6 +1,7 @@
 """The batched core against the CPU core (GPU effort, seam 1): shared states, one physics step, the CPU layout."""
 
 import math
+import os
 
 import mujoco
 import numpy as np
@@ -17,10 +18,13 @@ TIGHT = dict(rtol=1e-5, atol=1e-6)  # what the core-step kernels write: xfrc_app
 LOOSE = dict(rtol=1e-4, atol=1e-5)  # shell and hamster dofs after a physics step; see batch_core.md for the measurement
 
 
+DEVICE = os.environ.get("HAMSTERBALL_WARP_DEVICE", "cpu")  # "cuda:0" runs the same tests on a GPU
+
+
 def batch(**kw):
     from hamsterball.gpu.batch_core import BatchCore
 
-    return BatchCore(num_envs=2, device="cpu", camera_action=True, **kw)
+    return BatchCore(num_envs=2, device=DEVICE, camera_action=True, **kw)
 
 
 def fields(core):
@@ -127,6 +131,22 @@ def test_an_env_step_of_ten_physics_steps_stays_within_the_bound():
         np.testing.assert_allclose(got[f[k]], ref[f[k]], **LOOSE, err_msg=k)
 
 
+def test_the_captured_graph_matches_eager_launches():
+    """On CUDA the n steps run as one captured graph; on the CPU device both are eager, so this is trivial there."""
+    before, _, action, core = shared("running")
+    a, e = batch(), batch(graph=False)
+    for b in (a, e):
+        b.set_state(1, before)
+        for _ in range(3):
+            b.step(np.stack([np.zeros(4, np.float32), action]))
+    f = fields(core)
+    ga, ge = a.state(1), e.state(1)
+    np.testing.assert_allclose(ga[f["xfrc_applied"]], ge[f["xfrc_applied"]], **TIGHT)
+    for k in ("qpos", "qvel"):
+        np.testing.assert_allclose(ga[f[k]], ge[f[k]], **LOOSE, err_msg=k)
+    print("graph vs eager max |diff|:", float(np.abs(ga - ge).max()))
+
+
 def test_set_state_then_state_returns_the_cpu_vector():
     before, _, _, _ = shared("running")
     b = batch()
@@ -165,7 +185,7 @@ def test_the_articulated_tier_is_not_batched_yet():
         pass
 
     with pytest.raises(NotImplementedError):
-        BatchCore(tier=Articulated(), device="cpu")
+        BatchCore(tier=Articulated(), device=DEVICE)
 
 
 def test_a_plain_import_does_not_load_warp_or_torch():
