@@ -281,3 +281,17 @@ def test_collapse_tile_fraction_rises_from_zero_to_one_over_its_delay_and_the_po
             assert [p["tiles"][j] for p in poses] == [0.0] * len(poses)
     # a tile that has fallen is lower in the pose
     assert poses[-1]["bodies"][f"tile{i}"]["pos"][2] < poses[0]["bodies"][f"tile{i}"]["pos"][2]
+
+
+def test_a_zero_delay_tile_is_0_untouched_and_1_once_touched():
+    from hamsterball.env import LEVELS_DIR
+
+    d = yaml.safe_load((LEVELS_DIR / "survive_collapse.yaml").read_text())
+    d["collapse"]["delay"] = 0
+    env = gym.make("Hamsterball-v2", tasks=["survive"], levels=[Level.from_yaml(yaml.safe_dump(d))])
+    env.reset(seed=0)
+    assert set(env.unwrapped.pose()["tiles"]) == {0.0}
+    for _ in range(3):
+        env.step(Z)
+    tiles = env.unwrapped.pose()["tiles"]
+    assert 1.0 in tiles and 0.0 in tiles and set(tiles) <= {0.0, 1.0}

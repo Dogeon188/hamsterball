@@ -28,7 +28,7 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 
 ## Known quirks
 
-- `sim_time` still reads the env's private `_steps` and `_max_steps` (`progress` no longer reads any private state). A public accessor is the fix if a second reader appears.
+- `sim_time` still reads the env's private `_steps` (its limit comes from the public `step_limit`; `progress` reads no private state). A public accessor for the step count is the fix if a second reader appears.
 - `slack` 2 ms and the deadzone 0.15 need play-test; the slack keeps a late OS wake-up from counting as an overrun.
 - The gamepad has no walk or sprint buttons: the stick's deflection is the effort.
 - **Needs play-test:** the mouse's 0.1° per pixel on both axes, a guess from the plan. `STICK_TURN`, `STICK_PITCH`, and `MOUSE_SENS` assume 60 env steps a second (frame skip 10); they are fractions of the per-env-step angles in [step.md](../core/step.md).
@@ -65,3 +65,4 @@ The game's logic without a display (spec §13): input to the 4-D action, real-ti
 - 2026-10-22, ticket mouse-camera/04: `turn` and `cam_pitch` became per-env-step angles (30° and 15° at 1), test-first; `action` scales Q/E and the right stick by `TURN` and `PITCH`, and `MOUSE_SENS` is a (turn, pitch) pair, 0.1° per pixel each (was one 0.05, 0.1° per pixel turn and 0.075° pitch).
 - 2026-10-23, code review of mouse-camera tickets 04–05 (no behaviour change): `TURN` and `PITCH` are `STICK_TURN` and `STICK_PITCH` (`PITCH` shadowed `model.PITCH`, the userdata slot), and `action`'s turn is `turn` (was `cam`).
 - 2026-10-27, ticket pose-stream/04: `progress` counts `done` markers from `pose()`, test-first by the existing HUD tests (no behaviour change); the `ponytail:` comment on `_todo` is gone.
+- 2026-10-27, code review of pose-stream: `sim_time` reads the limit from `env.step_limit` instead of `_max_steps`, since `poses.py` became the second reader; `_steps` stays private (one reader).
