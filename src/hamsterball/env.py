@@ -59,6 +59,9 @@ def _levels(x):
     return [Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")]
 
 
+TIERS = {"abstract": AbstractTier}  # tier name -> constructor: the one lookup every compiled core goes through
+
+
 class HamsterballEnv(gym.Env):
     metadata = {"render_modes": []}
 
@@ -79,7 +82,7 @@ class HamsterballEnv(gym.Env):
         model_cache=16,
         difficulty=DIFFICULTY,
     ):
-        if tier != "abstract":
+        if tier not in TIERS:
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
         self.views = tuple(views)
         if unknown := set(self.views) - set(V.VIEWS):
@@ -100,7 +103,7 @@ class HamsterballEnv(gym.Env):
         # LRU keyed by level id: _Cached entries, a core and its renderer evicted together (spec §7, §11)
         self._cores, self.model_cache = OrderedDict(), model_cache
         # a generator pool has no level yet: the action space is the tier's, whatever the level
-        core = self._core(self.levels[0]) if self.levels else Core(AbstractTier(), camera_action=camera_action)
+        core = self._core(self.levels[0]) if self.levels else Core(TIERS[tier](), camera_action=camera_action)
         self.action_space = core.action_space
         inf = np.float32(np.inf)
         spaces = {}
@@ -116,7 +119,7 @@ class HamsterballEnv(gym.Env):
         if level.id in self._cores:
             self._cores.move_to_end(level.id)
         else:
-            core = Core(AbstractTier(), level, self.camera_action, self.view_size)
+            core = Core(TIERS[self.tier](), level, self.camera_action, self.view_size)
             m = core.model
             movers = [(g, mk["motion"], m.geom_pos[g].copy(), m.geom_quat[g].copy())
                       for g, mk in ((m.geom(name).id, mk) for name, mk in level.movers())]
