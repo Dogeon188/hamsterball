@@ -76,7 +76,7 @@ def build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0):
 {tier.fragment}
 {VIEWS}
 </worldbody>
-{bodies}</mujoco>"""
+{bodies}{tier.sections}</mujoco>"""
     m = mujoco.MjModel.from_xml_string(xml)
     assert m.body("shell").id == SHELL and m.body("hamster").id == HAM
     assert m.jnt_qposadr[m.body_jntadr[HAM]] == HAM_QPOS and m.jnt_dofadr[m.body_jntadr[HAM]] == HAM_DOF

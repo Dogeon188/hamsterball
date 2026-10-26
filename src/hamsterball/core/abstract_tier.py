@@ -22,6 +22,7 @@ LAST_TOUCH = CORE_SLOTS  # userdata slot, the first after the core's
 class AbstractTier:
     nuserdata = 1
     resting_radius = REST
+    sections = ""  # no actuators
     fragment = (
         f'<body name="hamster" pos="0 0 {T + R_HAM + 0.01!r}"><freejoint/>'
         f'<geom type="sphere" size="{R_HAM}" mass="{M_HAM}" solref="{SOLREF}" margin="0.002" priority="1" condim="1" '
