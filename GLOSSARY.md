@@ -167,7 +167,7 @@ A debug overlay on the game's view that draws what the normal view leaves out: t
 _Avoid_: debug view, collision view
 
 **Pose stream**:
-The sequence, one **pose** per env step, of what a front end needs to draw the scene without running physics: body poses, view poses, marker progress, and the outcome.
+The sequence, one **pose** per env step, of what a front end needs to draw the scene without running physics: body poses (the hamsterball and moving level parts), view poses, marker progress, and the outcome.
 _Avoid_: frame stream, render stream
 
 **Trajectory**:

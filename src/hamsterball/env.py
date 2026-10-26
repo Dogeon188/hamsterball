@@ -141,11 +141,12 @@ class HamsterballEnv(gym.Env):
         # the epsilon keeps a whole number of env steps (30 s at 60 Hz) from rounding up to one more
         self._max_steps = math.ceil(limit / (self.frame_skip * DT) - 1e-9)
         self._steps = 0
-        self._success, self._failure = False, None
+        self._success, self._failure, self._truncated = False, None, False
         # targets left, in task order, each (marker key, index or None): keys before the goal, waypoint i before i + 1
         self._todo = [
             (k, i) for k in TASK_MARKERS[self.task] for i in (range(len(block[k])) if k in MARKER_LISTS else [None])
         ]
+        self._all_targets = list(self._todo)
         self._n_targets = len(self._todo)
         # marker looks: the episode task's markers in their kind's colour, the unlock goal locked, other tasks' hidden
         m = self.core.model
@@ -263,6 +264,7 @@ class HamsterballEnv(gym.Env):
         self._prev, self._prev_t = pos, now
         terminated = self._success or self._failure is not None
         truncated = self.truncate and not terminated and self._steps >= self._max_steps
+        self._truncated = truncated
         obs, vec = self._observe()
         phi = 0.0 if terminated else self._potential(pos)  # Φ = 0 at terminal states
         shaping = self.shaping_gamma * phi - self._phi if self.shaped else 0.0
@@ -275,6 +277,37 @@ class HamsterballEnv(gym.Env):
             "reward_terms": {"event": event, "time": time, "shaping": shaping},
         }
         return obs, event + time + shaping, terminated, truncated, info
+
+    def pose(self):
+        """The current env step's pose as plain Python data (json.dumps takes it): bodies, facing and pitch, views,
+        marker states, the target's key, and, on the episode's last pose only, the outcome. Writes nothing; read it
+        after reset, step, or step_to (see env.md)."""
+        m, d = self.core.model, self.core.data
+        pq = lambda pos, quat: {"pos": [float(x) for x in pos], "quat": [float(x) for x in quat]}  # noqa: E731
+
+        def in_hamster(b):  # the shell, and the hamster body with its subtree
+            while b > HAM:
+                b = m.body_parentid[b]
+            return b == HAM
+
+        bodies = {m.body(b).name: pq(d.xpos[b], d.xquat[b]) for b in range(m.nbody) if b == SHELL or in_hamster(b)}
+        views = {}
+        for v in V.VIEWS:  # each camera sits at its mocap body's origin
+            mocap = m.body_mocapid[m.body(f"view_{v}").id]
+            views[v] = {**pq(d.mocap_pos[mocap], d.mocap_quat[mocap]), "fovy": float(m.cam_fovy[m.camera(v).id])}
+        key = lambda t: t[0] if t[1] is None else f"{t[0]}[{t[1]}]"  # noqa: E731  the canonical YAML's spelling
+        live = self._live()
+        # survive's region never completes: it stays active, success included
+        markers = {key(t): {"state": "active" if self.task == "survive" or t in live
+                            else "locked" if t in self._todo else "done"} for t in self._all_targets}
+        markers.update({f"hazards[{i}]": {"state": "active"} for i in range(len(self.level.hazards))})
+        pose = {"step": self._steps, "time": float(d.time), "bodies": bodies, "facing": float(d.userdata[FACING]),
+                "pitch": float(d.userdata[PITCH]), "views": views, "markers": markers,
+                "target": None if self._success else key(self._nearest(d.qpos[SHELL_QPOS : SHELL_QPOS + 3]))}
+        outcome = "success" if self._success else self._failure or ("truncated" if self._truncated else None)
+        if outcome:
+            pose["outcome"] = outcome
+        return pose
 
     def _marker(self, target):
         k, i = target
@@ -294,11 +327,17 @@ class HamsterballEnv(gym.Env):
             return self._todo[:-1]
         return self._todo
 
-    def _target(self, pos):
-        """The current target's centre at the current sim time: the nearest live target (spec §9)."""
+    def _nearest(self, pos):
+        """The current target (marker key, index): the live target whose centre is nearest `pos` at the current sim
+        time (spec §9)."""
         now = self.core.data.time
-        return min((centre(m, now, self._frame(m)) for m in map(self._marker, self._live())),
-                   key=lambda c: np.linalg.norm(c - pos))
+        return min(self._live(), key=lambda t: np.linalg.norm(
+            centre(m := self._marker(t), now, self._frame(m)) - pos))
+
+    def _target(self, pos):
+        """The current target's centre at the current sim time."""
+        m = self._marker(self._nearest(pos))
+        return centre(m, self.core.data.time, self._frame(m))
 
     def _frame(self, marker):
         """The world pose (pos, quat) of the body an attached marker rides, from the core state's qpos (a driven
