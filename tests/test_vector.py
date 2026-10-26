@@ -56,11 +56,6 @@ def test_sync_mode_gives_a_sync_vector_env():
     venv.reset(seed=0)
 
 
-def test_the_warp_backend_is_not_built_in_v1():
-    with pytest.raises(NotImplementedError):
-        make_vec(backend="warp")
-
-
 @pytest.mark.gl
 def test_views_render_in_spawned_workers():
     venv = make_vec(views=("chase", "first_person"), view_size=(32, 48))

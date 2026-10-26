@@ -430,13 +430,18 @@ def egl_devices():
 
 
 def make_vec(num_envs, backend="cpu", **kwargs):
-    """The ids' vector_entry_point (spec §10, §15): a stock AsyncVectorEnv of HamsterballEnv(**kwargs) copies.
+    """The ids' vector_entry_point (spec §10, §15): a stock AsyncVectorEnv of HamsterballEnv(**kwargs) copies, or with
+    backend="warp" the GPU-batched `WarpVectorEnv(num_envs, **kwargs)`.
 
     spawn on macOS, forkserver on Linux; shared memory only for views; same-step autoreset, the final observation in
     info. Each worker makes its own renderer (lazily, in the process that steps it), and on a multi-GPU machine takes
     EGL device i mod the GPU count."""
+    if backend == "warp":
+        from .gpu.vector_env import WarpVectorEnv  # lazily: a plain install never imports warp or torch
+
+        return WarpVectorEnv(num_envs, **kwargs)
     if backend != "cpu":
-        raise NotImplementedError(f"backend {backend!r}: v1 builds only the cpu backend")
+        raise ValueError(f"backend {backend!r}: choose 'cpu' or 'warp'")
     devices, blob = egl_devices(), cloudpickle.dumps(kwargs)
     return gym.vector.AsyncVectorEnv(
         [partial(_worker_env, i, devices, blob) for i in range(num_envs)],

@@ -126,7 +126,10 @@ class BatchCore:
         if any(isinstance(lv, Level) and (lv.bodies or lv.collapse) for lv in levels) or len(set(sections)) != 1:
             raise NotImplementedError("levels that need padded slots (bodies, tiles, other terrain) come in a later slice")
         wp.config.quiet = True
-        self.device = wp.get_device(device)  # raises RuntimeError for a CUDA device that doesn't exist
+        try:
+            self.device = wp.get_device(device)
+        except ValueError as e:  # Warp's error for a device it doesn't have
+            raise RuntimeError(f"no Warp device {device!r}: {e}") from e
         self.tier, self.num_envs, self.camera_action = tier, num_envs, camera_action
         self.graph = graph and self.device.is_cuda
         self.nlevels = len(sections)
@@ -155,11 +158,15 @@ class BatchCore:
         if bank_index is not None:
             self.level_index[worlds] = bank_index
         with wp.ScopedDevice(self.device):
-            mask, spawns, facings = wp.array(mask, dtype=wp.bool), wp.array(spawns, dtype=wp.vec3), wp.array(facings)
-            mjw.reset_data(self.model, self.data, mask)
-            wp.launch(_shell_spawn, n, [mask, spawns, facings, self.data.qpos, self.data.userdata])
-            self.warp_tier.reset(n, mask, spawns, self.data)
-            self._refresh()
+            self.reset_masked(wp.array(mask, dtype=wp.bool), wp.array(spawns, dtype=wp.vec3), wp.array(facings))
+
+    def reset_masked(self, mask, spawns, facings):
+        """`reset` on the device: `mask` (bool), `spawns` (vec3) and `facings` over the worlds, all Warp arrays, so it
+        can run inside a captured graph."""
+        mjw.reset_data(self.model, self.data, mask)
+        wp.launch(_shell_spawn, self.num_envs, [mask, spawns, facings, self.data.qpos, self.data.userdata])
+        self.warp_tier.reset(self.num_envs, mask, spawns, self.data)
+        self._refresh()
 
     def _refresh(self):
         """Positions (xpos, xipos, xmat, subtree_com) from qpos: what `mj_kinematics` and `mj_comPos` leave."""
@@ -182,24 +189,28 @@ class BatchCore:
         self.warp_tier.drive(nw, self.action, d)
         mjw.step(m, d)
 
-    def step(self, action, n=FRAME_SKIP):
-        """Hold one action per world, shape (num_envs, action dim), over n physics steps: one graph launch on CUDA."""
+    def step(self, action, n=FRAME_SKIP, post=None):
+        """Hold one action per world, shape (num_envs, action dim), over n physics steps: one graph launch on CUDA.
+        `post` (a callable that launches kernels) runs after them, inside the graph; a graph is kept per `n`, so pass
+        the same `post` every call."""
         torch_tensor = type(action).__module__.split(".")[0] == "torch"
         with wp.ScopedDevice(self.device):
             wp.copy(self.action, wp.from_torch(action.detach()) if torch_tensor else wp.array(action, dtype=float))
             if self.graph:
                 if n not in self._graphs:
                     with wp.ScopedCapture() as capture:
-                        self._launch(n)
+                        self._launch(n, post)
                     self._graphs[n] = capture.graph
                 wp.capture_launch(self._graphs[n])
             else:
-                self._launch(n)
+                self._launch(n, post)
 
-    def _launch(self, n):
+    def _launch(self, n, post):
         for _ in range(n):
             self._physics_step(n)
         self.warp_tier.obs(self.num_envs, self.data, self.obs_out)
+        if post:
+            post()
 
     def obs(self):
         """The tier's observation after the last step, one numpy array per entry, over the worlds."""
@@ -216,9 +227,16 @@ class BatchCore:
         solver's warm start, as on the CPU). Positions refresh at the next step."""
         row = self._state.numpy()
         row[world] = s
+        active = np.zeros(self.num_envs, bool)
+        active[world] = True
+        self._load(row, active)
+
+    def set_states(self, states):
+        """`set_state` for every world at once: `states` is (num_envs, state size)."""
+        self._load(np.asarray(states, np.float32), np.ones(self.num_envs, bool))
+
+    def _load(self, rows, active):
         with wp.ScopedDevice(self.device):
-            self._state.assign(row)
-            active = np.zeros(self.num_envs, bool)
-            active[world] = True
+            self._state.assign(rows)
             mjw.set_state(self.model, self.data, self._state, int(STATE), wp.array(active, dtype=wp.bool))
             self._refresh()

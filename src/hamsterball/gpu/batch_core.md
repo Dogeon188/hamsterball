@@ -8,10 +8,12 @@ The batched core: `num_envs` worlds of the CPU core ([step.md](../core/step.md))
 
 Needs the `gpu` extra; importing `hamsterball.gpu.batch_core` without it raises `ImportError` naming the extra, and nothing else in the package imports it, so a plain install never loads `warp` or `torch`.
 
-- `BatchCore(tier=None, levels=(FLAT,), num_envs=1, camera_action=False, device="cpu")`: `levels` is the bank (a `Level` or MJCF sections each); this slice needs them to compile to one model, else `NotImplementedError`. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError`. A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
+- `BatchCore(tier=None, levels=(FLAT,), num_envs=1, camera_action=False, device="cpu")`: `levels` is the bank (a `Level` or MJCF sections each); this slice needs them to compile to one model, else `NotImplementedError`. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError` (the core maps Warp's `ValueError` for an unknown device). A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
 - `reset(worlds=None, bank_index=None, spawn=(0, 0, R), facing=0.0)`: reset the given worlds like `Core.reset`; `bank_index` is stored in `level_index`.
-- `step(action, n=FRAME_SKIP)`: `action` is `(num_envs, adim)`, numpy or torch, with `turn` and `cam_pitch` last under the camera flag; one action per world, held over `n` physics steps. On CUDA the `n` steps are captured once per `n` as one graph and relaunched; on the CPU device they run eagerly.
+- `reset_masked(mask, spawns, facings)`: `reset` with Warp arrays on the device (a bool mask, vec3 spawns, facings), so it can run inside a captured graph; the vector env's same-step autoreset calls it.
+- `step(action, n=FRAME_SKIP, post=None)`: `action` is `(num_envs, adim)`, numpy or torch, with `turn` and `cam_pitch` last under the camera flag; one action per world, held over `n` physics steps. `post`, a callable that launches kernels, runs after the `n` steps inside the same graph (the vector env's env-step kernels); pass the same one every call, since the graph is kept per `n`. On CUDA the `n` steps are captured once per `n` as one graph and relaunched; on the CPU device they run eagerly.
 - `obs()`: the tier's observation after the last step, `{"wall_contact": bool array}` for the abstract tier.
+- `set_states(states)`: `set_state` for every world, `(num_envs, state size)`.
 - `state(world)` and `set_state(world, s)`: the `mjSTATE_INTEGRATION` vector `Core.state()` returns, at float32 precision, because Warp stores float32. A float32-exact vector round-trips exactly; any other comes back rounded to float32. `set_state` carries the solver warm start, as the CPU vector does, and the positions refresh at the next step.
 
 Kernels, each named for its CPU function and in `physics_step`'s order: clear `xfrc_applied`, the position refresh (`mjw.kinematics`, `mjw.com_pos`), `turn_facing`, `camera_pitch`, `drag`, `contain` (impulse and hard stop), the tier's `drive` (see [abstract_tier.md](abstract_tier.md)), `mjw.step`; then the tier's `obs` once per env step. Constants are `core.step`'s and `core.model`'s, read from there.
@@ -37,6 +39,7 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 
 - 2026-10-27, ticket gpu-backend/02: the tier hook is a class per tier in `TIERS` (CPU class to batched twin) supplying `drive`, `obs`, `reset`, and the arrays they read, launched by the core.
 - 2026-10-27, ticket gpu-backend/02: state goes through `mjw.get_state`/`set_state` (the official layout), not a hand-built vector.
+- 2026-10-27, ticket gpu-backend/03: the vector env's env-step kernels join the physics graph through `step(post=)`, and its autoreset uses `reset_masked`, a device-array form of `reset`, so no host sync sits between a finished world and its reset.
 
 ## Tried and rejected
 
@@ -46,3 +49,4 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 ## History
 
 - 2026-10-27, ticket gpu-backend/02: first version, a flat level, the abstract tier, the camera flag.
+- 2026-10-27, ticket gpu-backend/03: added `post`, `reset_masked` and `set_states`; a nonexistent CUDA device now raises `RuntimeError` as documented (Warp raises `ValueError`, which the first version let through).
