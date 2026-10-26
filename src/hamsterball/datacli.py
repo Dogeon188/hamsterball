@@ -1,4 +1,6 @@
-"""hamsterball-data (later efforts §7): replay, re-render, video, and LeRobot export of Minari datasets."""
+"""hamsterball-data (later efforts §7): replay, re-render, video, pose stream, and LeRobot export of Minari datasets."""
+
+import json
 
 import click
 
@@ -70,6 +72,20 @@ def video(dataset, episode, view, path, size):
     from .data import to_video
 
     to_video(_load(dataset), episode, view, path, size)
+    click.echo(f"wrote {path}")
+
+
+@main.command()
+@click.argument("dataset")
+@click.argument("episode", type=int)
+@click.argument("path", type=click.Path(dir_okay=False))
+def poses(dataset, episode, path):
+    """Write EPISODE of DATASET as a pose stream at PATH: JSON Lines, a header line then one pose per env step."""
+    from .data import pose_stream
+
+    with open(path, "w") as f:
+        for line in pose_stream(_load(dataset), episode):
+            f.write(json.dumps(line) + "\n")
     click.echo(f"wrote {path}")
 
 
