@@ -49,3 +49,4 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - 2026-10-27, ticket gpu-backend/03: first version.
 - 2026-10-27, ticket gpu-backend/03: CUDA run on an NVIDIA GeForce RTX 2080 Ti passed (see Known quirks).
 - 2026-10-27, ticket gpu-backend/04: all five tasks on still markers (see env_step.md for the parity measurement).
+- 2026-10-27, ticket gpu-backend/04: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 62 of 62 `gpu` tests passed (see env_step.md).
