@@ -24,13 +24,13 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 
 - One physics step from a shared state matches `Core`: `xfrc_applied` and the userdata slots at `rtol=1e-5, atol=1e-6`; qpos, qvel and time at the looser bound below. Cases: resting, running forward and sideways, inside the containment field, past the hard stop, airborne past the grace, facing wrapping at pi, pitch at both limits.
 - Three env steps (30 physics steps) from a running state stay within the same bounds.
-- `uv run pytest tests/test_batch_core.py` (skipped with a stated reason when the extra is missing).
+- `uv run pytest tests/test_batch_core.py` (skipped with a stated reason when the extra is missing); `HAMSTERBALL_WARP_DEVICE=cuda:0` runs the same tests on a GPU. `BatchCore(graph=False)` runs CUDA eagerly, for the graph-versus-eager test.
 
 ## Known quirks
 
 - **Measured looser bound** (Warp CPU device, Warp 1.18.0, `mujoco-warp` 3.16.0, 2026-10-27): after one physics step the largest absolute error against `Core` was 1.6e-7 in qpos and 7.0e-7 in qvel (relative, 1e-6 or less) across the cases above; after 30 physics steps of running 1.1e-7 and 2.0e-6, and `xfrc_applied` 3e-5 on forces of about 20 N (1.5e-6 relative). The test bound for shell and hamster dofs is `rtol=1e-4, atol=1e-5`, 5 to 15 times the measurement. float32 against float64 and the solver's iteration account for it.
 - `contain` calls no forward pass past the hard stop. The CPU calls `mj_forward` there; the only thing the rest of the step reads from it is fresh positions (`xpos`, `xipos`, `xmat`, `subtree_com`), and `mj_step` recomputes everything else. So the kernel refreshes positions again for every world after `contain`, which gives a world that did not move the same values back. It is two cheap kernels, not a per-world masked forward.
-- The CUDA path (graph capture, `"cuda:N"`) is written but was not run here: the laptop's GPU is too old for Warp's CUDA 13 build. It needs a by-hand run on a GPU, as the spec says.
+- **CUDA run** (2026-10-27, Warp 1.18.0, CUDA 13.4, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest tests/test_batch_core.py` passed, 16 of 16. The one-physics-step deviations from `Core` matched the CPU device's: qpos 1.6e-7 and qvel 7.0e-7 at most, `xfrc_applied` 1.1e-5 on forces of about 20 N, userdata 1.8e-7. The captured graph (three env steps of 10 physics steps) matched eager launches with a max difference of 0.0 in the state vector. Not bitwise against the CPU, as expected.
 - `float32` time: `data.time` is float32 on Warp, so very long episodes lose resolution (at 1000 s a step is about 3 ulps). The vector env's episodes are far shorter.
 
 ## Decisions
