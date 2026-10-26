@@ -21,5 +21,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libosmesa6
           echo MUJOCO_GL=osmesa >> "$GITHUB_ENV"
       - run: uv run --locked --all-extras --python ${{ matrix.python }} pytest --ignore=tests/test_data.py
+      - name: Batched core on Warp's CPU device (the gpu extra; --all-extras above installs it too)
+        run: uv run --locked --extra gpu --python ${{ matrix.python }} pytest -m gpu -rs
       - name: Record and replay an episode of every task (spec §17 determinism)
         run: uv run --locked --all-extras --python ${{ matrix.python }} pytest tests/test_data.py

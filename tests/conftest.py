@@ -1,4 +1,7 @@
-"""Skip tests marked `gl` where no OpenGL context can be made (GitHub's macOS runners have no GPU)."""
+"""Skip tests marked `gl` where no OpenGL context can be made (GitHub's macOS runners have no GPU), and tests marked
+`gpu` where the `gpu` extra is not installed."""
+
+import importlib.util
 
 import pytest
 
@@ -8,6 +11,7 @@ import mujoco
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "gl: renders through MuJoCo's offscreen GL context")
+    config.addinivalue_line("markers", "gpu: runs the batched backend (the `gpu` extra), on Warp's CPU device")
 
 
 def _gl_error():
@@ -23,3 +27,9 @@ def pytest_collection_modifyitems(config, items):
         skip = pytest.mark.skip(reason=f"no OpenGL context ({err})")
         for item in gl:
             item.add_marker(skip)
+    missing = [m for m in ("warp", "mujoco_warp", "torch") if importlib.util.find_spec(m) is None]
+    if missing:
+        skip = pytest.mark.skip(reason=f"the gpu extra is not installed (no {', '.join(missing)})")
+        for item in items:
+            if item.get_closest_marker("gpu"):
+                item.add_marker(skip)
