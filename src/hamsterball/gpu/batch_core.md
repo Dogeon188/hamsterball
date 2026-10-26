@@ -20,7 +20,7 @@ Kernels, each named for its CPU function and in `physics_step`'s order: clear `x
 
 ## How it works
 
-The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model`; `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so no mapping is needed yet. Padding and per-world slot mapping arrive with levels that differ.
+The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model` (`geom_rgba` batched per world, for the vector env's marker colours); `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so no mapping is needed yet. Padding and per-world slot mapping arrive with levels that differ.
 
 ## Invariants and checks
 

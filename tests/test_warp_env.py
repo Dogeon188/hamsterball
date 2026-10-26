@@ -180,7 +180,7 @@ def test_an_hfield_level_runs():
     ({"views": ("chase",)}, NotImplementedError),
     ({"tier": "articulated"}, NotImplementedError),
     ({"levels": ["first_goal", "hill"]}, NotImplementedError),
-    ({"tasks": ["survive"], "levels": ["first_survive"]}, NotImplementedError),
+    ({"tasks": ["survive"], "levels": ["survive_drift"]}, NotImplementedError),
     ({"obs_state": False}, ValueError),
     ({"difficulty": 0.7}, ValueError),
     ({"no_such_kwarg": 1}, TypeError),

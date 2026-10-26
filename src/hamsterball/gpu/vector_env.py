@@ -17,15 +17,13 @@ from ..core.abstract_tier import AbstractTier
 from ..core.generator import LevelGenerator
 from ..core.model import DT
 from ..core.step import FRAME_SKIP, Core
-from ..env import DIFFICULTY, LEVELS_DIR, TASKS, _file_pool_difficulty, _levels
+from ..env import DIFFICULTY, LEVELS_DIR, TASKS, TIME_PENALTY, _file_pool_difficulty, _levels
 from . import env_step as E
 from .batch_core import BatchCore
 
-TASK = "reach_goal"  # the one task this slice runs; its slot in the goal one-hot is TASKS.index(TASK)
-
 
 class WarpVectorEnv(gym.vector.VectorEnv):
-    """`num_envs` worlds of `HamsterballEnv`, all on one level and one task (reach_goal) so far. `step`, `reset` and
+    """`num_envs` worlds of `HamsterballEnv`, all on one level and one task so far. `step`, `reset` and
     `step_to` take and return float32 torch tensors on the device; a finished world resets inside the same `step`
     (`AutoresetMode.SAME_STEP`). The tensors are views of buffers the next call overwrites: clone what you keep."""
 
@@ -63,13 +61,13 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             raise NotImplementedError("a generator pool: the GPU backend takes one level so far")
         pool = [lv for x in pool for lv in _levels(x)]
         allowed = [t for t in tasks if any(t in lv.tasks for lv in pool)]
-        if len(pool) != 1 or allowed != [TASK]:
+        if len(pool) != 1 or len(allowed) != 1:
             raise NotImplementedError(
-                f"the GPU backend runs {TASK} on one level so far; got {len(pool)} levels and tasks {allowed}")
-        self.level, self.levels = pool[0], pool
-        block = self.level.tasks[TASK]
-        if any("motion" in h for h in self.level.hazards):
-            raise NotImplementedError("moving hazards are not built on the GPU yet")
+                f"the GPU backend runs one task on one level so far; got {len(pool)} levels and tasks {allowed}")
+        self.level, self.levels, self.task = pool[0], pool, allowed[0]
+        block = self.level.tasks[self.task]
+        if any("motion" in m or "attach" in m for m in [*self.level.hazards, *(m for _, m in E.targets(self.task, block))]):
+            raise NotImplementedError("moving and attached markers are not built on the GPU yet")
 
         self.num_envs, self.frame_skip, n = num_envs, frame_skip, num_envs
         self.core = BatchCore(AbstractTier(), pool, n, camera_action, device)
@@ -78,7 +76,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         # the epsilon keeps a whole number of env steps from rounding up to one more, as in HamsterballEnv
         self.max_steps = math.ceil(limit / (frame_skip * DT) - 1e-9)
         self.truncate, self.shaped, self.shaping_gamma = truncate, shaped, shaping_gamma
-        self.task_index = TASKS.index(TASK)
+        self.task_index = TASKS.index(self.task)
 
         self.single_action_space = Core(AbstractTier(), camera_action=camera_action).action_space
         inf = np.float32(np.inf)
@@ -88,7 +86,9 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self.action_space = gym.vector.utils.batch_space(self.single_action_space, n)
 
         with wp.ScopedDevice(self.core.device):
-            self.markers = E.Markers(block["goal"], self.level.hazards, self.core.device)
+            self.markers = E.Markers(self.task, block, self.level.hazards, self.core.device)
+            self.geoms = wp.array([self.core.cpu_model.geom(g).id for g in self.markers.geom_names], dtype=int)
+            self.todo = wp.ones((n, self.markers.ntargets), dtype=wp.bool)
             self.kill_z = float(self.level.kill_plane_z)
             z = lambda shape, dt=float: wp.zeros(shape, dtype=dt)  # noqa: E731
             self.steps, self.phi, self.prev_pos = z(n, int), z(n), z(n, wp.vec3)
@@ -101,6 +101,13 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.spawn = wp.array(spawn, dtype=wp.vec3)
             self.facing = wp.array(np.full(n, math.radians(block["spawn"]["yaw_deg"])), dtype=float)
             self.level_index, self.task_idx = z(n, int), wp.array(np.full(n, self.task_index), dtype=int)
+        m = self.core.cpu_model  # other tasks' markers stay hidden for good; the episode task's are looked each env step
+        rgba = np.tile(m.geom_rgba, (n, 1, 1))
+        for g in range(m.ngeom):
+            task, _, rest = m.geom(g).name.partition("/")
+            if rest and task != self.task:
+                rgba[:, g, 3] = 0
+        self.core.model.geom_rgba.assign(rgba)
         t = wp.to_torch
         self._obs = {"state": t(self.state), "goal": t(self.goal)}
         self._final_obs = {"state": t(self.final_state), "goal": t(self.final_goal)}
@@ -117,6 +124,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.core.reset_masked(self.all, self.spawn, self.facing)
             wp.launch(E.reset_episode, self.num_envs, self._episode_args(self.all))
             self._observe(self.all, self.none)
+            self._look()
         for a in (self.reward, self.event, self.time, self.shaping, self.terminated, self.truncated, self.success, self.done):
             a.zero_()
         self.failure.zero_()
@@ -149,13 +157,16 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         return (self._obs, wp.to_torch(self.reward), wp.to_torch(self.terminated), wp.to_torch(self.truncated), info)
 
     def _episode_args(self, mask):
-        return [mask, self.core.data.qpos, self.markers.centre, self.steps, self.prev_pos, self.phi]
+        m = self.markers
+        return [mask, self.core.data.qpos, m.centre, m.ntargets, m.mode, self.todo, self.steps, self.prev_pos, self.phi]
 
     def _env_step(self):
         """The kernels after the physics (HamsterballEnv._advance and _observe), then the same-step autoreset."""
         n, m, d = self.num_envs, self.markers, self.core.data
-        wp.launch(E.advance, n, [d.qpos, m.kind, m.a, m.b, m.rad, m.rot, m.half, m.centre, m.n, self.kill_z, self.max_steps,
-                                 int(self.truncate), int(self.shaped), self.shaping_gamma, self.steps, self.prev_pos, self.phi,
+        wp.launch(E.advance, n, [d.qpos, m.kind, m.a, m.b, m.rad, m.rot, m.half, m.centre, m.ntargets, m.n, m.mode,
+                                 m.goal_row, int(self.task == "survive"), 0.0 if self.task == "survive" else TIME_PENALTY,
+                                 self.kill_z, self.max_steps, int(self.truncate), int(self.shaped), self.shaping_gamma,
+                                 self.todo, self.steps, self.prev_pos, self.phi,
                                  self.reward, self.terminated, self.truncated, self.success, self.failure, self.event,
                                  self.time, self.shaping])
         self._observe(self.all, self.success)
@@ -164,6 +175,13 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self.core.reset_masked(self.done, self.spawn, self.facing)
         wp.launch(E.reset_episode, n, self._episode_args(self.done))
         self._observe(self.done, self.none)
+        self._look()
+
+    def _look(self):
+        """The episode task's marker colours into each world's `geom_rgba`, from the targets left."""
+        m = self.markers
+        wp.launch(E.look_markers, self.num_envs, [self.todo, m.ntargets, m.mode, self.geoms, m.role, m.base,
+                                                  self.core.model.geom_rgba])
 
     def _observe(self, mask, success):
         """`state` and `goal` for the worlds in `mask`, after the derived quantities `mj_step` leaves behind are refreshed
@@ -176,4 +194,6 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         mjw.subtree_vel(c.model, d)
         c.warp_tier.obs(self.num_envs, d, c.obs_out)
         wp.launch(E.observe, self.num_envs, [mask, d.xpos, d.xmat, d.qvel, d.subtree_com, d.subtree_linvel, d.userdata,
-                                             c.obs_out["wall_contact"], self.markers.centre, self.kill_z, self.task_index, success, self.state, self.goal])
+                                             c.obs_out["wall_contact"], self.markers.centre, self.todo, self.steps,
+                                             self.markers.ntargets, self.markers.mode, int(self.task == "survive"),
+                                             self.max_steps, self.kill_z, self.task_index, success, self.state, self.goal])

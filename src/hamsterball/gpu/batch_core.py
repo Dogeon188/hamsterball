@@ -137,7 +137,7 @@ class BatchCore:
         self.cpu_model = build(tier, sections[0], GAME_SIZE)
         self.adim = tier.action_space().shape[0] + 2 * camera_action
         with wp.ScopedDevice(self.device):
-            self.model = mjw.put_model(self.cpu_model)
+            self.model = mjw.put_model(self.cpu_model, batch_sizes={"geom_rgba": num_envs})  # a world's marker colours
             self.data = mjw.make_data(self.cpu_model, nworld=num_envs)
             self.warp_tier = TIERS[type(tier)](tier, self.device)
             self.action = wp.zeros((num_envs, self.adim), dtype=float)
