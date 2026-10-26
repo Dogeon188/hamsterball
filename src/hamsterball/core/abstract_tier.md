@@ -49,3 +49,4 @@ See the prototype's doc (`prototypes/honest_drive.md`, branch `prototype/honest-
 - 2026-10-22, ticket mouse-camera/04 (rename, no behaviour change): "camera yaw" is now **facing** (GLOSSARY.md): `drive` and `obs` take `facing` (was `yaw`).
 - 2026-10-23, code review of mouse-camera tickets 04–05 (no behaviour change): the Interface named `drive` and `obs`'s last argument `yaw`; it reads `facing`, as the code has since the rename.
 - 2026-10-23, `mouse-camera`: direction-scaled effort (Decisions, 2026-10-23); forward is unchanged, so the §5 feel rows hold.
+- 2026-10-27, ticket gpu-backend/02 (no behaviour change): `drive` and `obs` are ported to Warp in [gpu/abstract_tier.md](../gpu/abstract_tier.md), which reads this module's constants.

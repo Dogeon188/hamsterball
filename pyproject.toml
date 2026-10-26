@@ -20,6 +20,9 @@ data = [
 ]
 # the game records every finished episode (spec §13), so it needs the data extra
 game = ["hamsterball[data]", "imgui-bundle", "glfw", "pyopengl"]
+# the GPU-batched backend; mujoco-warp is pinned to the mujoco version (ADR 0002). Warp runs on its CPU device
+# without NVIDIA (macOS, CI); training needs NVIDIA on Linux.
+gpu = ["mujoco-warp==3.16.0", "warp-lang", "torch"]
 all = ["hamsterball[data,game]"]
 lerobot = [
     "lerobot[dataset]>=0.6 ; python_full_version >= '3.12' and python_full_version < '3.14'",

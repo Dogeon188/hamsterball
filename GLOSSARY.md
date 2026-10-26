@@ -142,6 +142,10 @@ _Avoid_: gym, simulator (for the front end)
 The physics implementation an env runs on: the **CPU core**, which is the reference that judges policies and records trajectories, or the **GPU-batched backend**, which runs many worlds at once for training and may drift from the CPU core.
 _Avoid_: engine, device
 
+**Batched core**:
+The GPU analogue of the CPU core: N worlds stepped together on one device, each world's state readable and writable in the CPU core-state layout of its level. The GPU-batched backend is built on it.
+_Avoid_: GPU core, vector core
+
 **View**:
 A camera from which pixel observations or the game's screen are rendered: the **chase view**, the **follow view**, or the **first-person view**.
 _Avoid_: camera angle, perspective
