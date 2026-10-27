@@ -11,7 +11,8 @@ The game menu's logic without a display (spec §13): the player name check, the 
 - `resolve(level, levels_dir)`: what to play for a menu or `--level` choice: `"generated"`, an existing file path as given, or `levels_dir/<stem>.yaml`.
 - `parse_seed(text)`: the seed field; blank is `None` (random), else a non-negative integer; raises `ValueError`.
 - `CONFIG`: the config file's path. `load_config(path=CONFIG)` returns the remembered choices, `{}` when the file is missing or isn't a JSON object. `save_config(settings, path=CONFIG)` writes `player`, `task`, `level`, and `difficulty` (`SAVED`), making the directory.
-- `prefill(flags, config)`: the menu's starting `{player, task, level, difficulty, seed}`: each flag that isn't `None`, else the remembered choice, else `DEFAULTS` (`""`, `reach_goal`, `None`, 0.5, `None`).
+- `TIERS` (`abstract`, `articulated`) and `dataset_id(player, tier="abstract")`: `hamsterball/human-<player>-v<N>`, or `-articulated-v<N>` for the articulated tier.
+- `prefill(flags, config)`: the menu's starting `{player, task, level, difficulty, seed, tier}`: each flag that isn't `None`, else the remembered choice, else `DEFAULTS` (`""`, `reach_goal`, `None`, 0.5, `None`, `abstract`). The tier is not in `SAVED`: it is chosen each run, so the default stays abstract.
 
 ## How it works
 
@@ -36,3 +37,4 @@ The game menu's logic without a display (spec §13): the player name check, the 
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/12: added, test-first.
+- 2026-10-27, ticket articulated-tier/06: added `TIERS`, `dataset_id`, and the per-run `tier` choice (default abstract, not remembered).

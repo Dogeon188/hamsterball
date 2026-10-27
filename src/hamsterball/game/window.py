@@ -16,7 +16,6 @@ import mujoco  # noqa: E402
 import numpy as np  # noqa: E402
 from OpenGL import GL  # noqa: E402
 
-from .. import ENV_VERSION  # noqa: E402
 from ..core import views as V  # noqa: E402
 from ..env import LEVELS_DIR, TASKS  # noqa: E402
 from . import menu  # noqa: E402
@@ -177,6 +176,8 @@ def _menu(window, settings, levels_dir, record):
             s["level"] = levels[0]
         _, i = imgui.combo("level", levels.index(s["level"]), levels)
         s["level"] = levels[i]
+        _, i = imgui.combo("tier", menu.TIERS.index(s["tier"]), list(menu.TIERS))
+        s["tier"] = menu.TIERS[i]
         problems = []
         if s["level"] == menu.GENERATED:
             _, s["difficulty"] = imgui.slider_float("difficulty", s["difficulty"], 0.0, 1.0, "%.2f")
@@ -187,7 +188,7 @@ def _menu(window, settings, levels_dir, record):
                 problems.append("The seed is a whole number, 0 or more, or blank for a random one.")
         if record and not menu.name_ok(s["player"]):
             problems.append("Player names use a-z, 0-9, and _ only.")
-        imgui.text(f"recording to hamsterball/human-{s['player']}-v{ENV_VERSION}" if record else "not recording")
+        imgui.text(f"recording to {menu.dataset_id(s['player'], s['tier'])}" if record else "not recording")
         for p in problems:
             imgui.text_colored((1, 0.3, 0.3, 1), p)
         imgui.begin_disabled(bool(problems))
@@ -305,7 +306,7 @@ def run(settings, levels_dir, record, skip_menu):
             menu.save_config(settings, menu.CONFIG)
             level = menu.resolve(settings["level"], levels_dir)
             session = Session(settings["task"], level, settings["difficulty"], settings["seed"], settings["player"],
-                              record)
+                              record, settings["tier"])
             command, hitboxes = _play(window, session, hitboxes)
             if command == "quit":
                 break
@@ -322,9 +323,10 @@ def run(settings, levels_dir, record, skip_menu):
 @click.option("--level", help="A level YAML, a level in --levels by name, or 'generated'.")
 @click.option("--seed", type=click.IntRange(min=0), help="A generated level's seed (default random).")
 @click.option("--difficulty", type=click.FloatRange(0, 1), help="A generated level's difficulty (default 0.5).")
-def main(levels_dir, player, no_record, task, level, seed, difficulty):
+@click.option("--tier", type=click.Choice(menu.TIERS), help="The control tier (default abstract); articulated records to human-<player>-articulated-vN.")
+def main(levels_dir, player, no_record, task, level, seed, difficulty, tier):
     """Play Hamsterball: the chase view at 60 Hz, keyboard (WASD, Shift, Ctrl, Q/E), mouse to turn and look up and down, or gamepad, Esc to pause, F3 to show or hide the hitbox view."""
-    flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed}
+    flags = {"player": player, "task": task, "level": level, "difficulty": difficulty, "seed": seed, "tier": tier}
     settings = menu.prefill(flags, menu.load_config(menu.CONFIG))
     record = not no_record
     skip = task is not None and level is not None and (not record or menu.name_ok(settings["player"]))

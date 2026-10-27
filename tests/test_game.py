@@ -278,7 +278,7 @@ def test_the_window_module_imports_and_the_cli_prints_help():
     assert r.exit_code == 0
     assert "mouse" in r.output
     assert "F3" in r.output
-    for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty"):
+    for flag in ("--levels", "--player", "--no-record", "--task", "--level", "--seed", "--difficulty", "--tier"):
         assert flag in r.output
 
 
@@ -299,9 +299,11 @@ def test_the_cli_skips_the_menu_given_a_task_and_level_and_prefills_it_otherwise
 
     settings, levels, record, skip = start("--task", "reach_goal", "--level", "generated", "--seed", "3")
     assert skip and record and str(levels) == str(window.LEVELS_DIR)
-    assert settings == {"player": "eric", "task": "reach_goal", "level": "generated", "difficulty": 0.5, "seed": 3}
+    assert settings == {"player": "eric", "task": "reach_goal", "level": "generated", "difficulty": 0.5, "seed": 3,
+                        "tier": "abstract"}
     settings, _, _, skip = start("--difficulty", "0.8")
     assert not skip and settings["task"] == "survive" and settings["difficulty"] == 0.8
+    assert start("--tier", "articulated")[0]["tier"] == "articulated"
     _, _, record, skip = start("--task", "survive", "--level", "first_survive", "--player", "Eric")
     assert not skip  # recording needs a valid name: the menu asks for one
     _, _, record, skip = start("--task", "survive", "--level", "first_survive", "--player", "Eric", "--no-record")

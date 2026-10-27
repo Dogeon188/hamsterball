@@ -6,11 +6,11 @@ The game's episodes and their recording (spec §13), without a display: each fin
 
 ## Interface
 
-- `Session(task, level, difficulty=0.5, seed=None, player=None, record=True)`: `level` is a level file path or `"generated"`; a file level ignores `difficulty`. Recording needs `player` to pass `name_ok` (`ValueError` otherwise) and the `data` extra; `record=False` needs neither.
+- `Session(task, level, difficulty=0.5, seed=None, player=None, record=True, tier="abstract")`: `level` is a level file path or `"generated"`; a file level ignores `difficulty`. Recording needs `player` to pass `name_ok` (`ValueError` otherwise) and the `data` extra; `record=False` needs neither.
 - `env`: the `Hamsterball-v<N>` env (`camera_action=True`, `truncate=False`), wrapped in a `Collector` when recording; the window reads `env.unwrapped` for drawing and the HUD.
-- `recording`, `dataset_id` (`hamsterball/human-<player>-v<N>`, N = `hamsterball.ENV_VERSION`), `running` (an episode is in progress).
+- `recording`, `dataset_id` (`hamsterball/human-<player>-v<N>`, or `hamsterball/human-<player>-articulated-v<N>` with `tier="articulated"`, apart from the abstract dataset, N = `hamsterball.ENV_VERSION`), `running` (an episode is in progress).
 - `start(retry=False)`: abandons a run in progress, then resets. A file level resets with `{task}`; a generated level draws a fresh seed, except the first episode when `seed` is given (`{level: generator(task, seed, difficulty), task}`). `retry=True` resets with the last episode's `{level, task}`, so the same level and seed.
-- `step(action, overruns=0)`: one env step. When the step ends the episode, a recording session appends it to the dataset (creating the dataset on the first), and sets the episode's `overruns` metadata.
+- `step(action, overruns=0)`: one env step; `action` is always the game's 4-D action. In the articulated tier the session runs the scripted gait (`lowlevel.DEFAULT`) on the latest observation and `action[:2]`, steps the env with the torques then `action[2:]` (`turn`, `cam_pitch`), and passes the run vector to `Collector.step(run_vector=...)` (not when `record=False`); `start()` resets the gait. The dataset carries `low_level_policy` and says "articulated" in its description. When the step ends the episode, a recording session appends it to the dataset (creating the dataset on the first), and sets the episode's `overruns` metadata.
 - `abandon()`: discards the run in progress with `Collector.discard_episode()`. `close()` abandons, then closes the env.
 
 ## How it works
@@ -46,3 +46,4 @@ The game's episodes and their recording (spec §13), without a display: each fin
 - 2026-10-22, ticket hamsterball-v1/12: added, test-first. Agent finding: with a file level, `env_spec` held the level's absolute path, and `replay` rebuilds the env from `env_spec`, so the session drops it.
 - 2026-10-22, code review of hamsterball-v1: `_save` set both `author` and `algorithm_name="human"`; spec §12 names a human player in `author` only, so `algorithm_name` is dropped (Minari warns that it's unset).
 - 2026-10-22, user play-test request: no time-up for a human player, except in survive; the session's env sets `truncate=False`.
+- 2026-10-27, ticket articulated-tier/06: the session owns the gait rather than the window, so the headless tests cover the whole articulated step and recording; `test_an_articulated_session_steps_the_gait_and_records_to_its_own_dataset` checks the id, 10-D actions, run vectors, gait name, and replay.

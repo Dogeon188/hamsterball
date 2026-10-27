@@ -31,9 +31,13 @@ def test_the_menu_prefills_from_flags_over_the_saved_choices_and_saves_them_back
     assert saved == {"player": "eric", "task": "survive", "level": "generated", "difficulty": 0.7}  # no seed
     flags = {"player": None, "task": "reach_goal", "level": None, "difficulty": None, "seed": 5}
     assert menu.prefill(flags, saved) == {
-        "player": "eric", "task": "reach_goal", "level": "generated", "difficulty": 0.7, "seed": 5,
+        "player": "eric", "task": "reach_goal", "level": "generated", "difficulty": 0.7, "seed": 5, "tier": "abstract",
     }
-    assert menu.prefill({}, {}) == {"player": "", "task": "reach_goal", "level": None, "difficulty": 0.5, "seed": None}
+    assert menu.prefill({}, {}) == {
+        "player": "", "task": "reach_goal", "level": None, "difficulty": 0.5, "seed": None, "tier": "abstract",
+    }
+    assert menu.prefill({"tier": "articulated"}, saved)["tier"] == "articulated"
+    assert "tier" not in saved  # the tier is chosen each run, so the default stays abstract
 
 
 def test_a_corrupt_config_file_reads_as_empty(tmp_path):
@@ -60,3 +64,8 @@ def test_a_blank_seed_is_random_and_a_seed_is_a_non_negative_integer():
     for bad in ("-1", "x", "1.5"):
         with pytest.raises(ValueError):
             menu.parse_seed(bad)
+
+
+def test_each_tier_records_to_its_own_dataset_id():
+    assert menu.dataset_id("eric") == "hamsterball/human-eric-v2"
+    assert menu.dataset_id("eric", "articulated") == "hamsterball/human-eric-articulated-v2"

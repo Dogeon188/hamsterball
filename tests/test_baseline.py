@@ -77,3 +77,9 @@ def test_without_minari_the_cli_says_which_extra_to_install(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "minari", None)  # import minari now raises ImportError
     result = CliRunner().invoke(main, ["hamsterball/human-ana-v0"])
     assert result.exit_code == 1 and "install hamsterball[data]" in result.output
+
+
+def test_an_articulated_dataset_pools_with_an_abstract_one_of_the_same_level_and_task():
+    a = synthetic("test/human-a-v0", [(file_level("reach_goal"), True, 120, 1.0)])  # 2 s
+    b = synthetic("test/human-a-articulated-v0", [(file_level("reach_goal"), False, 60, -1.0)], tier="articulated")
+    assert baselines([a, b])[("reach_goal", "ab" * 32)] == Stats(2, 0.5, 2.0, 2.0, 0.0)

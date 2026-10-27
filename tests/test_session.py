@@ -122,3 +122,29 @@ def test_a_recorded_episodes_pitch_is_in_its_4d_actions_and_replays():
     actions = next(ds.iterate_episodes()).actions
     assert actions.shape[1] == 4 and actions[0, 3] == -1
     replay(ds)
+
+
+def test_an_articulated_session_steps_the_gait_and_records_to_its_own_dataset():
+    s = Session("survive", SURVIVE, player="eric", tier="articulated")
+    assert s.dataset_id == "hamsterball/human-eric-articulated-v2"
+    s.start()
+    out = np.array([0, 1, 0.1, -0.2], np.float32)  # the game's 4-D action: run forward, turn, pitch
+    n = 1
+    while not any(s.step(out)[2:4]):
+        n += 1
+    s.close()
+    ds = minari.load_dataset(s.dataset_id)
+    ep = next(ds.iterate_episodes())
+    assert ep.actions.shape == (n, 10) and np.allclose(ep.actions[:, 8:], out[2:])
+    assert np.allclose(ep.infos["run_vector"][1:], [0, 1])  # entry 0 is the reset
+    assert ds.storage.metadata["low_level_policy"] == "scripted_trot_v1"
+    assert "articulated" in ds.storage.metadata["description"]
+    replay(ds)
+    assert not minari.list_local_datasets().keys() & {"hamsterball/human-eric-v2"}  # apart from the abstract dataset
+
+
+def test_an_unrecorded_articulated_session_runs_too():
+    s = Session("survive", SURVIVE, tier="articulated", record=False)
+    s.start()
+    s.step(OUT)
+    s.close()

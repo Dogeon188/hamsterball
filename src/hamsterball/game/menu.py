@@ -9,18 +9,26 @@ from pathlib import Path
 
 import yaml
 
+from .. import ENV_VERSION
 from ..core.level import Level
 
 CONFIG = Path.home() / ".config" / "hamsterball" / "game.json"
 GENERATED = "generated"
-SAVED = ("player", "task", "level", "difficulty")  # the choices the config file remembers; the seed is per run
-DEFAULTS = {"player": "", "task": "reach_goal", "level": None, "difficulty": 0.5, "seed": None}
+TIERS = ("abstract", "articulated")
+SAVED = ("player", "task", "level", "difficulty")  # the choices the config file remembers; the seed and the tier are per run
+DEFAULTS = {"player": "", "task": "reach_goal", "level": None, "difficulty": 0.5, "seed": None,
+            "tier": "abstract"}
 NAME = re.compile(r"[a-z0-9_]+")
 
 
 def name_ok(name):
     """Whether `name` can name a player's dataset: `[a-z0-9_]+`."""
     return NAME.fullmatch(name) is not None
+
+
+def dataset_id(player, tier="abstract"):
+    """The Minari id a player's episodes of `tier` record to."""
+    return f"hamsterball/human-{player}-{'articulated-' * (tier == 'articulated')}v{ENV_VERSION}"
 
 
 def level_choices(levels_dir, task):
