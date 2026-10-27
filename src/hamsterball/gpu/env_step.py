@@ -1,5 +1,5 @@
-"""The env-step kernels (spec §9, §10): what `HamsterballEnv._advance` and `_observe` do for the five tasks on still
-markers, one thread per world, so the vector env runs them inside the step graph. See env_step.md."""
+"""The env-step kernels (spec §9, §10): what `HamsterballEnv._advance` and `_observe` do for the five tasks, moving
+markers included, one thread per world, so the vector env runs them inside the step graph. See env_step.md."""
 
 import math
 
@@ -8,6 +8,7 @@ import numpy as np
 import warp as wp
 
 from ..core.level import LOCKED_RGBA, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS
+from ..core.marker import centre as marker_centre
 from ..core.model import R
 from ..env import PHI_SCALE, TIME_PENALTY
 
@@ -28,6 +29,9 @@ _G = wp.constant((math.sqrt(5) - 1) / 2)  # the golden section's ratio
 _TOL = wp.constant(1e-6)  # the box test's bracket, in metres
 _FACING, _PITCH = wp.constant(0), wp.constant(1)  # model.FACING, model.PITCH
 _SHELL, _HAM, _SHELL_DOF = wp.constant(1), wp.constant(2), wp.constant(0)  # model.SHELL, HAM, SHELL_DOF
+STILL, OSCILLATE, PATH = 0, 1, 2  # a marker row's motion kind
+_STILL, _OSCILLATE = wp.constant(STILL), wp.constant(OSCILLATE)
+_TWO_PI = wp.constant(2.0 * math.pi)
 
 
 def targets(task, block):
@@ -38,11 +42,30 @@ def targets(task, block):
     return out
 
 
+@wp.struct
+class Motion:
+    """The marker rows' motions (`motion.pose`): per row its kind, period, phase, spin (rad/s), the offset's
+    amplitude vector (oscillate: axis times amplitude), the point its spin turns about (`pivot`: `marker.centre` at
+    sim time 0, so its authored centre plus its offset then), and a path's slice (`start`, `count`) of `pts` and `cum` (its
+    closed polyline's points and cumulative lengths)."""
+
+    kind: wp.array(dtype=int)
+    period: wp.array(dtype=float)
+    phase: wp.array(dtype=float)
+    spin: wp.array(dtype=float)
+    vec: wp.array(dtype=wp.vec3)
+    pivot: wp.array(dtype=wp.vec3)
+    start: wp.array(dtype=int)
+    count: wp.array(dtype=int)
+    pts: wp.array(dtype=wp.vec3)
+    cum: wp.array(dtype=float)
+
+
 class Markers:
     """The marker tables on the device, one block of `stride` rows per bank entry: the entry's task's targets in task
     order, then its level's hazards, each a sphere, capsule, or box in the kernels' form (`a`, `b` the segment's ends,
     `rot` and `half` the box's frame and half-sizes), and the rest of the block padding. `role` and `base` say how each
-    target looks (see `look_markers`). Per entry: `ntargets`, `n` (targets and hazards), `mode`, `goal_row`, `survive`,
+    target looks (see `look_markers`) and `motion` (a `Motion`) how it moves. Per entry: `ntargets`, `n` (targets and hazards), `mode`, `goal_row`, `survive`,
     `time_penalty`. `entries` is a list of `(task, block, hazards)`; `row_geom` maps each row to its geom in the model,
     `row_slot` to its marker slot."""
 
@@ -52,6 +75,8 @@ class Markers:
         pad = {"type": "sphere", "pos": [0, 0, 0], "radius": 0.0}
         kind, a, b, rad, rot, half, centre, role, base = [], [], [], [], [], [], [], [], []
         ntargets, n, mode, goal_row, survive, tp = [], [], [], [], [], []
+        mo = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pivot", "start", "count")}
+        pts, cum = [[0, 0, 0]], [0.0]  # a path's closed polylines end to end (one padding point so the arrays are never empty)
         for task, block, hazards in entries:
             tgt = targets(task, block)
             ntargets.append(len(tgt)), n.append(len(tgt) + len(hazards)), mode.append(MODES[task])
@@ -71,6 +96,18 @@ class Markers:
                 mujoco.mju_euler2Quat(q, np.radians(m.get("euler", [0, 0, 0])), "xyz")
                 mujoco.mju_quat2Mat(mat, q)
                 rot.append(mat.reshape(3, 3))
+                motion = m.get("motion")
+                mo["kind"].append(STILL if motion is None else OSCILLATE if motion["type"] == "oscillate" else PATH)
+                mo["period"].append(motion["period"] if motion else 1.0), mo["phase"].append(motion["phase"] if motion else 0.0)
+                mo["spin"].append(math.radians(motion["spin"]) if motion else 0.0)
+                mo["vec"].append(np.array(motion["axis"]) * motion["amplitude"] if motion and motion["type"] == "oscillate" else [0, 0, 0])
+                mo["pivot"].append(marker_centre(m, 0.0))
+                mo["start"].append(len(pts)), mo["count"].append(0)
+                if motion and motion["type"] == "path":
+                    closed = np.array(motion["points"] + motion["points"][:1])
+                    pts += closed.tolist()
+                    cum += np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(closed, axis=0), axis=1))]).tolist()
+                    mo["count"][-1] = len(closed)
             keys = [k for k, _ in tgt]
             role += [VANISH if k in ("items", "keys") else WAYPOINT if k == "waypoints" else UNLOCK if MODES[task] == GOAL_LAST and k == "goal"
                      else PLAIN for k in keys] + [PLAIN] * (self.stride - len(keys))
@@ -82,6 +119,11 @@ class Markers:
         self.rad, self.rot, self.base = f(rad, float), f(rot, wp.mat33), f(base, wp.vec4)
         self.ntargets, self.n, self.mode, self.goal_row, self.survive = i(ntargets), i(n), i(mode), i(goal_row), i(survive)
         self.time_penalty = f(tp, float)
+        self.motion = Motion()
+        self.motion.kind, self.motion.start, self.motion.count = i(mo["kind"]), i(mo["start"]), i(mo["count"])
+        self.motion.period, self.motion.phase, self.motion.spin = (f(mo[k], float) for k in ("period", "phase", "spin"))
+        self.motion.vec, self.motion.pivot = f(mo["vec"], wp.vec3), f(mo["pivot"], wp.vec3)
+        self.motion.pts, self.motion.cum = f(pts, wp.vec3), f(cum, float)
 
 
 @wp.func
@@ -189,17 +231,61 @@ def live(w: int, i: int, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: i
 
 
 @wp.func
+def offset_of(r: int, t: float, mo: Motion):
+    """motion.pose's offset for marker row r at sim time t: a sine along an axis, or a point on the closed path at the
+    fraction of its length the phase gives. A still row has none."""
+    off = wp.vec3()
+    k = mo.kind[r]
+    if k != _STILL:
+        u = t / mo.period[r] + mo.phase[r]
+        u = u - wp.floor(u)  # Python's % 1.0
+        if k == _OSCILLATE:
+            off = mo.vec[r] * wp.sin(_TWO_PI * u)
+        else:
+            s0 = mo.start[r]
+            n = mo.count[r]
+            x = u * mo.cum[s0 + n - 1]
+            j = int(0)
+            for i in range(n - 2):
+                if x > mo.cum[s0 + i + 1]:
+                    j = i + 1
+                else:
+                    break
+            seg = mo.cum[s0 + j + 1] - mo.cum[s0 + j]
+            f = float(0.0)
+            if seg > 0.0:
+                f = wp.clamp((x - mo.cum[s0 + j]) / seg, 0.0, 1.0)
+            off = mo.pts[s0 + j] + (mo.pts[s0 + j + 1] - mo.pts[s0 + j]) * f
+    return off
+
+
+@wp.func
+def to_authored(r: int, p: wp.vec3, t: float, mo: Motion):
+    """marker._authored: the point p at sim time t in row r's authored frame, undoing its offset and then its spin
+    about its pivot (a still row's frame is the world's)."""
+    if mo.kind[r] == _STILL:
+        return p
+    yaw = mo.spin[r] * t
+    cy = wp.cos(yaw)
+    sy = wp.sin(yaw)
+    v = p - mo.pivot[r] - offset_of(r, t, mo)
+    return mo.pivot[r] + wp.vec3(cy * v[0] + sy * v[1], -sy * v[0] + cy * v[1], v[2])
+
+
+@wp.func
 def nearest(w: int, p: wp.vec3, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: int, centre: wp.array(dtype=wp.vec3),
-            row: int):
-    """HamsterballEnv._target: the centre of the live target nearest p (the first of a tie)."""
+            row: int, t: float, mo: Motion):
+    """HamsterballEnv._target: the centre of the live target nearest p at sim time t (the first of a tie), a moving
+    target's by its offset then."""
     best = wp.vec3()
     d_best = float(1.0e30)
     for i in range(ntargets):
         if live(w, i, todo, mode, ntargets):
-            d = wp.length(centre[row + i] - p)
+            c = centre[row + i] + offset_of(row + i, t, mo)
+            d = wp.length(c - p)
             if d < d_best:
                 d_best = d
-                best = centre[row + i]
+                best = c
     return best
 
 
@@ -238,11 +324,16 @@ def advance(
     event_out: wp.array(dtype=float),
     time_out: wp.array(dtype=float),
     shaping_out: wp.array(dtype=float),
+    time: wp.array(dtype=float),
+    prev_t: wp.array(dtype=float),
+    mo: Motion,
 ):
-    """HamsterballEnv._advance on still markers: rows 0..ntargets-1 are the task's targets, the rest hazards. Survive
-    tests the region (row 0) at the centre and clears it at the time limit; every other task removes the live targets
-    the swept segment touches. Then success over failure (hazard, kill plane, left region), the time penalty (none
-    in survive), the shaping term, truncation. Updates the targets left, step count, previous shell position, potential."""
+    """HamsterballEnv._advance: rows 0..ntargets-1 are the task's targets, the rest hazards. Survive tests the region
+    (row 0, which may move) at the centre and clears it at the time limit; every other task removes the live targets
+    the swept segment touches (targets are still). A hazard is tested on its relative path: the previous centre in its
+    frame at the previous sim time, the current one in its frame now. Then success over failure (hazard, kill plane,
+    left region), the time penalty (none in survive), the shaping term, truncation. Updates the targets left, step
+    count, previous shell position and sim time, potential."""
     w = wp.tid()
     e = entry[w]
     row = e * stride
@@ -257,11 +348,12 @@ def advance(
     steps[w] = steps[w] + 1
     pos = wp.vec3(qpos[w, 0], qpos[w, 1], qpos[w, 2])
     prev = prev_pos[w]
+    now = time[w]
     event = float(0.0)
     fail = int(0)
     in_region = bool(True)
     if survive != 0:
-        in_region = inside(row, kind, a, b, rad, rot, half, pos)
+        in_region = inside(row, kind, a, b, rad, rot, half, to_authored(row, pos, now, mo))
         if in_region and steps[w] >= max_steps:
             todo[w, 0] = False
     else:
@@ -279,7 +371,8 @@ def advance(
         event += 1.0
     else:
         for i in range(ntargets, nmarkers):
-            if fail == 0 and touches(row + i, kind, a, b, rad, rot, half, prev, pos):
+            if fail == 0 and touches(row + i, kind, a, b, rad, rot, half, to_authored(row + i, prev, prev_t[w], mo),
+                                     to_authored(row + i, pos, now, mo)):
                 fail = 1  # hazard
         if fail == 0 and pos[2] < kill_z:
             fail = 2  # kill_plane
@@ -288,10 +381,11 @@ def advance(
         if fail != 0:
             event -= 1.0
     prev_pos[w] = pos
+    prev_t[w] = now
     done = won or fail != 0
     new_phi = float(0.0)
     if not done:
-        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre, row) - pos)
+        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre, row, now, mo) - pos)
     shaping = float(0.0)
     if shaped != 0:
         shaping = gamma * new_phi - phi[w]
@@ -335,6 +429,8 @@ def observe(
     success: wp.array(dtype=wp.bool),
     state: wp.array2d(dtype=float),
     goal: wp.array2d(dtype=float),
+    time: wp.array(dtype=float),
+    mo: Motion,
 ):
     """HamsterballEnv._observe's `state` and `goal` for the worlds in `mask`; needs fresh xpos, xmat, subtree_com and
     subtree_linvel, which the caller refreshes. The goal's target is the nearest live one; its fraction remaining is
@@ -377,7 +473,7 @@ def observe(
         goal[w, i] = 0.0
     goal[w, 5 + task[w]] = 1.0
     if not success[w]:
-        g = to_facing(nearest(w, c, todo, mode, ntargets, centre, row) - c, sy, cy)
+        g = to_facing(nearest(w, c, todo, mode, ntargets, centre, row, time[w], mo) - c, sy, cy)
         for i in range(3):
             goal[w, i] = g[i]
         goal[w, 3] = 1.0
@@ -421,8 +517,12 @@ def reset_episode(
     steps: wp.array(dtype=int),
     prev_pos: wp.array(dtype=wp.vec3),
     phi: wp.array(dtype=float),
+    time: wp.array(dtype=float),
+    prev_t: wp.array(dtype=float),
+    mo: Motion,
 ):
-    """HamsterballEnv.reset's episode state: every target left, no steps, the swept segment a point at the spawn, Φ there."""
+    """HamsterballEnv.reset's episode state: every target left, no steps, the swept segment a point at the spawn (and the
+    sim time then), Φ there."""
     w = wp.tid()
     if not mask[w]:
         return
@@ -433,7 +533,8 @@ def reset_episode(
         todo[w, i] = i < ntargets  # a padded target is never left
     steps[w] = 0
     prev_pos[w] = pos
-    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, t_mode[e], ntargets, centre, e * stride) - pos)
+    prev_t[w] = time[w]
+    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, t_mode[e], ntargets, centre, e * stride, time[w], mo) - pos)
 
 
 @wp.kernel
@@ -485,3 +586,47 @@ def look_markers(
         elif role[r] == _UNLOCK and todo[w, i] and not live(w, i, todo, mode, ntargets):
             c = _LOCKED
         geom_rgba[w, row_geom[r]] = c
+
+
+@wp.kernel
+def pose_movers(
+    entry: wp.array(dtype=int),
+    stride: int,
+    t_n: wp.array(dtype=int),
+    row_slot: wp.array(dtype=int),
+    row_geom: wp.array(dtype=int),
+    slot_pos: wp.array2d(dtype=wp.vec3),
+    slot_quat: wp.array2d(dtype=wp.quat),
+    time: wp.array(dtype=float),
+    mo: Motion,
+    geom_pos: wp.array2d(dtype=wp.vec3),
+    geom_quat: wp.array2d(dtype=wp.quat),
+    geom_xpos: wp.array2d(dtype=wp.vec3),
+    geom_xmat: wp.array2d(dtype=wp.mat33),
+):
+    """HamsterballEnv._pose_movers: each moving marker's geom at its pose at the world's sim time, its authored pose
+    moved by the offset and turned by the yaw about z (quaternions are MuJoCo's w, x, y, z). The geom is static, so
+    its world pose (`geom_xpos`, `geom_xmat`), which forward never recomputes, is written too."""
+    w, i = wp.tid()
+    e = entry[w]
+    r = e * stride + i
+    if i >= t_n[e] or mo.kind[r] == _STILL:
+        return
+    g = row_geom[r]
+    s = row_slot[r]
+    t = time[w]
+    yaw = mo.spin[r] * t
+    cz = wp.cos(0.5 * yaw)
+    sz = wp.sin(0.5 * yaw)
+    q0 = slot_quat[e, s]
+    # (cz, 0, 0, sz) * q0
+    q = wp.quat(cz * q0[0] - sz * q0[3], cz * q0[1] - sz * q0[2], cz * q0[2] + sz * q0[1], cz * q0[3] + sz * q0[0])
+    p = slot_pos[e, s] + offset_of(r, t, mo)
+    geom_pos[w, g] = p
+    geom_quat[w, g] = q
+    geom_xpos[w, g] = p
+    a, b, c, d = q[0], q[1], q[2], q[3]
+    geom_xmat[w, g] = wp.mat33(
+        a * a + b * b - c * c - d * d, 2.0 * (b * c - a * d), 2.0 * (b * d + a * c),
+        2.0 * (b * c + a * d), a * a - b * b + c * c - d * d, 2.0 * (c * d - a * b),
+        2.0 * (b * d - a * c), 2.0 * (c * d + a * b), a * a - b * b - c * c + d * d)
