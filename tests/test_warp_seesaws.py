@@ -224,16 +224,16 @@ def test_episodes_on_different_seesaw_levels_of_one_bank_replay_together():
 
 
 class SeesawsAndOthers:
-    """The procedural generator without the collapse layout (ticket 08), and a seesaw layout for every even seed."""
+    """The procedural generator, with a seesaw layout for every even seed."""
 
     def __init__(self):
         self.tasks, self.version = GEN.tasks, GEN.version
 
     def __call__(self, task, seed, difficulty):
         want = seed % 2 == 0
-        while (lv := GEN(task, seed, difficulty)).collapse or (want and not any("joint" in b for b in lv.bodies)):
+        while want and not any("joint" in b for b in GEN(task, seed, difficulty).bodies):
             seed += 1
-        return lv
+        return GEN(task, seed, difficulty)
 
 
 def test_a_generator_pool_with_the_seesaw_layout_trains_on_the_device():
