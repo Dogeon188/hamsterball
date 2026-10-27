@@ -59,8 +59,6 @@ class Bank:
         for lv, _ in pairs:
             if any("joint" in b for b in lv.bodies):
                 raise NotImplementedError("seesaws come with a later ticket")
-            if lv.collapse:
-                raise NotImplementedError("collapsing tiles come with a later ticket")
             if any(CONTACT.keys() & g.keys() for g in lv.geoms):
                 raise NotImplementedError("a geom with friction, solref or solimp is not batched yet")
         self.levels = [lv for lv, _ in pairs]
@@ -99,9 +97,17 @@ class Bank:
             for slot, b in zip(self.body_counts, self.levels[i].bodies):
                 for k in BODY_TYPES:
                     slot[k] = max(slot[k], sum(g["type"] == k for g in b["geoms"]))
+        # the tile pool (ticket 08): as many free-joint slots as the most tiles a level has, each with one geom slot per type
+        # a tile of that slot has in any entry; a level's collapse tiles are its first slots
+        self.ntiles = max([len(self.levels[i].collapse["tiles"]) if self.levels[i].collapse else 0 for i, _ in self.entries], default=0)
+        self.tile_counts = [{k: 0 for k in BODY_TYPES} for _ in range(self.ntiles)]
+        for i, _ in self.entries:
+            for slot, g in zip(self.tile_counts, self.levels[i].collapse["tiles"] if self.levels[i].collapse else []):
+                slot[g["type"]] = 1
         self.slots = [("s", k, j) for k in STATIC_TYPES for j in range(self.static_counts[k])] + [
             ("m", k, j) for k in MARKER_TYPES for j in range(self.marker_counts[k])] + [
-            (f"b{b}", k, j) for b in range(self.nbodies) for k in BODY_TYPES for j in range(self.body_counts[b][k])]
+            (f"b{b}", k, j) for b in range(self.nbodies) for k in BODY_TYPES for j in range(self.body_counts[b][k])] + [
+            (f"t{b}", k, j) for b in range(self.ntiles) for k in BODY_TYPES for j in range(self.tile_counts[b][k])]
 
     def name(self, slot):
         return "/".join(map(str, slot))
@@ -117,8 +123,8 @@ class Bank:
         for slot in self.slots:
             kind, typ, _ = slot
             if kind != "m":  # contact on, like a level solid (level._geom_mjcf)
-                if kind[0] == "b":
-                    continue  # a body's geoms are in its body (body_mjcf)
+                if kind[0] in "bt":
+                    continue  # a body's or tile's geoms are in its body (body_mjcf, tile_mjcf)
                 shape = 'hfield="hfield0"' if typ == "hfield" else 'size="1 1 1"'
                 out.append(f'<geom name="{self.name(slot)}" type="{typ}" {shape} contype="1" conaffinity="1" group="0"/>')
             else:  # contact off, like a marker (level._marker_mjcf)
@@ -139,11 +145,27 @@ class Bank:
             out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
         return _sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
 
+    def tile_mjcf(self):
+        """MJCF sections for `core.model.build`'s `bodies`, after `body_mjcf()`'s: the tile slots `tile<k>`, each a kinematic
+        body as `Level.tile_mjcf` compiles a tile, at the origin holding its geom slots, excluded from the world, the body
+        slots and each other. "" for a bank without tiles."""
+        if not self.ntiles:
+            return ""
+        names = [f"tile{k}" for k in range(self.ntiles)]
+        out = []
+        for k, n in enumerate(names):
+            geoms = "".join(f'<geom name="t{k}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
+                            for typ in BODY_TYPES for j in range(self.tile_counts[k][typ]))
+            out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
+        others = ["world", *(f"body{b}" for b in range(self.nbodies))]
+        return _sections(out, [(a, t) for t in names for a in others] + list(itertools.combinations(names, 2)))
+
     def tables(self, mjm):
         """The slot tables as numpy, one row per entry: what each world's model fields take for that (level, task).
         `mjm` is the compiled padded model, which gives the slot geom ids and the values a parked slot keeps."""
         ids = self.slot_ids = [mjm.geom(self.name(s)).id for s in self.slots]
         self.row_slots = []  # per entry, the slot of each marker row
+        self.tile_slots = []  # per entry, the slot of each of the level's tiles (its one geom)
         E, S = len(self.entries), len(self.slots)
         t = {"pos": np.zeros((E, S, 3), np.float32), "quat": np.zeros((E, S, 4), np.float32),
              "size": np.zeros((E, S, 3), np.float32), "aabb": np.zeros((E, S, 2, 3), np.float32),
@@ -154,14 +176,19 @@ class Bank:
             lv = self.levels[i]
             solids = [("s", g["type"], _geom_row(g, self.hfields)) for g in lv.geoms]
             solids += [(f"b{b}", g["type"], _geom_row(g, self.hfields)) for b, body in enumerate(lv.bodies) for g in body["geoms"]]
+            tiles = [(f"t{k}", g["type"], _geom_row({**g, "pos": [0.0, 0.0, 0.0]}, self.hfields))  # a tile geom is at its body's origin
+                     for k, g in enumerate(lv.collapse["tiles"] if lv.collapse else [])]
             marks = [("m", m["type"], _marker_row(m, rgba)) for m, rgba in marker_rows(lv, task)]
             used, filled = {}, {}
             self.row_slots.append([])
-            for kind, typ, row in solids + marks:
+            self.tile_slots.append([])
+            for kind, typ, row in solids + tiles + marks:
                 j = used[kind, typ] = used.get((kind, typ), -1) + 1
                 filled[kind, typ, j] = row
                 if kind == "m":
                     self.row_slots[-1].append(self.slots.index((kind, typ, j)))
+                elif kind[0] == "t":
+                    self.tile_slots[-1].append(self.slots.index((kind, typ, j)))
             park = lv.kill_plane_z - PARK_DEPTH
             for s, slot in enumerate(self.slots):
                 g = ids[s]
@@ -173,7 +200,7 @@ class Bank:
                     margin = 0.0
                 else:  # parked: far under the kill plane (a body's geom, far under its body), no contacts, invisible; its
                     # compiled size and bounds stay
-                    pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if slot[0][0] == "b" else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
+                    pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if slot[0][0] in "bt" else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
                     size, aabb, rbound = mjm.geom_size[g], mjm.geom_aabb[g].reshape(2, 3), mjm.geom_rbound[g]
                     rgba, dataid = (*mjm.geom_rgba[g][:3], 0.0), int(mjm.geom_dataid[g])
                 if slot[1] == "plane":  # the plane's bounds are infinite, so they are the compiled ones

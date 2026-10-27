@@ -342,6 +342,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         wp.launch(E.pose_movers, (self.num_envs, m.stride), [c.entry, m.stride, m.n, self.row_slot, self.row_geom, c.tables.pos,
                                                              c.tables.quat, c.data.time, c.data.qpos, m.motion, c.model.geom_pos,
                                                              c.model.geom_quat, c.data.geom_xpos, c.data.geom_xmat])
+        c.tiles.look(c.entry, c.data.time, c.data.userdata, c.tables.slot_geom, c.tables.rgba, c.model.geom_rgba)
 
     def _observe(self, mask, success):
         """`state` and `goal` for the worlds in `mask`, after the derived quantities `mj_step` leaves behind are refreshed

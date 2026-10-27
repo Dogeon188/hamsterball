@@ -42,3 +42,4 @@ All of it is float64, including the time (`data.time` is float32, widened). The 
 ## History
 
 - 2026-10-27, ticket gpu-backend/07: first version. CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 117 of 117 `gpu` tests passed (see Invariants and checks).
+- 2026-10-27, ticket gpu-backend/08: tiles joined as a pool of their own after the body pool, not inside it (see tiles.md and bank.md); the Known quirks line above that says tiles join the body pool is superseded.
