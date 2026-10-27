@@ -2,26 +2,26 @@
 
 ## Purpose
 
-The batched core: `num_envs` worlds of the CPU core ([step.md](../core/step.md)) on one Warp device, with each world's state read and written in the CPU core-state layout. It is the base of the GPU-batched backend (spec `gpu-backend`); this slice covers a bank of static levels (planes, hfields, boxes, spheres, capsules; no bodies or tiles) padded into one model ([bank.md](bank.md)), the abstract tier, and the camera flag.
+The batched core: `num_envs` worlds of the CPU core ([step.md](../core/step.md)) on one Warp device, with each world's state read and written in the CPU core-state layout. It is the base of the GPU-batched backend (spec `gpu-backend`); this slice covers a bank of levels with planes, hfields, boxes, spheres, capsules and kinematic bodies (no seesaws or tiles yet) padded into one model ([bank.md](bank.md)), the abstract tier, and the camera flag.
 
 ## Interface
 
 Needs the `gpu` extra; importing `hamsterball.gpu.batch_core` without it raises `ImportError` naming the extra, and nothing else in the package imports it, so a plain install never loads `warp` or `torch`.
 
-- `BatchCore(tier=None, levels=(FLAT_LEVEL,), num_envs=1, camera_action=False, device="cpu", graph=True, tasks=all, keep=())`: `levels` is the bank, a list of `Level`s (the default is one plane, `FLAT_LEVEL`); bodies, seesaws and tiles raise `NotImplementedError`. `tasks` and `keep` are for the vector env (see [bank.md](bank.md)). `bank` is the host `Bank`, `entry` the device array of each world's (level, task) entry. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError` (the core maps Warp's `ValueError` for an unknown device). A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
+- `BatchCore(tier=None, levels=(FLAT_LEVEL,), num_envs=1, camera_action=False, device="cpu", graph=True, tasks=all, keep=())`: `levels` is the bank, a list of `Level`s (the default is one plane, `FLAT_LEVEL`); seesaws and tiles raise `NotImplementedError`; kinematic bodies are driven by [bodies.py](bodies.md). `tasks` and `keep` are for the vector env (see [bank.md](bank.md)). `bank` is the host `Bank`, `entry` the device array of each world's (level, task) entry. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError` (the core maps Warp's `ValueError` for an unknown device). A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
 - `reset(worlds=None, bank_index=None, spawn=(0, 0, R), facing=0.0)`: reset the given worlds like `Core.reset` onto bank level `bank_index` (stored in `level_index`; default the level they are on), taking that level's first task's markers.
 - `reset_masked(mask, spawns, facings)`: `reset` with Warp arrays on the device (a bool mask, vec3 spawns, facings), so it can run inside a captured graph; the vector env's same-step autoreset calls it. Each masked world loads the slots of its `entry` first (`load_levels(mask)`, also public: it rewrites the geometry and nothing else).
-- `states()`: every world's state in the CPU layout, `(num_envs, state size)`.
+- `states()`: every world's state in the padded layout, `(num_envs, padded state size)`; the CPU layout when no level in the bank has bodies. `cpu_states()`: a list of each world's state in the CPU layout of its level (vectors differ in length when the levels' bodies do).
 - `step(action, n=FRAME_SKIP, post=None)`: `action` is `(num_envs, adim)`, numpy or torch, with `turn` and `cam_pitch` last under the camera flag; one action per world, held over `n` physics steps. `post`, a callable that launches kernels, runs after the `n` steps inside the same graph (the vector env's env-step kernels); pass the same one every call, since the graph is kept per `n`. On CUDA the `n` steps are captured once per `n` as one graph and relaunched; on the CPU device they run eagerly.
 - `obs()`: the tier's observation after the last step, `{"wall_contact": bool array}` for the abstract tier.
-- `set_states(states)`: `set_state` for every world, `(num_envs, state size)`.
-- `state(world)` and `set_state(world, s)`: the `mjSTATE_INTEGRATION` vector `Core.state()` returns, at float32 precision, because Warp stores float32. A float32-exact vector round-trips exactly; any other comes back rounded to float32. `set_state` carries the solver warm start, as the CPU vector does, and the positions refresh at the next step.
+- `set_states(states)`: `set_state` for every world: a `(num_envs, size)` array or a list of one vector per world, each in the CPU layout of the level that world is on (a wrong length raises `ValueError`).
+- `state(world)` and `set_state(world, s)`: the `mjSTATE_INTEGRATION` vector `Core.state()` returns for the world's level, at float32 precision, because Warp stores float32. A float32-exact vector round-trips exactly; any other comes back rounded to float32. `set_state` carries the solver warm start, as the CPU vector does, and the positions refresh at the next step.
 
-Kernels, each named for its CPU function and in `physics_step`'s order: clear `xfrc_applied`, the position refresh (`mjw.kinematics`, `mjw.com_pos`), `turn_facing`, `camera_pitch`, `drag`, `contain` (impulse and hard stop), the tier's `drive` (see [abstract_tier.md](abstract_tier.md)), `mjw.step`; then the tier's `obs` once per env step. Constants are `core.step`'s and `core.model`'s, read from there.
+Kernels, each named for its CPU function and in `physics_step`'s order: clear `xfrc_applied`, `drive_bodies`, the position refresh (`mjw.kinematics`, `mjw.com_pos`), `turn_facing`, `camera_pitch`, `drag`, `contain` (impulse and hard stop), the tier's `drive` (see [abstract_tier.md](abstract_tier.md)), `mjw.step`; then the tier's `obs` once per env step. Constants are `core.step`'s and `core.model`'s, read from there.
 
 ## How it works
 
-The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model`, with the geom fields of [bank.md](bank.md) given a world axis; `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so no mapping is needed: the padded slots are geoms, which the integration state does not hold, and static levels all have the same dofs and userdata. A level with bodies or tiles would have a different layout, which is why those come with the later tickets' mapping.
+The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model`, with the geom fields of [bank.md](bank.md) given a world axis; `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so a bank of static levels needs no mapping: the padded slots are geoms, which the integration state does not hold. A level with bodies has more qpos, qvel, warm start, `qfrc_applied` and `xfrc_applied` numbers (13 each body: 7 qpos, 6 dofs, and 6 more in each of the other three vectors). The body slots are the last bodies, joints and dofs of the model, so every segment of the CPU vector is the padded segment with its tail cut, and `state`, `set_state`, `cpu_states` and `set_states` map by index arrays per body count; an unused slot rests at the origin with a unit quaternion, zero velocity and zero warm start. Tiles (ticket 09) will add userdata slots, which are not a tail cut: that mapping extends this one.
 
 ## Invariants and checks
 
@@ -41,6 +41,8 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 
 ## Decisions
 
+- 2026-10-27, ticket gpu-backend/07: the CPU-layout state of a world with bodies is the padded state with each segment's tail cut (the body slots are the model's last), mapped by precomputed index arrays per body count; `states()` stays padded and `cpu_states()` is the portable form (the vector env's `set_levels` carries worlds across banks of different padding with it).
+
 - 2026-10-27, ticket gpu-backend/02: the tier hook is a class per tier in `TIERS` (CPU class to batched twin) supplying `drive`, `obs`, `reset`, and the arrays they read, launched by the core.
 - 2026-10-27, ticket gpu-backend/02: state goes through `mjw.get_state`/`set_state` (the official layout), not a hand-built vector.
 - 2026-10-27, ticket gpu-backend/03: the vector env's env-step kernels join the physics graph through `step(post=)`, and its autoreset uses `reset_masked`, a device-array form of `reset`, so no host sync sits between a finished world and its reset.
@@ -52,6 +54,8 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 - Zeroing the warm start in `set_state`: the CPU vector carries the warm start, so loading it is what keeps the two cores' first step comparable.
 
 ## History
+
+- 2026-10-27, ticket gpu-backend/07: kinematic bodies: `drive_bodies` in the physics step and at reset, the CPU-layout state map, `cpu_states()`, list-form `set_states`.
 
 - 2026-10-27, ticket gpu-backend/02: first version, a flat level, the abstract tier, the camera flag.
 - 2026-10-27, ticket gpu-backend/03: added `post`, `reset_masked` and `set_states`; a nonexistent CUDA device now raises `RuntimeError` as documented (Warp raises `ValueError`, which the first version let through).

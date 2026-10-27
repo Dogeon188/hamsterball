@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The env-step kernels: what `HamsterballEnv._advance` and `_observe` ([env.md](../env.md)) do after the physics, one thread per world, so the Warp vector env ([vector_env.md](vector_env.md)) runs them inside the step graph. It covers all five tasks, with moving markers (a drifting region, moving hazards) tested on their relative path and posed per world each env step; markers attached to a body or seesaw come with the kinematic-body tickets of the `gpu-backend` effort.
+The env-step kernels: what `HamsterballEnv._advance` and `_observe` ([env.md](../env.md)) do after the physics, one thread per world, so the Warp vector env ([vector_env.md](vector_env.md)) runs them inside the step graph. It covers all five tasks, with moving markers (a drifting region, moving hazards) tested on their relative path and posed per world each env step; markers attached to a kinematic body ride it (a seesaw's come with its ticket).
 
 ## Interface
 
@@ -13,6 +13,7 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 - `FAILURE_CODES = ("none", "hazard", "kill_plane", "left_region")`: the table for `info["failure_reason"]`, an int32 per world, the index into this tuple. `left_region` is survive's.
 - Kernels, named for the CPU function they port: `advance` (`_advance`), `pose_movers` (`_pose_movers`), `observe` (`_observe`'s `state` and `goal`), `look_markers` (`_look`), `stash_final` and `reset_episode` (autoreset), `set_spawn` (the spawn pose of the masked worlds from their entry's table), `either` (an or of two masks).
 - Helpers: `offset_of` (`motion.pose`'s offset for a row at a sim time), `to_authored` (`marker._authored`: a point into a moving marker's authored frame at a sim time), `seg_seg_dist`, `box_dist`, `seg_box_dist`, `touches` (`core.marker`'s `_seg_seg_dist`, `_seg_box_dist` and `crosses` with reach `R`), `inside` (`crosses` at reach 0 on a point: survive's region test), `live` (`_live`), `nearest` (`_target`).
+- Attached markers (ticket 07): `Markers(entries, device, body_qadr)` gives each row `Motion.qadr`, the qpos address of its body slot (-1 for none). `to_body` (`crosses`' `frame`: `R^T (p - pos)` from the body's qpos), `centre_at` (`marker.centre` with a frame: the body's pos plus `R c`, else the authored centre plus the motion's offset) and `quat_mat` serve them; `advance` tests survive's region at the shell centre in the body's frame, `nearest` steers at the frame's centre, `observe` and `pose_movers` read `qpos`.
 - `advance`, `observe` and `reset_episode` also read the world's sim time (`data.time`), and `advance` and `reset_episode` keep its previous value `prev_t` beside the previous shell position.
 - `advance`, `observe`, `reset_episode` and `look_markers` read each world's entry (the bank's (level, task) pair, see [bank.md](bank.md)) for its marker rows, mode, kill plane height and step limit; the targets-left array is `(num_envs, max targets)`, padded with False.
 
@@ -23,6 +24,7 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 - The box test is the CPU's golden-section search along the segment to a 1e-6 m bracket, in float32 (capped at 64 passes, which only a degenerate bracket would reach). The CPU's reach-0 slab test of a box is not ported: survive's region test is a point, which `inside` does as the slab test does for a segment of zero length.
 - `observe` writes the 21-number `state` and 10-number `goal` for the worlds in a mask, from the refreshed `xpos`, `xmat`, `subtree_com` and `subtree_linvel`, in the facing frame. The goal's target is the nearest live target's centre (a capsule's midpoint) to the shell; its fraction is the targets left over all of them, or survive's time left over the limit. Once a world has succeeded its goal vector is zeros apart from the task one-hot.
 - `look_markers` writes the episode task's marker colours into the world's `geom_rgba` from the targets left: a collected item or key alpha 0, a waypoint locked until it is next and passed after, the unlock goal locked until every key is in, the rest in their kind's colour. It is derived from the targets left each env step, after the autoreset, so a world that just reset shows its next episode's colours (the CPU's `_look` calls change them as targets fall). A world's marker slots hold only its own task's markers, so there are no other tasks' markers to hide.
+- Attached markers. The only attached marker is survive's region, a point test, so the shell centre is taken into the body's frame (`to_body`, from the body's qpos after the step, whose pose is the driven pose at the end of the step), then `inside` tests it there as for a still region. The potential and the goal vector steer at the frame's centre. `pose_movers` puts the region's slot geom at the body's pose times the authored pose (`geom_pos`, `geom_quat`, `geom_xpos`, `geom_xmat`).
 - Per-world episode state, all device arrays owned by the vector env: the targets left (a bool array over the task's targets, a bitmask's equal without a cap on the count), step count, previous shell position, potential. The previous sim time the spec lists is not kept: still markers don't read it.
 
 ## Invariants and checks
@@ -54,6 +56,8 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 - Nothing yet.
 
 ## History
+
+- 2026-10-27, ticket gpu-backend/07: attached markers (survive's region riding a kinematic body). Parity with the CPU env through `step_to` on 6 recorded body-level episodes plus a five-level mixed bank (Warp CPU device): largest observation difference 1.4e-6, largest reward difference 3.8e-8, largest attached-region geom position or matrix difference 3.7e-7, flags, success and failure codes matching on every step. The episodes cover a raft that rolls the ball off its low edge, a chased raft, a bar that shoves a still ball out of its region, a ridden platform to a shaped time-up success, a ridden pillar level to time-up, and three pillars shoving a still ball out.
 
 - 2026-10-27, ticket gpu-backend/03: first version, reach_goal on one level. Parity with the CPU env on 8 recorded scenarios (sphere, capsule and box goals and hazards, a fall, a truncation): largest observation difference 5.7e-6, largest reward difference 4.7e-8.
 - 2026-10-27, ticket gpu-backend/04: all five tasks on still markers. Parity with the CPU env on 14 recorded scenarios of the four new tasks plus the eight reach_goal ones (Warp CPU device): largest observation difference 7.6e-6 (a fall), largest reward difference 1.6e-7; flags, success, failure codes and marker colours matched on every step.

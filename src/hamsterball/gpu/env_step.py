@@ -46,8 +46,9 @@ def targets(task, block):
 class Motion:
     """The marker rows' motions (`motion.pose`): per row its kind, period, phase, spin (rad/s), the offset's
     amplitude vector (oscillate: axis times amplitude), the point its spin turns about (`pivot`: `marker.centre` at
-    sim time 0, so its authored centre plus its offset then), and a path's slice (`start`, `count`) of `pts` and `cum` (its
-    closed polyline's points and cumulative lengths)."""
+    sim time 0, so its authored centre plus its offset then), a path's slice (`start`, `count`) of `pts` and `cum` (its
+    closed polyline's points and cumulative lengths), and `qadr`: the qpos address of the free-joint body the row is
+    attached to (it is authored in that body's frame), -1 for a row that rides none."""
 
     kind: wp.array(dtype=int)
     period: wp.array(dtype=float)
@@ -59,6 +60,7 @@ class Motion:
     count: wp.array(dtype=int)
     pts: wp.array(dtype=wp.vec3)
     cum: wp.array(dtype=float)
+    qadr: wp.array(dtype=int)
 
 
 class Markers:
@@ -67,15 +69,15 @@ class Markers:
     `rot` and `half` the box's frame and half-sizes), and the rest of the block padding. `role` and `base` say how each
     target looks (see `look_markers`) and `motion` (a `Motion`) how it moves. Per entry: `ntargets`, `n` (targets and hazards), `mode`, `goal_row`, `survive`,
     `time_penalty`. `entries` is a list of `(task, block, hazards)`; `row_geom` maps each row to its geom in the model,
-    `row_slot` to its marker slot."""
+    `row_slot` to its marker slot. `body_qadr[k]` is the qpos address of body slot k, for the rows attached to body k."""
 
-    def __init__(self, entries, device):
+    def __init__(self, entries, device, body_qadr=()):
         self.stride = max(len(targets(t, b)) + len(h) for t, b, h in entries)
         self.max_targets = max(len(targets(t, b)) for t, b, _ in entries)
         pad = {"type": "sphere", "pos": [0, 0, 0], "radius": 0.0}
         kind, a, b, rad, rot, half, centre, role, base = [], [], [], [], [], [], [], [], []
         ntargets, n, mode, goal_row, survive, tp = [], [], [], [], [], []
-        mo = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pivot", "start", "count")}
+        mo = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pivot", "start", "count", "qadr")}
         pts, cum = [[0, 0, 0]], [0.0]  # a path's closed polylines end to end (one padding point so the arrays are never empty)
         for task, block, hazards in entries:
             tgt = targets(task, block)
@@ -103,6 +105,7 @@ class Markers:
                 mo["vec"].append(np.array(motion["axis"]) * motion["amplitude"] if motion and motion["type"] == "oscillate" else [0, 0, 0])
                 mo["pivot"].append(marker_centre(m, 0.0))
                 mo["start"].append(len(pts)), mo["count"].append(0)
+                mo["qadr"].append(body_qadr[m["attach"]] if "attach" in m else -1)
                 if motion and motion["type"] == "path":
                     closed = np.array(motion["points"] + motion["points"][:1])
                     pts += closed.tolist()
@@ -121,6 +124,7 @@ class Markers:
         self.time_penalty = f(tp, float)
         self.motion = Motion()
         self.motion.kind, self.motion.start, self.motion.count = i(mo["kind"]), i(mo["start"]), i(mo["count"])
+        self.motion.qadr = i(mo["qadr"])
         self.motion.period, self.motion.phase, self.motion.spin = (f(mo[k], float) for k in ("period", "phase", "spin"))
         self.motion.vec, self.motion.pivot = f(mo["vec"], wp.vec3), f(mo["pivot"], wp.vec3)
         self.motion.pts, self.motion.cum = f(pts, wp.vec3), f(cum, float)
@@ -273,15 +277,53 @@ def to_authored(r: int, p: wp.vec3, t: float, mo: Motion):
 
 
 @wp.func
+def quat_mat(a: float, b: float, c: float, d: float):
+    """The rotation matrix of the quaternion (a, b, c, d) = (w, x, y, z), as mju_quat2Mat."""
+    return wp.mat33(
+        a * a + b * b - c * c - d * d, 2.0 * (b * c - a * d), 2.0 * (b * d + a * c),
+        2.0 * (b * c + a * d), a * a - b * b + c * c - d * d, 2.0 * (c * d - a * b),
+        2.0 * (b * d - a * c), 2.0 * (c * d + a * b), a * a - b * b - c * c + d * d)
+
+
+@wp.func
+def body_rot(w: int, r: int, qpos: wp.array2d(dtype=float), mo: Motion):
+    """The rotation of the body row r is attached to, from its qpos."""
+    a = mo.qadr[r]
+    return quat_mat(qpos[w, a + 3], qpos[w, a + 4], qpos[w, a + 5], qpos[w, a + 6])
+
+
+@wp.func
+def to_body(w: int, r: int, p: wp.vec3, qpos: wp.array2d(dtype=float), mo: Motion):
+    """crosses' frame: the point p in the frame of the body row r is attached to, R^T (p - pos) from the body's qpos (a
+    row that rides none: p)."""
+    a = mo.qadr[r]
+    if a < 0:
+        return p
+    pos = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2])
+    return wp.transpose(body_rot(w, r, qpos, mo)) @ (p - pos)
+
+
+@wp.func
+def centre_at(w: int, r: int, centre: wp.array(dtype=wp.vec3), t: float, qpos: wp.array2d(dtype=float), mo: Motion):
+    """marker.centre for row r at sim time t: an attached row's authored centre in its body's frame (the body's pos plus
+    R c), else its authored centre plus its motion's offset."""
+    a = mo.qadr[r]
+    if a < 0:
+        return centre[r] + offset_of(r, t, mo)
+    pos = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2])
+    return pos + body_rot(w, r, qpos, mo) @ centre[r]
+
+
+@wp.func
 def nearest(w: int, p: wp.vec3, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: int, centre: wp.array(dtype=wp.vec3),
-            row: int, t: float, mo: Motion):
+            row: int, t: float, qpos: wp.array2d(dtype=float), mo: Motion):
     """HamsterballEnv._target: the centre of the live target nearest p at sim time t (the first of a tie), a moving
-    target's by its offset then."""
+    target's by its offset then, an attached one's by its body's pose in qpos."""
     best = wp.vec3()
     d_best = float(1.0e30)
     for i in range(ntargets):
         if live(w, i, todo, mode, ntargets):
-            c = centre[row + i] + offset_of(row + i, t, mo)
+            c = centre_at(w, row + i, centre, t, qpos, mo)
             d = wp.length(c - p)
             if d < d_best:
                 d_best = d
@@ -353,7 +395,7 @@ def advance(
     fail = int(0)
     in_region = bool(True)
     if survive != 0:
-        in_region = inside(row, kind, a, b, rad, rot, half, to_authored(row, pos, now, mo))
+        in_region = inside(row, kind, a, b, rad, rot, half, to_authored(row, to_body(w, row, pos, qpos, mo), now, mo))
         if in_region and steps[w] >= max_steps:
             todo[w, 0] = False
     else:
@@ -385,7 +427,7 @@ def advance(
     done = won or fail != 0
     new_phi = float(0.0)
     if not done:
-        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre, row, now, mo) - pos)
+        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre, row, now, qpos, mo) - pos)
     shaping = float(0.0)
     if shaped != 0:
         shaping = gamma * new_phi - phi[w]
@@ -410,6 +452,7 @@ def observe(
     mask: wp.array(dtype=wp.bool),
     xpos: wp.array2d(dtype=wp.vec3),
     xmat: wp.array2d(dtype=wp.mat33),
+    qpos: wp.array2d(dtype=float),
     qvel: wp.array2d(dtype=float),
     subtree_com: wp.array2d(dtype=wp.vec3),
     subtree_linvel: wp.array2d(dtype=wp.vec3),
@@ -473,7 +516,7 @@ def observe(
         goal[w, i] = 0.0
     goal[w, 5 + task[w]] = 1.0
     if not success[w]:
-        g = to_facing(nearest(w, c, todo, mode, ntargets, centre, row, time[w], mo) - c, sy, cy)
+        g = to_facing(nearest(w, c, todo, mode, ntargets, centre, row, time[w], qpos, mo) - c, sy, cy)
         for i in range(3):
             goal[w, i] = g[i]
         goal[w, 3] = 1.0
@@ -534,7 +577,7 @@ def reset_episode(
     steps[w] = 0
     prev_pos[w] = pos
     prev_t[w] = time[w]
-    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, t_mode[e], ntargets, centre, e * stride, time[w], mo) - pos)
+    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, t_mode[e], ntargets, centre, e * stride, time[w], qpos, mo) - pos)
 
 
 @wp.kernel
@@ -598,6 +641,7 @@ def pose_movers(
     slot_pos: wp.array2d(dtype=wp.vec3),
     slot_quat: wp.array2d(dtype=wp.quat),
     time: wp.array(dtype=float),
+    qpos: wp.array2d(dtype=float),
     mo: Motion,
     geom_pos: wp.array2d(dtype=wp.vec3),
     geom_quat: wp.array2d(dtype=wp.quat),
@@ -610,23 +654,30 @@ def pose_movers(
     w, i = wp.tid()
     e = entry[w]
     r = e * stride + i
-    if i >= t_n[e] or mo.kind[r] == _STILL:
+    if i >= t_n[e] or (mo.kind[r] == _STILL and mo.qadr[r] < 0):
         return
     g = row_geom[r]
     s = row_slot[r]
     t = time[w]
-    yaw = mo.spin[r] * t
-    cz = wp.cos(0.5 * yaw)
-    sz = wp.sin(0.5 * yaw)
     q0 = slot_quat[e, s]
-    # (cz, 0, 0, sz) * q0
-    q = wp.quat(cz * q0[0] - sz * q0[3], cz * q0[1] - sz * q0[2], cz * q0[2] + sz * q0[1], cz * q0[3] + sz * q0[0])
-    p = slot_pos[e, s] + offset_of(r, t, mo)
+    p0 = slot_pos[e, s]
+    if mo.qadr[r] >= 0:  # attached: the authored pose is in the body's frame, so the world pose is the body's times it
+        a = mo.qadr[r]
+        bq = wp.vec4(qpos[w, a + 3], qpos[w, a + 4], qpos[w, a + 5], qpos[w, a + 6])
+        # body quat * authored quat
+        q = wp.quat(bq[0] * q0[0] - bq[1] * q0[1] - bq[2] * q0[2] - bq[3] * q0[3],
+                    bq[0] * q0[1] + bq[1] * q0[0] + bq[2] * q0[3] - bq[3] * q0[2],
+                    bq[0] * q0[2] - bq[1] * q0[3] + bq[2] * q0[0] + bq[3] * q0[1],
+                    bq[0] * q0[3] + bq[1] * q0[2] - bq[2] * q0[1] + bq[3] * q0[0])
+        p = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2]) + body_rot(w, r, qpos, mo) @ p0
+    else:
+        yaw = mo.spin[r] * t
+        cz = wp.cos(0.5 * yaw)
+        sz = wp.sin(0.5 * yaw)
+        # (cz, 0, 0, sz) * q0
+        q = wp.quat(cz * q0[0] - sz * q0[3], cz * q0[1] - sz * q0[2], cz * q0[2] + sz * q0[1], cz * q0[3] + sz * q0[0])
+        p = p0 + offset_of(r, t, mo)
     geom_pos[w, g] = p
     geom_quat[w, g] = q
     geom_xpos[w, g] = p
-    a, b, c, d = q[0], q[1], q[2], q[3]
-    geom_xmat[w, g] = wp.mat33(
-        a * a + b * b - c * c - d * d, 2.0 * (b * c - a * d), 2.0 * (b * d + a * c),
-        2.0 * (b * c + a * d), a * a - b * b + c * c - d * d, 2.0 * (c * d - a * b),
-        2.0 * (b * d - a * c), 2.0 * (c * d + a * b), a * a - b * b - c * c + d * d)
+    geom_xmat[w, g] = quat_mat(q[0], q[1], q[2], q[3])

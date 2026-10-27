@@ -220,9 +220,9 @@ def test_each_bundled_static_task_level_runs_through_make_vec():
 
 
 @pytest.mark.parametrize("lv, task", [
-    (bundled("survive_raft"), "survive"),  # a body
+    (bundled("survive_seesaw"), "survive"),  # a seesaw
     (bundled("survive_collapse"), "survive"),  # tiles
 ])
-def test_levels_with_bodies_or_tiles_raise(lv, task):
+def test_levels_with_seesaws_or_tiles_raise(lv, task):
     with pytest.raises(NotImplementedError):
         warp_env(lv, task, 1)

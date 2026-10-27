@@ -17,6 +17,7 @@ from ..core.step import (DRAG_K, FIELD_HARD, FIELD_START, FRAME_SKIP, M_HAM, M_S
                          STATE, TAU, TURN_STEP)
 from .abstract_tier import WarpAbstractTier
 from .bank import BATCHED, TASK_NAMES, Bank, DeviceTables
+from .bodies import BodyTables
 
 # core.step's constants, as kernel constants
 _SHELL, _HAM, _SHELL_DOF, _HAM_DOF, _SHELL_QPOS, _HAM_QPOS = (wp.constant(x) for x in (SHELL, HAM, SHELL_DOF, HAM_DOF, SHELL_QPOS, HAM_QPOS))
@@ -126,7 +127,7 @@ class BatchCore:
                  tasks=TASK_NAMES, keep=()):
         """`levels`: the bank, a list of `Level`s, padded into one model (see bank.py); `tasks` limits the (level, task)
         entries a world can be on, and `keep` appends entries a world still needs (see `bank.Bank`). `device`: "cpu" or
-        "cuda:N". Bodies, seesaws and collapsing tiles raise `NotImplementedError`."""
+        "cuda:N". Seesaws and collapsing tiles raise `NotImplementedError`."""
         tier = tier or AbstractTier()
         if type(tier) not in TIERS:
             raise NotImplementedError(f"{type(tier).__name__} has no batched drive/obs yet")
@@ -142,18 +143,21 @@ class BatchCore:
         if not len(valid):
             raise ValueError("no level in the bank has an entry for the tasks")
         self.level_index = np.full(num_envs, valid[0], np.int32)
-        self.cpu_model = build(tier, self.bank.mjcf(), GAME_SIZE)
+        self.cpu_model = build(tier, self.bank.mjcf(), GAME_SIZE, self.bank.body_mjcf())
         self.adim = tier.action_space().shape[0] + 2 * camera_action
         with wp.ScopedDevice(self.device):
             self.model = mjw.put_model(self.cpu_model, batch_sizes={k: num_envs for k in BATCHED})
             self.data = mjw.make_data(self.cpu_model, nworld=num_envs)
             self.tables = DeviceTables(self.bank, self.cpu_model, self.device)
+            self.bodies = BodyTables(self.bank, self.cpu_model, self.device)
+            self.on = wp.ones(num_envs, dtype=wp.bool)
             self.entry = wp.zeros(num_envs, dtype=int)  # each world's (level, task) entry in the bank's tables
             self.warp_tier = TIERS[type(tier)](tier, self.device)
             self.action = wp.zeros((num_envs, self.adim), dtype=float)
             self.obs_out = self.warp_tier.obs_arrays(num_envs, self.device)
             self.nstate = mujoco.mj_stateSize(self.cpu_model, STATE)
             self._state = wp.zeros((num_envs, self.nstate), dtype=float)
+        self._layouts = self._state_layouts()
         self._graphs = {}
         self.reset()
 
@@ -181,6 +185,7 @@ class BatchCore:
         can run inside a captured graph."""
         mjw.reset_data(self.model, self.data, mask)
         self.load_levels(mask)
+        self.bodies.drive(mask, self.entry, self.data.time, self.data.qpos, self.data.qvel)
         wp.launch(_shell_spawn, self.num_envs, [mask, spawns, facings, self.data.qpos, self.data.userdata])
         self.warp_tier.reset(self.num_envs, mask, spawns, self.data)
         self._refresh()
@@ -200,6 +205,7 @@ class BatchCore:
         m, d, nw = self.model, self.data, self.num_envs
         turn_col = self.adim - 2 if self.camera_action else -1
         d.xfrc_applied.zero_()
+        self.bodies.drive(self.on, self.entry, d.time, d.qpos, d.qvel)
         self._refresh()
         wp.launch(turn_facing, nw, [self.action, turn_col, n, d.userdata])
         wp.launch(camera_pitch, nw, [self.action, turn_col + 1 if turn_col >= 0 else -1, n, d.userdata])
@@ -238,30 +244,74 @@ class BatchCore:
         """The tier's observation after the last step, one numpy array per entry, over the worlds."""
         return {k: v.numpy() for k, v in self.obs_out.items()}
 
+    def _state_layouts(self):
+        """For each body count b, the indices into the padded state vector that make up the CPU core-state vector of a
+        level with b bodies, and the padded vector of a world with none of its slots in use. The body slots are the last
+        bodies, joints and dofs of the model, so each segment of the vector (time, qpos, qvel, warm start,
+        `qfrc_applied`, `xfrc_applied`, mocap, userdata) is the padded one with its tail cut."""
+        m, K = self.cpu_model, self.bank.nbodies
+        sizes = [1, m.nq, m.nv, m.nv, m.nv, 6 * m.nbody, 3 * m.nmocap, 4 * m.nmocap, m.nuserdata]
+        cut = [0, 7, 6, 6, 6, 6, 0, 0, 0]  # what each segment loses per body
+        assert sum(sizes) == self.nstate, (sizes, self.nstate)
+        off = np.cumsum([0] + sizes)
+        idx = []
+        for b in range(K + 1):
+            idx.append(np.concatenate([np.arange(off[j], off[j] + sizes[j] - cut[j] * (K - b)) for j in range(len(sizes))]))
+        template = np.zeros(self.nstate, np.float32)
+        for q in self.bodies.qadr:  # an unused slot rests at the origin with a unit quaternion
+            template[1 + q + 3] = 1.0
+        return idx, template
+
+    def _count(self, world):
+        """The number of bodies of the level a world is on."""
+        e = int(self.entry.numpy()[world])
+        return len(self.bank.levels[self.bank.entries[e][0]].bodies)
+
     def state(self, world):
-        """One world's state in the CPU core-state layout (`Core.state()`), float32 precision."""
+        """One world's state in the CPU core-state layout (`Core.state()`) of its level, float32 precision."""
         with wp.ScopedDevice(self.device):
             mjw.get_state(self.model, self.data, self._state, int(STATE))
-        return self._state.numpy()[world].astype(np.float64)
+        return self._state.numpy()[world][self._layouts[0][self._count(world)]].astype(np.float64)
 
     def set_state(self, world, s):
         """Load a CPU core state into one world, as `Core.set_state` (float32 precision; the vector carries the
-        solver's warm start, as on the CPU). Positions refresh at the next step."""
+        solver's warm start, as on the CPU). `s` is in the layout of the world's level. Positions refresh at the next
+        step."""
         row = self._state.numpy()
-        row[world] = s
+        row[world] = self._pad(world, s, self._count(world))
         active = np.zeros(self.num_envs, bool)
         active[world] = True
         self._load(row, active)
 
+    def _pad(self, world, s, b):
+        idx, template = self._layouts
+        s = np.asarray(s)
+        if len(s) != len(idx[b]):
+            raise ValueError(f"world {world}: a state of {len(s)} numbers, its level's layout has {len(idx[b])}")
+        row = template.copy()
+        row[idx[b]] = s
+        return row
+
     def states(self):
-        """Every world's state in the CPU layout, `(num_envs, state size)`, float32."""
+        """Every world's state in the padded layout, `(num_envs, padded state size)`, float32: equal to the CPU layout
+        when no level in the bank has bodies. `cpu_states()` gives each world's own."""
         with wp.ScopedDevice(self.device):
             mjw.get_state(self.model, self.data, self._state, int(STATE))
         return self._state.numpy().copy()
 
+    def cpu_states(self):
+        """Every world's state in the CPU layout of its level: a list of float32 vectors, which differ in length when the
+        levels' bodies do."""
+        rows, entry = self.states(), self.entry.numpy()
+        counts = [len(self.bank.levels[self.bank.entries[e][0]].bodies) for e in entry]
+        return [rows[w][self._layouts[0][c]] for w, c in enumerate(counts)]
+
     def set_states(self, states):
-        """`set_state` for every world at once: `states` is (num_envs, state size)."""
-        self._load(np.asarray(states, np.float32), np.ones(self.num_envs, bool))
+        """`set_state` for every world at once: a `(num_envs, size)` array, or a list of one vector per world, in each
+        world's level's CPU layout."""
+        entry = self.entry.numpy()
+        counts = [len(self.bank.levels[self.bank.entries[e][0]].bodies) for e in entry]
+        self._load(np.stack([self._pad(w, states[w], c) for w, c in enumerate(counts)]), np.ones(self.num_envs, bool))
 
     def _load(self, rows, active):
         with wp.ScopedDevice(self.device):
