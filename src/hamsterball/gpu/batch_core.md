@@ -2,15 +2,16 @@
 
 ## Purpose
 
-The batched core: `num_envs` worlds of the CPU core ([step.md](../core/step.md)) on one Warp device, with each world's state read and written in the CPU core-state layout. It is the base of the GPU-batched backend (spec `gpu-backend`); this slice covers one model for every world (a plane, no bodies or tiles), the abstract tier, and the camera flag.
+The batched core: `num_envs` worlds of the CPU core ([step.md](../core/step.md)) on one Warp device, with each world's state read and written in the CPU core-state layout. It is the base of the GPU-batched backend (spec `gpu-backend`); this slice covers a bank of static levels (planes, hfields, boxes, spheres, capsules; no bodies or tiles) padded into one model ([bank.md](bank.md)), the abstract tier, and the camera flag.
 
 ## Interface
 
 Needs the `gpu` extra; importing `hamsterball.gpu.batch_core` without it raises `ImportError` naming the extra, and nothing else in the package imports it, so a plain install never loads `warp` or `torch`.
 
-- `BatchCore(tier=None, levels=(FLAT,), num_envs=1, camera_action=False, device="cpu")`: `levels` is the bank (a `Level` or MJCF sections each); this slice needs them to compile to one model, else `NotImplementedError`. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError` (the core maps Warp's `ValueError` for an unknown device). A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
-- `reset(worlds=None, bank_index=None, spawn=(0, 0, R), facing=0.0)`: reset the given worlds like `Core.reset`; `bank_index` is stored in `level_index`.
-- `reset_masked(mask, spawns, facings)`: `reset` with Warp arrays on the device (a bool mask, vec3 spawns, facings), so it can run inside a captured graph; the vector env's same-step autoreset calls it.
+- `BatchCore(tier=None, levels=(FLAT_LEVEL,), num_envs=1, camera_action=False, device="cpu", graph=True, tasks=all, keep=())`: `levels` is the bank, a list of `Level`s (the default is one plane, `FLAT_LEVEL`); bodies, seesaws and tiles raise `NotImplementedError`. `tasks` and `keep` are for the vector env (see [bank.md](bank.md)). `bank` is the host `Bank`, `entry` the device array of each world's (level, task) entry. `device` is `"cpu"` or `"cuda:N"`; a missing CUDA device raises `RuntimeError` (the core maps Warp's `ValueError` for an unknown device). A tier other than `AbstractTier` raises `NotImplementedError` until effort 1 adds its batched twin to `TIERS`.
+- `reset(worlds=None, bank_index=None, spawn=(0, 0, R), facing=0.0)`: reset the given worlds like `Core.reset` onto bank level `bank_index` (stored in `level_index`; default the level they are on), taking that level's first task's markers.
+- `reset_masked(mask, spawns, facings)`: `reset` with Warp arrays on the device (a bool mask, vec3 spawns, facings), so it can run inside a captured graph; the vector env's same-step autoreset calls it. Each masked world loads the slots of its `entry` first (`load_levels(mask)`, also public: it rewrites the geometry and nothing else).
+- `states()`: every world's state in the CPU layout, `(num_envs, state size)`.
 - `step(action, n=FRAME_SKIP, post=None)`: `action` is `(num_envs, adim)`, numpy or torch, with `turn` and `cam_pitch` last under the camera flag; one action per world, held over `n` physics steps. `post`, a callable that launches kernels, runs after the `n` steps inside the same graph (the vector env's env-step kernels); pass the same one every call, since the graph is kept per `n`. On CUDA the `n` steps are captured once per `n` as one graph and relaunched; on the CPU device they run eagerly.
 - `obs()`: the tier's observation after the last step, `{"wall_contact": bool array}` for the abstract tier.
 - `set_states(states)`: `set_state` for every world, `(num_envs, state size)`.
@@ -20,7 +21,7 @@ Kernels, each named for its CPU function and in `physics_step`'s order: clear `x
 
 ## How it works
 
-The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model` (`geom_rgba` batched per world, for the vector env's marker colours); `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so no mapping is needed yet. Padding and per-world slot mapping arrive with levels that differ.
+The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the ids, the view mocaps, and the userdata layout are the CPU's) and loaded with `mjw.put_model`, with the geom fields of [bank.md](bank.md) given a world axis; `mjw.make_data` allocates the worlds. Every kernel is one thread per world. The state vector is Warp's own `mjw.get_state`/`set_state` with `State.INTEGRATION`, whose layout matches C's here (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap, userdata; 124 numbers on a flat level), so no mapping is needed: the padded slots are geoms, which the integration state does not hold, and static levels all have the same dofs and userdata. A level with bodies or tiles would have a different layout, which is why those come with the later tickets' mapping.
 
 ## Invariants and checks
 
@@ -30,6 +31,9 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 
 ## Known quirks
 
+- **Mixed-bank parity** (Warp CPU device, 2026-10-27, one physics step from states 0, 20, 40, 70 and 120 env steps into a run, tests plus a sweep over six generated levels and the bundled hill): on plane, box, sphere, capsule and the bundled hill levels the largest difference from `Core` was 1.4e-6 in qpos and qvel. On rough generated hfield levels with 2 to 5 contacts it was 1.2e-5 in qpos and 7.0e-3 in qvel (shell linear 2.3e-3, angular 7.0e-3, hamster 7.0e-3), the same on a bank of that level alone, so it is Warp's hfield contact solution against the CPU's (issue 20's hfield drift), not padding; a world in a mixed bank equals the same world alone within 1e-6. The test bound for hfield qvel is `atol=2e-2`.
+- **CUDA run of the bank tests** (2026-10-27, Warp 1.18.0, CUDA 13.4, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu` passed, 79 of 79 (all gpu tests, with `tests/test_bank.py` and `tests/test_warp_levels.py` among them). The mixed-bank parity tests held at the same bounds as on the CPU device, including the rough generated hfield world, and a world in the mixed bank matched the same world alone within 1e-6. Largest observation difference against the CPU env: 5.7e-6 on the six-level bank, 3.8e-6 on the five-task bank.
+- **Memory at the default bank** (1024 generated reach_goal levels, one hfield each of about 40 by 123 samples, 64 worlds): the padded model has one hfield slot and a goal sphere and a hazard box marker slot, 1024 hfield assets (33 MB of shared model), and per world about 31 KB of Data plus 30 KB of batched model fields, 61 KB, so 65,536 worlds take about 4 GB. Building the bank took 1.7 s plus 13 s for the generator to make the 1024 levels. These are CPU-side figures; a bank with more geoms per level pads every world to the largest.
 - **Measured looser bound** (Warp CPU device, Warp 1.18.0, `mujoco-warp` 3.16.0, 2026-10-27): after one physics step the largest absolute error against `Core` was 1.6e-7 in qpos and 7.0e-7 in qvel (relative, 1e-6 or less) across the cases above; after 30 physics steps of running 1.1e-7 and 2.0e-6, and `xfrc_applied` 3e-5 on forces of about 20 N (1.5e-6 relative). The test bound for shell and hamster dofs is `rtol=1e-4, atol=1e-5`, 5 to 15 times the measurement. float32 against float64 and the solver's iteration account for it.
 - `contain` calls no forward pass past the hard stop. The CPU calls `mj_forward` there; the only thing the rest of the step reads from it is fresh positions (`xpos`, `xipos`, `xmat`, `subtree_com`), and `mj_step` recomputes everything else. So the kernel refreshes positions again for every world after `contain`, which gives a world that did not move the same values back. It is two cheap kernels, not a per-world masked forward.
 - **CUDA run** (2026-10-27, Warp 1.18.0, CUDA 13.4, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest tests/test_batch_core.py` passed, 16 of 16. The one-physics-step deviations from `Core` matched the CPU device's: qpos 1.6e-7 and qvel 7.0e-7 at most, `xfrc_applied` 1.1e-5 on forces of about 20 N, userdata 1.8e-7. The captured graph (three env steps of 10 physics steps) matched eager launches with a max difference of 0.0 in the state vector. Not bitwise against the CPU, as expected.
@@ -40,6 +44,7 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 - 2026-10-27, ticket gpu-backend/02: the tier hook is a class per tier in `TIERS` (CPU class to batched twin) supplying `drive`, `obs`, `reset`, and the arrays they read, launched by the core.
 - 2026-10-27, ticket gpu-backend/02: state goes through `mjw.get_state`/`set_state` (the official layout), not a hand-built vector.
 - 2026-10-27, ticket gpu-backend/03: the vector env's env-step kernels join the physics graph through `step(post=)`, and its autoreset uses `reset_masked`, a device-array form of `reset`, so no host sync sits between a finished world and its reset.
+- 2026-10-27, ticket gpu-backend/05: the model is padded from a `Bank` of `Level`s (the older MJCF-sections form of `levels` is gone), and `reset_masked` loads each world's level slots before the physics resets, so a level draw inside the graph needs no host step.
 
 ## Tried and rejected
 
@@ -50,3 +55,4 @@ The CPU model is compiled once (`core.model.build`, so the ids, the view mocaps,
 
 - 2026-10-27, ticket gpu-backend/02: first version, a flat level, the abstract tier, the camera flag.
 - 2026-10-27, ticket gpu-backend/03: added `post`, `reset_masked` and `set_states`; a nonexistent CUDA device now raises `RuntimeError` as documented (Warp raises `ValueError`, which the first version let through).
+- 2026-10-27, ticket gpu-backend/05: the bank: padded slots, per-world level loading, `states()`, `keep` and `tasks`.

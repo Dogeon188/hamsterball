@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from test_warp_env import CODES, DEVICE, OBS
 
-from hamsterball.core.level import Level
+from hamsterball.core.level import TASK_MARKERS, Level
 from hamsterball.core.model import SHELL_QPOS
 from hamsterball.env import LEVELS_DIR, TASKS, HamsterballEnv
 
@@ -93,15 +93,27 @@ def warp_env(lv, task, n, **kw):
 
 
 def looks(venv, w):
-    """The episode's markers' colours in world w, by geom name."""
-    m, rgba = venv.core.cpu_model, venv.core.model.geom_rgba.numpy()[w]
-    return {m.geom(g).name: rgba[g] for g in range(m.ngeom)}
+    """The episode's markers' colours in world w, by geom name (`task/key[/i]`): the padded model keeps each marker in
+    a slot, which the vector env maps from its row."""
+    task = TASKS[int(venv.task_idx.numpy()[w])]
+    e = int(venv.core.entry.numpy()[w])
+    bank = venv.core.bank
+    block = bank.levels[bank.entries[e][0]].tasks[task]
+    rgba = venv.core.model.geom_rgba.numpy()[w]
+    geoms = venv.row_geom.numpy()[e * venv.markers.stride:]
+    names = [f"{task}/{k}" + (f"/{i}" if isinstance(block[k], list) else "")
+             for k in TASK_MARKERS[task] for i in (range(len(block[k])) if isinstance(block[k], list) else [0])]
+    return {name: rgba[geoms[i]] for i, name in enumerate(names)}
 
 
 def same_looks(got, want, where):
+    """The CPU env hides other tasks' markers with alpha 0; the bank holds only the episode task's, so those are absent."""
     for name, c in want.items():
         if "/" in name:  # marker geoms are named task/key[/i]
-            np.testing.assert_allclose(got[name], c, atol=1e-6, err_msg=f"{where} {name}")
+            if name in got:
+                np.testing.assert_allclose(got[name], c, atol=1e-6, err_msg=f"{where} {name}")
+            else:
+                assert c[3] == 0, f"{where} {name} is drawn on the CPU but not in the bank"
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
@@ -216,12 +228,3 @@ def test_each_bundled_static_task_level_runs_through_make_vec():
 def test_levels_with_movers_bodies_or_tiles_raise(lv, task):
     with pytest.raises(NotImplementedError):
         warp_env(lv, task, 1)
-
-
-def test_several_tasks_on_one_level_raise_until_the_level_bank_exists():
-    spawn = {"pos": [0, 0, 0.5], "yaw_deg": 0}
-    both = Level.from_dict({"kill_plane_z": -5, "geoms": [PLATFORM], "tasks": {
-        "reach_goal": {"spawn": spawn, "goal": sph(0, 5), "time_limit_s": 5},
-        "survive": {"spawn": spawn, "region": {"type": "box", "pos": [0, 0, 0.5], "size": [2, 2, 1]}, "time_limit_s": 5}}})
-    with pytest.raises(NotImplementedError):
-        warp_env(both, "reach_goal", 1, tasks=["reach_goal", "survive"])

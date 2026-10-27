@@ -146,6 +146,10 @@ _Avoid_: engine, device
 The GPU analogue of the CPU core: N worlds stepped together on one device, each world's state readable and writable in the CPU core-state layout of its level. The GPU-batched backend is built on it.
 _Avoid_: GPU core, vector core
 
+**Level bank**:
+The levels of a **level pool** compiled into the **batched core**'s one padded model, so each world can reset onto any of them on the device: a file pool's levels, or a generator pool's `bank_size` levels drawn at construction and at each `set_levels()`. Bank entry i is the pool's i-th level.
+_Avoid_: level table, level cache
+
 **View**:
 A camera from which pixel observations or the game's screen are rendered: the **chase view**, the **follow view**, or the **first-person view**.
 _Avoid_: camera angle, perspective

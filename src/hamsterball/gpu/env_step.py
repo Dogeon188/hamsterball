@@ -39,40 +39,49 @@ def targets(task, block):
 
 
 class Markers:
-    """The marker table on the device: rows for the task's targets in task order, then the hazards, each a sphere,
-    capsule, or box in the kernels' form (`a`, `b` the segment's ends, `rot` and `half` the box's frame and half-sizes).
-    `role` and `base` say how each target looks (see `look_markers`)."""
+    """The marker tables on the device, one block of `stride` rows per bank entry: the entry's task's targets in task
+    order, then its level's hazards, each a sphere, capsule, or box in the kernels' form (`a`, `b` the segment's ends,
+    `rot` and `half` the box's frame and half-sizes), and the rest of the block padding. `role` and `base` say how each
+    target looks (see `look_markers`). Per entry: `ntargets`, `n` (targets and hazards), `mode`, `goal_row`, `survive`,
+    `time_penalty`. `entries` is a list of `(task, block, hazards)`; `row_geom` maps each row to its geom in the model,
+    `row_slot` to its marker slot."""
 
-    def __init__(self, task, block, hazards, device):
-        tgt = targets(task, block)
-        self.ntargets, self.n, self.mode = len(tgt), len(tgt) + len(hazards), MODES[task]
-        self.goal_row = {"reach_goal": 0, "unlock_goal": len(tgt) - 1}.get(task, -1)  # the row that pays no +1 of its own
-        rows = [m for _, m in tgt] + list(hazards)
-        kind, a, b, rad, rot, half, centre = [], [], [], [], [], [], []
-        for m in rows:
-            kind.append({"sphere": SPHERE, "capsule": CAPSULE, "box": BOX}[m["type"]])
-            if m["type"] == "capsule":
-                a.append(m["fromto"][:3]), b.append(m["fromto"][3:])
-            else:
-                a.append(m["pos"]), b.append(m["pos"])
-            centre.append(np.mean([a[-1], b[-1]], axis=0))
-            rad.append(m.get("radius", 0.0))
-            half.append(m.get("size", [0, 0, 0]))
-            q, mat = np.empty(4), np.empty(9)  # the box's frame, as marker._seg_box builds it
-            mujoco.mju_euler2Quat(q, np.radians(m.get("euler", [0, 0, 0])), "xyz")
-            mujoco.mju_quat2Mat(mat, q)
-            rot.append(mat.reshape(3, 3))
+    def __init__(self, entries, device):
+        self.stride = max(len(targets(t, b)) + len(h) for t, b, h in entries)
+        self.max_targets = max(len(targets(t, b)) for t, b, _ in entries)
+        pad = {"type": "sphere", "pos": [0, 0, 0], "radius": 0.0}
+        kind, a, b, rad, rot, half, centre, role, base = [], [], [], [], [], [], [], [], []
+        ntargets, n, mode, goal_row, survive, tp = [], [], [], [], [], []
+        for task, block, hazards in entries:
+            tgt = targets(task, block)
+            ntargets.append(len(tgt)), n.append(len(tgt) + len(hazards)), mode.append(MODES[task])
+            goal_row.append({"reach_goal": 0, "unlock_goal": len(tgt) - 1}.get(task, -1))  # the row that pays no +1 of its own
+            survive.append(int(task == "survive")), tp.append(0.0 if task == "survive" else TIME_PENALTY)
+            rows = [m for _, m in tgt] + list(hazards)
+            for m in rows + [pad] * (self.stride - len(rows)):
+                kind.append({"sphere": SPHERE, "capsule": CAPSULE, "box": BOX}[m["type"]])
+                if m["type"] == "capsule":
+                    a.append(m["fromto"][:3]), b.append(m["fromto"][3:])
+                else:
+                    a.append(m["pos"]), b.append(m["pos"])
+                centre.append(np.mean([a[-1], b[-1]], axis=0))
+                rad.append(m.get("radius", 0.0))
+                half.append(m.get("size", [0, 0, 0]))
+                q, mat = np.empty(4), np.empty(9)  # the box's frame, as marker._seg_box builds it
+                mujoco.mju_euler2Quat(q, np.radians(m.get("euler", [0, 0, 0])), "xyz")
+                mujoco.mju_quat2Mat(mat, q)
+                rot.append(mat.reshape(3, 3))
+            keys = [k for k, _ in tgt]
+            role += [VANISH if k in ("items", "keys") else WAYPOINT if k == "waypoints" else UNLOCK if MODES[task] == GOAL_LAST and k == "goal"
+                     else PLAIN for k in keys] + [PLAIN] * (self.stride - len(keys))
+            base += [MARKER_RGBA[k] for k in keys] + [(0, 0, 0, 0)] * (self.stride - len(keys))
         f = lambda x, t: wp.array(np.array(x, np.float32), dtype=t, device=device)  # noqa: E731
-        self.kind = wp.array(kind, dtype=int, device=device)
+        i = lambda x: wp.array(x, dtype=int, device=device)  # noqa: E731
+        self.kind, self.role = i(kind), i(role)
         self.a, self.b, self.half, self.centre = (f(x, wp.vec3) for x in (a, b, half, centre))
-        self.rad, self.rot = f(rad, float), f(rot, wp.mat33)
-        keys = [k for k, _ in tgt]
-        role = [VANISH if k in ("items", "keys") else WAYPOINT if k == "waypoints" else UNLOCK if self.mode == GOAL_LAST and k == "goal"
-                else PLAIN for k in keys]
-        self.role = wp.array(role or [0], dtype=int, device=device)
-        self.base = f([MARKER_RGBA[k] for k in keys] or [(0, 0, 0, 0)], wp.vec4)
-        self.geom_names = [f"{task}/{k}" + (f"/{i}" if isinstance(block[k], list) else "")
-                           for k in TASK_MARKERS[task] for i in (range(len(block[k])) if isinstance(block[k], list) else [0])]
+        self.rad, self.rot, self.base = f(rad, float), f(rot, wp.mat33), f(base, wp.vec4)
+        self.ntargets, self.n, self.mode, self.goal_row, self.survive = i(ntargets), i(n), i(mode), i(goal_row), i(survive)
+        self.time_penalty = f(tp, float)
 
 
 @wp.func
@@ -180,16 +189,17 @@ def live(w: int, i: int, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: i
 
 
 @wp.func
-def nearest(w: int, p: wp.vec3, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: int, centre: wp.array(dtype=wp.vec3)):
+def nearest(w: int, p: wp.vec3, todo: wp.array2d(dtype=wp.bool), mode: int, ntargets: int, centre: wp.array(dtype=wp.vec3),
+            row: int):
     """HamsterballEnv._target: the centre of the live target nearest p (the first of a tie)."""
     best = wp.vec3()
     d_best = float(1.0e30)
     for i in range(ntargets):
         if live(w, i, todo, mode, ntargets):
-            d = wp.length(centre[i] - p)
+            d = wp.length(centre[row + i] - p)
             if d < d_best:
                 d_best = d
-                best = centre[i]
+                best = centre[row + i]
     return best
 
 
@@ -203,14 +213,16 @@ def advance(
     rot: wp.array(dtype=wp.mat33),
     half: wp.array(dtype=wp.vec3),
     centre: wp.array(dtype=wp.vec3),
-    ntargets: int,
-    nmarkers: int,
-    mode: int,
-    goal_row: int,
-    survive: int,
-    time_penalty: float,
-    kill_z: float,
-    max_steps: int,
+    entry: wp.array(dtype=int),
+    stride: int,
+    t_ntargets: wp.array(dtype=int),
+    t_n: wp.array(dtype=int),
+    t_mode: wp.array(dtype=int),
+    t_goal_row: wp.array(dtype=int),
+    t_survive: wp.array(dtype=int),
+    t_time_penalty: wp.array(dtype=float),
+    t_kill_z: wp.array(dtype=float),
+    t_max_steps: wp.array(dtype=int),
     truncate: int,
     shaped: int,
     gamma: float,
@@ -232,6 +244,16 @@ def advance(
     the swept segment touches. Then success over failure (hazard, kill plane, left region), the time penalty (none
     in survive), the shaping term, truncation. Updates the targets left, step count, previous shell position, potential."""
     w = wp.tid()
+    e = entry[w]
+    row = e * stride
+    ntargets = t_ntargets[e]
+    nmarkers = t_n[e]
+    mode = t_mode[e]
+    goal_row = t_goal_row[e]
+    survive = t_survive[e]
+    time_penalty = t_time_penalty[e]
+    kill_z = t_kill_z[e]
+    max_steps = t_max_steps[e]
     steps[w] = steps[w] + 1
     pos = wp.vec3(qpos[w, 0], qpos[w, 1], qpos[w, 2])
     prev = prev_pos[w]
@@ -239,12 +261,12 @@ def advance(
     fail = int(0)
     in_region = bool(True)
     if survive != 0:
-        in_region = inside(0, kind, a, b, rad, rot, half, pos)
+        in_region = inside(row, kind, a, b, rad, rot, half, pos)
         if in_region and steps[w] >= max_steps:
             todo[w, 0] = False
     else:
         for i in range(ntargets):
-            if live(w, i, todo, mode, ntargets) and touches(i, kind, a, b, rad, rot, half, prev, pos):
+            if live(w, i, todo, mode, ntargets) and touches(row + i, kind, a, b, rad, rot, half, prev, pos):
                 todo[w, i] = False
                 if i != goal_row:
                     event += 1.0  # +1 per item, key, or waypoint
@@ -257,7 +279,7 @@ def advance(
         event += 1.0
     else:
         for i in range(ntargets, nmarkers):
-            if fail == 0 and touches(i, kind, a, b, rad, rot, half, prev, pos):
+            if fail == 0 and touches(row + i, kind, a, b, rad, rot, half, prev, pos):
                 fail = 1  # hazard
         if fail == 0 and pos[2] < kill_z:
             fail = 2  # kill_plane
@@ -269,7 +291,7 @@ def advance(
     done = won or fail != 0
     new_phi = float(0.0)
     if not done:
-        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre) - pos)
+        new_phi = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre, row) - pos)
     shaping = float(0.0)
     if shaped != 0:
         shaping = gamma * new_phi - phi[w]
@@ -302,12 +324,14 @@ def observe(
     centre: wp.array(dtype=wp.vec3),
     todo: wp.array2d(dtype=wp.bool),
     steps: wp.array(dtype=int),
-    ntargets: int,
-    mode: int,
-    survive: int,
-    max_steps: int,
-    kill_z: float,
-    task: int,
+    entry: wp.array(dtype=int),
+    stride: int,
+    t_ntargets: wp.array(dtype=int),
+    t_mode: wp.array(dtype=int),
+    t_survive: wp.array(dtype=int),
+    t_max_steps: wp.array(dtype=int),
+    t_kill_z: wp.array(dtype=float),
+    task: wp.array(dtype=int),
     success: wp.array(dtype=wp.bool),
     state: wp.array2d(dtype=float),
     goal: wp.array2d(dtype=float),
@@ -318,6 +342,13 @@ def observe(
     w = wp.tid()
     if not mask[w]:
         return
+    e = entry[w]
+    row = e * stride
+    ntargets = t_ntargets[e]
+    mode = t_mode[e]
+    survive = t_survive[e]
+    max_steps = t_max_steps[e]
+    kill_z = t_kill_z[e]
     facing = userdata[w, _FACING]
     sy = wp.sin(facing)
     cy = wp.cos(facing)
@@ -344,9 +375,9 @@ def observe(
         state[w, 20] = 1.0
     for i in range(10):
         goal[w, i] = 0.0
-    goal[w, 5 + task] = 1.0
+    goal[w, 5 + task[w]] = 1.0
     if not success[w]:
-        g = to_facing(nearest(w, c, todo, mode, ntargets, centre) - c, sy, cy)
+        g = to_facing(nearest(w, c, todo, mode, ntargets, centre, row) - c, sy, cy)
         for i in range(3):
             goal[w, i] = g[i]
         goal[w, 3] = 1.0
@@ -382,8 +413,10 @@ def reset_episode(
     mask: wp.array(dtype=wp.bool),
     qpos: wp.array2d(dtype=float),
     centre: wp.array(dtype=wp.vec3),
-    ntargets: int,
-    mode: int,
+    entry: wp.array(dtype=int),
+    stride: int,
+    t_ntargets: wp.array(dtype=int),
+    t_mode: wp.array(dtype=int),
     todo: wp.array2d(dtype=wp.bool),
     steps: wp.array(dtype=int),
     prev_pos: wp.array(dtype=wp.vec3),
@@ -393,12 +426,24 @@ def reset_episode(
     w = wp.tid()
     if not mask[w]:
         return
+    e = entry[w]
+    ntargets = t_ntargets[e]
     pos = wp.vec3(qpos[w, 0], qpos[w, 1], qpos[w, 2])
-    for i in range(ntargets):
-        todo[w, i] = True
+    for i in range(todo.shape[1]):
+        todo[w, i] = i < ntargets  # a padded target is never left
     steps[w] = 0
     prev_pos[w] = pos
-    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, mode, ntargets, centre) - pos)
+    phi[w] = _PHI_SCALE * wp.length(nearest(w, pos, todo, t_mode[e], ntargets, centre, e * stride) - pos)
+
+
+@wp.kernel
+def set_spawn(mask: wp.array(dtype=wp.bool), entry: wp.array(dtype=int), t_spawn: wp.array(dtype=wp.vec3),
+              t_yaw: wp.array(dtype=float), spawn: wp.array(dtype=wp.vec3), facing: wp.array(dtype=float)):
+    """The masked worlds' spawn pose from their entry's table."""
+    w = wp.tid()
+    if mask[w]:
+        spawn[w] = t_spawn[entry[w]]
+        facing[w] = t_yaw[entry[w]]
 
 
 @wp.kernel
@@ -411,26 +456,32 @@ def either(x: wp.array(dtype=wp.bool), y: wp.array(dtype=wp.bool), out: wp.array
 @wp.kernel
 def look_markers(
     todo: wp.array2d(dtype=wp.bool),
-    ntargets: int,
-    mode: int,
-    geom: wp.array(dtype=int),
+    entry: wp.array(dtype=int),
+    stride: int,
+    t_ntargets: wp.array(dtype=int),
+    t_mode: wp.array(dtype=int),
+    row_geom: wp.array(dtype=int),
     role: wp.array(dtype=int),
     base: wp.array(dtype=wp.vec4),
     geom_rgba: wp.array2d(dtype=wp.vec4),
 ):
     """The episode task's marker colours (HamsterballEnv's `_look`), derived from the targets left: a collected item or
     key vanishes (alpha 0), a waypoint is locked until it is next and passed after, the unlock goal is locked until
-    every key is in. The other tasks' markers are hidden once, when the env is built."""
+    every key is in. A world's marker slots hold only its own task's markers, so the other tasks' are never drawn."""
     w = wp.tid()
+    e = entry[w]
+    ntargets = t_ntargets[e]
+    mode = t_mode[e]
     for i in range(ntargets):
-        c = base[i]
-        if role[i] == _VANISH and not todo[w, i]:
+        r = e * stride + i
+        c = base[r]
+        if role[r] == _VANISH and not todo[w, i]:
             c = wp.vec4(c[0], c[1], c[2], 0.0)
-        elif role[i] == _WAYPOINT:
+        elif role[r] == _WAYPOINT:
             if not todo[w, i]:
                 c = _PASSED
             elif not live(w, i, todo, mode, ntargets):
                 c = _LOCKED
-        elif role[i] == _UNLOCK and todo[w, i] and not live(w, i, todo, mode, ntargets):
+        elif role[r] == _UNLOCK and todo[w, i] and not live(w, i, todo, mode, ntargets):
             c = _LOCKED
-        geom_rgba[w, geom[i]] = c
+        geom_rgba[w, row_geom[r]] = c
