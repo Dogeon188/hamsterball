@@ -39,6 +39,7 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 - A capsule's slot geom has its axis along `fromto` start to end, the compiler's the other way (the bank's quaternion differs from the CPU model's by a half turn about a perpendicular axis): the same capsule, a different `geom_quat`.
 - float32: a segment whose closest approach to a marker lies within about 1e-5 m of the touch threshold may trigger on one backend and not the other (the CPU is float64, and its state loads into Warp rounded to float32). The parity test's scenarios avoid it; the spec allows the exception.
 - `info` arrays that the CPU gives as Python values (`failure_reason` a string or `None`) are int codes here.
+- The kernels take their arrays as long positional argument lists (`advance` about 40). It is a known smell: a struct per group of arrays would shorten them, and the code review chose not to bundle them (see Decisions).
 
 ## Decisions
 
@@ -50,6 +51,7 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 
 - 2026-10-27, ticket gpu-backend/06: motions live in a `Motion` struct of per-row arrays beside the marker table (kind, period, phase, spin, oscillation vector, path polyline), evaluated on the device by `offset_of`, rather than precomputed per step on the host: a world's sim time differs from every other's, so the poses can't be shared.
 - 2026-10-27, ticket gpu-backend/06: the kernel copies the CPU's spin pivot (`marker.centre(m, 0.0)`, which includes the motion's offset at time 0) rather than the authored centre the spec's wording suggests, so the two backends agree on a spinning marker with a phase (a test scenario found the difference); the quirk is listed under Known quirks.
+- 2026-10-27, code review of gpu-backend (6877534...028aa8c), user decision: the kernels' long positional argument lists are not bundled into structs; recorded as a known smell under Known quirks.
 
 ## Tried and rejected
 

@@ -95,23 +95,32 @@ def warp_rate(kwargs, num_envs, secs, device):
         env.close()
 
 
+def table(header, note, label, sizes, rate_of, secs, reps):
+    """Print the header, the note and the table of env steps/s per (config, level, size), the median of `reps` runs of
+    `rate_of(kwargs, size, secs)`; return the medians keyed by (config, level, size)."""
+    click.echo(f"{header}\nmedian of {reps} x {secs:g} s, random actions; {note}\n")
+    click.echo(f"{'config':<8}{'level':<8}{label:>6}  {'env steps/s':>11}")
+    levels = {"flat": "first_goal", "hfield": hfield_level()}
+    configs = {"state": {}, "pixels": {"views": VIEWS}}  # pixels: the three views at 84x84, plus the vectors
+    out = {}
+    for config, extra in configs.items():
+        for name, level in levels.items():
+            for n in sizes:
+                kwargs = {"tasks": ["reach_goal"], "levels": [level], **extra}
+                out[config, name, n] = statistics.median(rate_of(kwargs, n, secs) for _ in range(reps))
+                click.echo(f"{config:<8}{name:<8}{n:>6}  {out[config, name, n]:>11,.0f}")
+    return out
+
+
 def main_warp(secs, reps, num_envs, device):
     """The GPU-batched table: state and pixels configs on the flat and hfield levels, per num_envs. Gates nothing."""
     import torch
     import warp as wp
 
     gpu = torch.cuda.get_device_name(torch.device(device)) if device.startswith("cuda") else "Warp CPU device"
-    click.echo(f"{platform.platform()}, Python {platform.python_version()}, mujoco {mujoco.__version__}, warp {wp.config.version}, {gpu}")
-    click.echo(f"median of {reps} x {secs:g} s, random actions, one WarpVectorEnv (frame_skip 10, autoreset on the device)\n")
-    click.echo(f"{'config':<8}{'level':<8}{'envs':>6}  {'env steps/s':>11}")
-    levels = {"flat": "first_goal", "hfield": hfield_level()}
-    configs = {"state": {}, "pixels": {"views": VIEWS}}
-    for config, extra in configs.items():
-        for name, level in levels.items():
-            for n in num_envs:
-                kwargs = {"tasks": ["reach_goal"], "levels": [level], **extra}
-                r = statistics.median(warp_rate(kwargs, n, secs, device) for _ in range(reps))
-                click.echo(f"{config:<8}{name:<8}{n:>6}  {r:>11,.0f}")
+    header = f"{platform.platform()}, Python {platform.python_version()}, mujoco {mujoco.__version__}, warp {wp.config.version}, {gpu}"
+    table(header, "one WarpVectorEnv (frame_skip 10, autoreset on the device)", "envs", num_envs,
+          lambda kwargs, n, secs: warp_rate(kwargs, n, secs, device), secs, reps)
     click.echo("\nno gate: the GPU numbers are guidance (spec gpu-backend)")
 
 
@@ -130,20 +139,9 @@ def main(secs, reps, copies, backend, num_envs, device):
     if backend == "warp":
         return main_warp(secs, reps, num_envs or (16, 256, 4096), device)
     copies = copies or performance_cores()
-    click.echo(f"{platform.platform()}, Python {platform.python_version()}, mujoco {mujoco.__version__}")
-    click.echo(f"median of {reps} x {secs:g} s, random actions; N copies run in make_vec's AsyncVectorEnv\n")
-    click.echo(f"{'config':<8}{'level':<8}{'copies':>6}  {'env steps/s':>11}")
-    levels = {"flat": "first_goal", "hfield": hfield_level()}
-    configs = {"state": {}, "pixels": {"views": VIEWS}}  # pixels: the three views at 84x84, plus the vectors
-    gate = None
-    for config, extra in configs.items():
-        for name, level in levels.items():
-            for n in sorted({1, copies}):
-                kwargs = {"tasks": ["reach_goal"], "levels": [level], **extra}
-                r = statistics.median(rate(kwargs, n, secs) for _ in range(reps))
-                click.echo(f"{config:<8}{name:<8}{n:>6}  {r:>11,.0f}")
-                if (config, name, n) == ("state", "hfield", 1):
-                    gate = r
+    out = table(f"{platform.platform()}, Python {platform.python_version()}, mujoco {mujoco.__version__}",
+                "N copies run in make_vec's AsyncVectorEnv", "copies", sorted({1, copies}), rate, secs, reps)
+    gate = out["state", "hfield", 1]
     ok = gate >= GATE
     click.echo(f"\ngate: one state-only process on hfield >= {GATE:,}: {gate:,.0f} env steps/s, {'PASS' if ok else 'FAIL'}")
     raise SystemExit(0 if ok else 1)

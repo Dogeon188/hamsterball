@@ -1,13 +1,10 @@
 """The batched core: N worlds of the CPU core on one Warp device. See batch_core.md."""
 
-try:
-    import mujoco_warp as mjw
-    import warp as wp
-except ImportError as e:  # a plain install has no warp
-    raise ImportError("the GPU backend needs the `gpu` extra: pip install 'hamsterball[gpu]'") from e
-
 import mujoco
+import mujoco_warp as mjw
 import numpy as np
+import torch
+import warp as wp
 
 from ..core.abstract_tier import AbstractTier
 from ..core.level import Level
@@ -16,7 +13,7 @@ from ..core.model import (FACING, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, PITCH, PITC
 from ..core.step import (DRAG_K, FIELD_HARD, FIELD_START, FRAME_SKIP, M_HAM, M_SHELL, MU, PITCH_MAX, PITCH_MIN, PITCH_STEP,
                          STATE, TAU, TURN_STEP)
 from .abstract_tier import WarpAbstractTier
-from .bank import BATCHED, TASK_NAMES, Bank, DeviceTables, body_kind
+from .bank import BATCHED, KINDS, TASK_NAMES, Bank, DeviceTables, body_kind
 from .bodies import BodyTables
 from .seesaws import SEESAW_FIELDS, SeesawTables
 from .tiles import TileTables
@@ -151,8 +148,7 @@ class BatchCore:
         with wp.ScopedDevice(self.device):
             seesaws = self.bank.nhinge + self.bank.nball > 0
             self.model = mjw.put_model(self.cpu_model, batch_sizes={k: num_envs for k in BATCHED + (SEESAW_FIELDS if seesaws else ())})
-            if seesaws:  # the solver's tolerance scales with the level's mean inertia: one per world
-                self.model.stat.meaninertia = wp.zeros(num_envs, dtype=float)
+            self.model.stat.meaninertia = wp.zeros(num_envs, dtype=float)  # the solver's tolerance scale: one per world (seesaws.py)
             self.data = mjw.make_data(self.cpu_model, nworld=num_envs)
             self.tables = DeviceTables(self.bank, self.cpu_model, self.device)
             self.bodies = BodyTables(self.bank, self.cpu_model, self.device)
@@ -234,9 +230,8 @@ class BatchCore:
         """Hold one action per world, shape (num_envs, action dim), over n physics steps: one graph launch on CUDA.
         `post` (a callable that launches kernels) runs after them, inside the graph; a graph is kept per `n`, so pass
         the same `post` every call."""
-        torch_tensor = type(action).__module__.split(".")[0] == "torch"
         with wp.ScopedDevice(self.device):
-            wp.copy(self.action, wp.from_torch(action.detach()) if torch_tensor else wp.array(action, dtype=float))
+            wp.copy(self.action, wp.from_torch(action.detach()) if isinstance(action, torch.Tensor) else wp.array(action, dtype=float))
             if self.graph:
                 if n not in self._graphs:
                     with wp.ScopedCapture() as capture:
@@ -286,7 +281,7 @@ class BatchCore:
 
     def _layout(self, level):
         """The indices into the padded state vector that make up the CPU core-state vector of `level`: each segment's
-        prefix (the shell, the hamster, the views), then the level's bodies in its own order, each at its slot's address.
+        prefix (the shell, the hamster, the views), then the level's bodies in its own order, each at its slot's address,
         then its collapsing tiles, each at its slot's address, and the first tile slots of userdata. Cached per sequence of
         body kinds and tile count."""
         sizes, slots, _ = self._layouts
@@ -295,19 +290,18 @@ class BatchCore:
         kinds = tuple(body_kind(b) for b in level.bodies)
         if (kinds, nt) not in self._layout_cache:
             m = self.cpu_model
-            first = (slots + tiles)[0] if slots or tiles else (m.nq, m.nv, m.nbody)
-            nq0, nv0, nb0 = first
-            size = {"b": (7, 6), "h": (1, 1), "n": (4, 3)}
+            first_q, first_v, first_body = (slots + tiles)[0] if slots or tiles else (m.nq, m.nv, m.nbody)
+            q_idx, v_idx, body_idx = [np.arange(first_q)], [np.arange(first_v)], [np.arange(first_body)]
             off = np.cumsum([0] + sizes)
-            qa, da, ba = [np.arange(nq0)], [np.arange(nv0)], [np.arange(nb0)]
+            free = KINDS["b"]  # a tile is a free-joint body
             for si, k in zip(self.bank.slot_of(level), kinds):
-                nq, nv = size[k]
-                qa.append(slots[si][0] + np.arange(nq)), da.append(slots[si][1] + np.arange(nv)), ba.append([slots[si][2]])
-            for q, d, b in tiles[:nt]:
-                qa.append(q + np.arange(7)), da.append(d + np.arange(6)), ba.append([b])
-            qa, da, ba = (np.concatenate(x).astype(int) for x in (qa, da, ba))
-            xf = (6 * ba[:, None] + np.arange(6)).ravel()
-            parts = [np.arange(1), off[1] + qa, off[2] + da, off[3] + da, off[4] + da, off[5] + xf]
+                nq, nv = KINDS[k].nq, KINDS[k].nv
+                q_idx.append(slots[si][0] + np.arange(nq)), v_idx.append(slots[si][1] + np.arange(nv)), body_idx.append([slots[si][2]])
+            for q, v, body in tiles[:nt]:
+                q_idx.append(q + np.arange(free.nq)), v_idx.append(v + np.arange(free.nv)), body_idx.append([body])
+            q_idx, v_idx, body_idx = (np.concatenate(x).astype(int) for x in (q_idx, v_idx, body_idx))
+            xfrc = (6 * body_idx[:, None] + np.arange(6)).ravel()
+            parts = [np.arange(1), off[1] + q_idx, off[2] + v_idx, off[3] + v_idx, off[4] + v_idx, off[5] + xfrc]
             parts += [np.arange(off[j], off[j + 1]) for j in (6, 7)]
             parts.append(off[8] + np.arange(m.nuserdata - len(tiles) + nt))  # the tier's slots, then the level's tiles'
             self._layout_cache[kinds, nt] = np.concatenate(parts)

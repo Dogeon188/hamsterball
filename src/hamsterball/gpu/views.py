@@ -2,11 +2,8 @@
 
 import math
 
-try:
-    import mujoco_warp as mjw
-    import warp as wp
-except ImportError as e:  # a plain install has no warp
-    raise ImportError("the GPU backend needs the `gpu` extra: pip install 'hamsterball[gpu]'") from e
+import mujoco_warp as mjw
+import warp as wp
 
 from ..core.model import FACING, HAM, PITCH, PITCH_DEFAULT, SHELL
 from ..core.views import CHASE_DIST, FOLLOW_DIST, FOLLOW_PITCH, VIEWS

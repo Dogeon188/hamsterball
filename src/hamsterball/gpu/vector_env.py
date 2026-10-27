@@ -3,15 +3,11 @@ with the env-step logic as kernels in the same graph as the physics. See vector_
 
 import math
 
-try:
-    import mujoco_warp  # noqa: F401
-    import torch
-    import warp as wp
-except ImportError as e:  # a plain install has none of them
-    raise ImportError("the GPU backend needs the `gpu` extra: pip install 'hamsterball[gpu]'") from e
-
 import gymnasium as gym
+import mujoco_warp as mjw
 import numpy as np
+import torch
+import warp as wp
 
 from ..core.abstract_tier import AbstractTier
 from ..core.generator import LevelGenerator
@@ -281,6 +277,26 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self._render()
         return self._outputs()
 
+    def get_state(self, i):
+        """World i's state in the CPU core-state layout of its level (the vector `Core.state()` returns), as float32-precision
+        float64."""
+        return self.core.state(i)
+
+    def set_state(self, i, core_state):
+        """Load a CPU core state into world i, in the layout of the (level, task) the world is on, and start a new episode on
+        it: every target left, no steps taken, the swept segment a point at the loaded pose, the potential there, and the
+        observation and marker looks refreshed, and the views redrawn (`step`'s `obs` shows them). The other worlds are untouched. `step`
+        applies the same rules from here on."""
+        self.core.set_state(i, core_state)
+        with wp.ScopedDevice(self.core.device):
+            mask = wp.array(np.arange(self.num_envs) == i, dtype=wp.bool)
+            wp.launch(E.reset_episode, self.num_envs, self._episode_args(mask))
+            self._observe(mask, self.none)
+            self._look()
+            if self.views:  # the mocaps are part of the state: posed only where a view reads them, so a state round-trips exactly
+                self.renderer.pose()
+                self.renderer.render()
+
     def _outputs(self):
         done = self._done
         info = {**self._step_info, "final_obs": self._final_obs, "_final_obs": done,
@@ -348,8 +364,6 @@ class WarpVectorEnv(gym.vector.VectorEnv):
     def _observe(self, mask, success):
         """`state` and `goal` for the worlds in `mask`, after the derived quantities `mj_step` leaves behind are refreshed
         from the state (_observe does the same on the CPU)."""
-        import mujoco_warp as mjw
-
         c, d = self.core, self.core.data
         c._refresh()
         mjw.com_vel(c.model, d)

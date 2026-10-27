@@ -1,12 +1,12 @@
-"""Seesaws on the device: the per-world joint and mass fields of the bank's hinge and ball slots. See seesaws.md."""
+"""Seesaws on the device: the per-world joint and mass fields of the bank's hinge and ball slots, and each world's solver
+scale (`stat.meaninertia`), which every bank needs. See seesaws.md."""
 
 import mujoco
 import numpy as np
 import warp as wp
 
 from ..core.level import _seesaw_mjcf
-from .bank import body_kind
-from .env_step import BALL, FREE, HINGE
+from .bank import KINDS, body_kind
 
 # the model fields a seesaw slot's values live in; each needs a world axis (the bank adds them to `put_model`'s batch_sizes)
 SEESAW_FIELDS = ("jnt_axis", "jnt_stiffness", "jnt_range", "dof_damping", "body_pos", "body_mass", "body_inertia",
@@ -26,31 +26,33 @@ class SeesawTables:
         self.body = [int(b.id) for b in bodies]
         self.joint = [int(b.jntadr[0]) for b in bodies]
         self.dof = [int(m.jnt_dofadr[j]) for j in self.joint]
-        self.ndof = [1 if n.startswith("hinge") else 3 for n in names]
+        self.ndof = [KINDS[k].nv for k in bank.body_kinds[bank.nbodies:]]
         E = len(bank.entries)
         t = {"pos": np.zeros((E, S, 3)), "axis": np.zeros((E, S, 3)), "stiffness": np.zeros((E, S)),
              "damping": np.zeros((E, S)), "range": np.zeros((E, S, 2)), "mass": np.zeros((E, S)),
              "inertia": np.zeros((E, S, 3)), "ipos": np.zeros((E, S, 3)), "iquat": np.zeros((E, S, 4)),
              "subtree": np.zeros((E, S)), "bw": np.zeros((E, S, 2)), "dw": np.zeros((E, S, 3))}
         cache = {}
-        # the mean of the mass matrix's diagonal at qpos0, which scales the solver's tolerance: the padded model's, then
-        # each level's own dofs (the prefix, its driven bodies' slots, its seesaws)
+        # the solver scales its tolerance by `stat.meaninertia * nv` with the padded nv (mujoco_warp's solver.py), so a world's
+        # value is the trace of its own level's mass matrix at qpos0 (the prefix, its driven bodies' slots, its seesaws, its
+        # tiles) over the padded nv: the product is the CPU model's, whatever the bank pads to
         d = mujoco.MjData(m)
         mujoco.mj_forward(m, d)
         diag = _mass_diag(m, d)
-        nv0 = int(m.jnt_dofadr[m.body_jntadr[m.body(bank.body_names[0]).id]]) if bank.body_names else m.nv
-        free = {k: int(m.jnt_dofadr[m.body_jntadr[m.body(n).id]]) for k, n in enumerate(bank.body_names[:bank.nbodies])}
+        dof = lambda n: int(m.jnt_dofadr[m.body_jntadr[m.body(n).id]])  # noqa: E731
+        nv0 = dof(bank.body_names[0]) if bank.body_names else dof("tile0") if bank.ntiles else m.nv  # the prefix's dofs
+        free_dof = {k: dof(n) for k, n in enumerate(bank.body_names[:bank.nbodies])}
+        tile_dof = [dof(f"tile{k}") for k in range(bank.ntiles)]
         mean = np.zeros(E)
         for e, (i, _) in enumerate(bank.entries):
             lv = bank.levels[i]
             used = {}
-            total, nv = diag[:nv0].sum(), nv0
+            total = diag[:nv0].sum()
             for si, b in zip(bank.slot_of(lv), lv.bodies):
-                if body_kind(b) != "b":
+                if KINDS[body_kind(b)].seesaw:
                     used[si - bank.nbodies] = b
                 else:
-                    total += diag[free[si]:free[si] + 6].sum()
-                    nv += 6
+                    total += diag[free_dof[si]:free_dof[si] + KINDS["b"].nv].sum()
             for s in range(S):
                 if s in used:
                     key = id(used[s])
@@ -58,13 +60,14 @@ class SeesawTables:
                         cache[key] = _compile(used[s])
                     row = cache[key]
                     total += row["mdiag"].sum()
-                    nv += len(row["mdiag"])
                 else:
                     row = _parked(m, self.body[s], self.joint[s], self.dof[s], self.ndof[s])
                 for k, v in row.items():
                     if k != "mdiag":
                         t[k][e, s, ...] = v
-            mean[e] = total / nv
+            if lv.collapse:
+                total += sum(diag[tile_dof[k]:tile_dof[k] + KINDS["b"].nv].sum() for k in range(len(lv.collapse["tiles"])))
+            mean[e] = total / m.nv
         f = lambda x, dt: wp.array(np.array(x, np.float32), dtype=dt, device=device)  # noqa: E731
         self.meaninertia = f(mean, float)
         i = lambda x: wp.array(x, dtype=int, device=device)  # noqa: E731
@@ -74,10 +77,11 @@ class SeesawTables:
         self.stiffness, self.damping, self.mass, self.subtree = (f(t[k], float) for k in ("stiffness", "damping", "mass", "subtree"))
 
     def load(self, mask, entry, model):
-        """Write each masked world's seesaw slots from its entry. A bank without seesaws launches nothing."""
+        """Write each masked world's solver scale and, in a bank with seesaws, its seesaw slots from its entry."""
+        wp.launch(load_meaninertia, entry.shape[0], [mask, entry, self.meaninertia, model.stat.meaninertia])
         if self.S:
             wp.launch(load_seesaws, (entry.shape[0], self.S), [
-                mask, entry, self.meaninertia, model.stat.meaninertia, self.dev_body, self.dev_joint, self.dev_dof, self.dev_ndof, self.pos, self.axis, self.stiffness,
+                mask, entry, self.dev_body, self.dev_joint, self.dev_dof, self.dev_ndof, self.pos, self.axis, self.stiffness,
                 self.damping, self.range, self.mass, self.inertia, self.ipos, self.iquat, self.subtree, self.bw, self.dw,
                 model.body_pos, model.jnt_axis, model.jnt_stiffness, model.dof_damping, model.jnt_range, model.body_mass,
                 model.body_inertia, model.body_ipos, model.body_iquat, model.body_subtreemass, model.body_invweight0,
@@ -94,9 +98,9 @@ def attach_frames(bank, slot_qadr):
         lv = bank.levels[i]
         row = []
         for si, b in zip(bank.slot_of(lv), lv.bodies):
-            k = body_kind(b)
-            axis = b["joint"].get("axis", [0, 0, 0]) if k != "b" else [0, 0, 0]
-            row.append((slot_qadr[si], {"b": FREE, "n": BALL, "h": HINGE}[k], list(b["pos"]) if k != "b" else [0, 0, 0], list(axis)))
+            kind = KINDS[body_kind(b)]
+            axis = b["joint"].get("axis", [0, 0, 0]) if kind.seesaw else [0, 0, 0]
+            row.append((slot_qadr[si], kind.attach, list(b["pos"]) if kind.seesaw else [0, 0, 0], list(axis)))
         out.append(row)
     return out
 
@@ -137,11 +141,18 @@ def _parked(m, body, joint, dof, nd):
 
 
 @wp.kernel
+def load_meaninertia(mask: wp.array(dtype=wp.bool), entry: wp.array(dtype=int), t_mean: wp.array(dtype=float),
+                     meaninertia: wp.array(dtype=float)):
+    """One masked world's solver scale from its entry."""
+    w = wp.tid()
+    if mask[w]:
+        meaninertia[w] = t_mean[entry[w]]
+
+
+@wp.kernel
 def load_seesaws(
     mask: wp.array(dtype=wp.bool),
     entry: wp.array(dtype=int),
-    t_mean: wp.array(dtype=float),
-    meaninertia: wp.array(dtype=float),
     body: wp.array(dtype=int),
     joint: wp.array(dtype=int),
     dof: wp.array(dtype=int),
@@ -173,13 +184,11 @@ def load_seesaws(
 ):
     """One masked world's seesaw slot s: the joint's axis, stiffness and range, the dofs' damping, and the body's pivot,
     mass, inertia (with its centre and principal axes) and the derived subtree mass and invweight0 that MuJoCo's
-    set_const would refresh, from the world's entry (slot 0 also writes the world's mean inertia)."""
+    set_const would refresh, from the world's entry."""
     w, s = wp.tid()
     if not mask[w]:
         return
     e = entry[w]
-    if s == 0:
-        meaninertia[w] = t_mean[e]
     b = body[s]
     j = joint[s]
     body_pos[w, b] = t_pos[e, s]

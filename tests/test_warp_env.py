@@ -205,3 +205,37 @@ def test_without_the_gpu_extra_the_error_names_it():
         "try:\n    import hamsterball.gpu.vector_env\nexcept ImportError as e:\n    assert 'gpu' in str(e), e\nelse:\n    raise SystemExit('no error')"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_get_state_and_set_state_round_trip_one_world_in_the_cpu_layout():
+    from hamsterball.core import Core
+
+    lv, _, _ = SCENARIOS["sphere_goal"]
+    core = Core(level=lv)
+    core.reset((1.0, 2.0, 0.5))
+    for _ in range(5):
+        core.step(np.array(FORWARD, np.float32))
+    s = core.state().astype(np.float32).astype(np.float64)  # Warp holds float32: a float32-exact state comes back exactly
+    venv = warp_env(lv, 3)
+    venv.reset(seed=0)
+    venv.set_state(1, s)
+    np.testing.assert_array_equal(venv.get_state(1), s)
+    assert not np.array_equal(venv.get_state(0), s)  # the other worlds are untouched
+
+
+def test_set_state_starts_the_episode_bookkeeping_afresh_for_that_world_only():
+    """A world loaded with a state far from where it was is a new episode on it: no step count, no swept segment from the
+    old position (which would cross the goal), and the other worlds go on."""
+    from hamsterball.core import Core
+
+    lv, _, _ = SCENARIOS["sphere_goal"]
+    venv = warp_env(lv, 2, time_limit_s=1 / 6)  # 10 env steps
+    venv.reset(seed=0)
+    for _ in range(9):
+        venv.step(np.zeros((2, 2), np.float32))
+    beyond = Core(level=lv)
+    beyond.reset((0.0, 9.9, 0.5))  # past the goal at y = 8, still: the segment from the spawn crosses it
+    venv.set_state(0, beyond.state())
+    _, _, terminated, truncated, info = venv.step(np.zeros((2, 2), np.float32))
+    assert not terminated[0] and not truncated[0] and not info["success"][0]  # step 1 of an episode, on no goal
+    assert truncated[1]  # world 1 reaches the step limit on its 10th step
