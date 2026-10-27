@@ -26,7 +26,7 @@ Contacts: torso, head, thighs and shins have `condim 1`, `priority 1`, so they a
 
 Masses are set per geom so the subtree is exactly 2.4 kg: torso 1.38, head 0.30, and per leg thigh 0.10, shin 0.06, foot 0.02.
 
-## Constants (second cut; play-test verdicts: first cut "stands and falls fine, barely moves the shell"; this cut **pending**)
+## Constants (second cut; play-test verdicts: first cut "stands and falls fine, barely moves the shell"; this cut **signed off at about 1 m/s**)
 
 | | value |
 |---|---|
@@ -73,3 +73,4 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 - 2026-10-27, ticket articulated-tier/02: built with the core-seam tests of the spec. The play-test (stand, push the shell, fall naturally) awaits the user.
 - 2026-10-27, ticket articulated-tier/02 play-test (user): "model is off (three floating spheres with unknown purpose), and the uni-color ground makes it hard to observe hamster behavior"; the constants are not yet judged.
 - 2026-10-27, second play-test (user): "Stronger push". It stands and falls fine, but barely moves the shell. Retuned the gears (5.0/4.0 to 16.0/12.8 N m), hip range (±0.9 to ±1.5 rad), standing pose and the canned trot (see Tried and rejected); the shell constants are untouched. Measured about 1 m/s of shell speed, tumble-free over 15 s; the new play-test verdict is pending.
+- 2026-10-27, third play-test (user): signed off at about 1 m/s. Half the abstract top speed is out of reach with this skeleton and an open-loop trot; the user chose to accept it and leave push speed to the scripted gait (ticket 04), whose posture loop closes the balance the canned trot lacks. Matching the abstract feel stays out of scope.
