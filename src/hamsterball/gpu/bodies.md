@@ -23,6 +23,8 @@ All of it is float64, including the time (`data.time` is float32, widened). The 
 - `uv run --extra gpu pytest tests/test_warp_bodies.py`: seam 1 (a mixed bank of a floor, two bars, a raft, three pillars and a platform; round trips of the CPU-layout state, one physics step against `Core` at `rtol=1e-5, atol=1e-6` on each body's qpos and qvel, padding invariance, the reset pose) and seam 2 (recorded CPU episodes replayed through `step_to`, see [env_step.md](env_step.md)). `HAMSTERBALL_WARP_DEVICE=cuda:0` runs it on a GPU.
 - Measured (Warp CPU device, one physics step from states 0, 400 and 2000 env steps into a run, on all five levels): the largest difference from `Core` in a body's qpos was 1.2e-7, 5.4e-7 and 3.3e-6, in its qvel 1.5e-8, 2.3e-7 and 8.4e-7. The growth with sim time is the float32 time: a state's time loads rounded to float32 (an ulp of 3.8e-6 s at 33 s), which moves a body moving at 1 m/s by about that much times its speed.
 
+- CUDA run (2026-10-27, Warp 1.18.0, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu` passed 117 of 117 on the merged tree (the 16 tests of `tests/test_warp_bodies.py` among them), the body, observation and region-pose differences within the CPU device's bounds (observation 1.4e-6 at most, region pose 3.7e-7).
+
 ## Known quirks
 
 - A world's sim time is Warp's float32 `data.time`, which accumulates one physics step's rounding at a time, so a long episode's bodies drift in phase from the CPU's (the CPU's time is float64). At the episode lengths in use (under a minute) it is below the test's tolerance on a loaded state, and Warp's own time keeps the drift ([batch_core.md](batch_core.md)).
@@ -39,4 +41,4 @@ All of it is float64, including the time (`data.time` is float32, widened). The 
 
 ## History
 
-- 2026-10-27, ticket gpu-backend/07: first version.
+- 2026-10-27, ticket gpu-backend/07: first version. CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 117 of 117 `gpu` tests passed (see Invariants and checks).

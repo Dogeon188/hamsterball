@@ -83,3 +83,4 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - 2026-10-27, ticket gpu-backend/06: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 90 of 90 `gpu` tests passed (see env_step.md); the marker poses were written inside the captured graph.
 - 2026-10-27, ticket gpu-backend/10: pixel views (see views.md); the unsupported-kwarg test no longer lists `views`.
 - 2026-10-27, ticket gpu-backend/10: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 90 of 90 `gpu` tests passed, and the render costs above measured.
+- 2026-10-27, ticket gpu-backend/07: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 117 of 117 `gpu` tests passed (see bodies.md); the bodies were driven inside the captured graph.
