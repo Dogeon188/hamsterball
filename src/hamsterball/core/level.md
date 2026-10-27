@@ -39,7 +39,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 ## Known quirks
 
 - Unknown keys raise rather than pass through.
-- An unset geom `rgba` stays unset in the canonical form and compiles to a fixed grey: colour is a look value, so it isn't filled into the level id. Every other default is filled.
+- An unset geom `rgba` stays unset in the canonical form and compiles to the checker material (`model.GROUND`): colour is a look value, so it isn't filled into the level id. Every other default is filled.
 - A `plane` collides infinitely in MuJoCo whatever its `size`, so a level with a kill plane needs finite ground (boxes) for the hamsterball to fall off.
 - MuJoCo scales hfield samples so the lowest is 0 and the highest is the max height: only relative heights in the PNG matter, and a constant PNG is flat at `pos` z. An hfield sits on a solid slab `HFIELD_BASE` = 1 m deep (MuJoCo needs a positive base; spec §7's `size` has three numbers).
 - The torsional friction of a contact-tuned geom is the shell's 0.05: spec §7 lets authors set only sliding and rolling.
@@ -62,6 +62,7 @@ Levels of spec §7: a project-owned YAML file loads into one in-memory `Level`, 
 - 2026-10-22, ticket survive-movers/05: a seesaw is a `bodies` entry (with `joint` for `motion`), not a separate block, so ticket 04's `attach` works unchanged and tiles stay after every body. Its mass is authored as one number and split evenly over its geoms (exact for the usual one-geom platform) rather than an explicit inertial, so MuJoCo derives the inertia from the shape; gravity compensation keeps an off-pivot geom from tipping it by itself.
 - 2026-10-23, ticket hitbox-view/03: `mjcf()` adds the hitbox view's kill plane, since the level knows `kill_plane_z`. A model built from bare MJCF sections (`model.FLAT`) has no kill plane, so it gets no plane geom; the centre dot is in the shell (see [model.md](model.md)).
 - 2026-10-23, code review of hitbox-view: supersedes ticket hitbox-view/03's entry above: `mjcf()` holds no kill plane. The 200 m plane grew `model.stat.extent` (`first_goal` 28.30 → 28.65), which moves MuJoCo's clip planes and so env pixels; the game window draws the plane into its scene instead.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): an unset geom `rgba` compiles to the checker material instead of the fixed grey, so level floors (planes, boxes, hfields) read against the hamster. Explicit `rgba` is unchanged; trajectories and level ids are too.
 
 ## Tried and rejected
 

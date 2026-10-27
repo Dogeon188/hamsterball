@@ -23,7 +23,7 @@ FRAGMENT = "\n".join(f'<body name="view_{v}" mocap="true"><camera name="{v}" fov
 # The features: spheres on one mocap body (the hamster rolls, so they can't ride it), massless and contactless like
 # the views; group 2, the hamster's, so first person hides them.
 _SPHERES = (("tail", *TAIL), ("ear_left", (-EARS[0][0], *EARS[0][1:]), EARS[1]), ("ear_right", *EARS))
-FRAGMENT += ('\n<body name="features" mocap="true">'
+FEATURES = ('\n<body name="features" mocap="true">'
              + "".join(f'<geom name="{n}" type="sphere" size="{r!r}" pos="{x!r} {y!r} {z!r}" mass="0" contype="0" '
                        f'conaffinity="0" group="2" rgba="{FEATURE_RGBA}"/>' for n, (x, y, z), r in _SPHERES)
              + "</body>")
@@ -58,10 +58,11 @@ def pose(model, data, follow_yaw):
         q, fwd = _quat(yw, p)
         data.mocap_pos[mocap] = at - dist * np.array(fwd)
         data.mocap_quat[mocap] = q
-    # the features: at the hamster centre, their body's +y turned to the facing
-    mocap = model.body_mocapid[model.body("features").id]
-    data.mocap_pos[mocap] = data.xpos[HAM]
-    data.mocap_quat[mocap] = (math.cos(facing / 2), 0.0, 0.0, math.sin(facing / 2))
+    # the features, if the tier has them: at the hamster centre, their body's +y turned to the facing
+    if (b := mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "features")) >= 0:
+        mocap = model.body_mocapid[b]
+        data.mocap_pos[mocap] = data.xpos[HAM]
+        data.mocap_quat[mocap] = (math.cos(facing / 2), 0.0, 0.0, math.sin(facing / 2))
 
 
 def option(view, hitboxes=False):

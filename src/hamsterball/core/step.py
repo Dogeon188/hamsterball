@@ -63,6 +63,8 @@ class Tier(Protocol):
     """What the core needs from a control tier (spec §6)."""
 
     fragment: str  # MJCF: a free body named "hamster", 2.4 kg in total, geoms in group 2, a site "hamster_eye"
+    features: bool  # whether the views' tail and ears (sized for a 0.12 m sphere) are drawn
+    sections: str  # top-level MJCF after the worldbody: a tier's <actuator> and <keyframe>, or ""
     nuserdata: int  # its userdata slots, after the core's CORE_SLOTS
     resting_radius: float  # m, shell centre to hamster subtree centre of mass at rest
 
@@ -259,8 +261,8 @@ class Core:
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         d.qpos[SHELL_QPOS:SHELL_QPOS + 3] = spawn
+        d.userdata[FACING], d.userdata[PITCH] = facing, PITCH_DEFAULT  # before the tier, which may point along the facing
         self.tier.reset(m, d, spawn)
-        d.userdata[FACING], d.userdata[PITCH] = facing, PITCH_DEFAULT
         if self.tiles:
             d.userdata[self.tiles.slot:] = math.inf  # untouched
         drive_bodies(d, self.bodies)

@@ -37,7 +37,15 @@ def _tile_normals():
 
 TILE_NORMALS = _tile_normals()  # (320, 3) in the shell frame
 
-FLAT = '<worldbody><geom type="plane" size="0 0 .1" rgba=".35 .4 .35 1"/></worldbody>'
+# Ground and sky look (rendering only): a checker material for floors, a gradient skybox. Grays, so no view mistakes
+# the ground for a green goal.
+LOOK = (
+    '<asset><texture name="sky" type="skybox" builtin="gradient" rgb1=".55 .72 .92" rgb2=".12 .16 .28" width="256" height="256"/>'
+    '<texture name="grid" type="2d" builtin="checker" rgb1=".30 .32 .36" rgb2=".44 .46 .50" width="256" height="256"/>'
+    '<material name="grid" texture="grid" texuniform="true" texrepeat="1 1" reflectance="0"/></asset>'
+)
+GROUND = 'material="grid"'  # the ground and level floors without a colour of their own
+FLAT = f'<worldbody><geom type="plane" size="0 0 .1" {GROUND}/></worldbody>'
 
 
 def _shell_xml():
@@ -63,20 +71,21 @@ def build(tier, level=FLAT, view_size=GAME_SIZE, bodies="", slots=0):
     worldbody geoms), with an offscreen buffer that holds both the game window and `view_size` (height, width).
     `bodies` (top-level MJCF sections too, from `Level.body_mjcf()`) goes last, so its bodies follow the view mocaps.
     `slots` more userdata slots go after the tier's (a level's collapsing tiles)."""
-    from .views import FRAGMENT as VIEWS  # views imports this module's ids
+    from .views import FEATURES, FRAGMENT as VIEWS  # views imports this module's ids
 
     h, w = max(view_size[0], GAME_SIZE[0]), max(view_size[1], GAME_SIZE[1])
     xml = f"""<mujoco><option timestep="{DT!r}" integrator="implicitfast"/>
 <size nuserdata="{CORE_SLOTS + tier.nuserdata + slots}"/>
 <visual><global offwidth="{w}" offheight="{h}"/><map znear="0.001"/></visual>
+{LOOK}
 <worldbody><light pos="0 0 10" dir="0 0 -1" directional="true"/></worldbody>
 {level}
 <worldbody>
 {_shell_xml()}
 {tier.fragment}
-{VIEWS}
+{VIEWS}{FEATURES if tier.features else ""}
 </worldbody>
-{bodies}</mujoco>"""
+{bodies}{tier.sections}</mujoco>"""
     m = mujoco.MjModel.from_xml_string(xml)
     assert m.body("shell").id == SHELL and m.body("hamster").id == HAM
     assert m.jnt_qposadr[m.body_jntadr[HAM]] == HAM_QPOS and m.jnt_dofadr[m.body_jntadr[HAM]] == HAM_DOF

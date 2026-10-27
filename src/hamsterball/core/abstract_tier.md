@@ -9,6 +9,7 @@ The abstract control tier of spec §5: the hamster is one 2.4 kg sphere, and a r
 `AbstractTier` implements the `Tier` protocol in [step.md](step.md):
 
 - `fragment`: a free body `hamster` with one frictionless sphere (`condim 1`, `priority 1`, solref `0.04 2`, 2 mm margin, group 2) and a site `hamster_eye` at its centre.
+- `sections = ""`: no actuators or keyframe. `features = True`: the views' tail and ears are drawn.
 - `nuserdata = 1`: `userdata[LAST_TOUCH]` (`LAST_TOUCH = CORE_SLOTS`, the first slot after the core's) holds the last wall-touch time.
 - `resting_radius = 0.35` m.
 - `action_space()`: `Box(-1, 1, (2,), float32)` = `[run_x, run_y]` in the facing frame.

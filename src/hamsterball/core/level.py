@@ -14,6 +14,7 @@ import numpy as np
 import yaml
 
 from . import motion as M
+from .model import GROUND
 from .marker import crosses
 from .motion import _keys, _num, _unit, _vec
 from .model import ROLL, TORSION
@@ -198,7 +199,7 @@ def _seesaw_mjcf(name, b, attached):
 def _geom_mjcf(g, shape=None, extra=""):
     """A level solid: group 0, contype and conaffinity 1 (the shell's outer sphere), contact values with priority;
     `extra` attributes last."""
-    rgba = " ".join(map(repr, g.get("rgba", [0.45, 0.5, 0.45, 1.0])))
+    colour = f'rgba="{_s(g["rgba"])}"' if "rgba" in g else GROUND  # no colour of its own: the checker
     shape = shape or f'size="{_s(g["size"])}"'
     if CONTACT.keys() & g.keys():
         # priority over the shell's outer sphere, so these values apply as written; condim 6 keeps rolling
@@ -206,7 +207,7 @@ def _geom_mjcf(g, shape=None, extra=""):
         shape += f' priority="1" condim="6" friction="{slide!r} {TORSION!r} {roll!r}"'
         shape += "".join(f' {k}="{_s(g[k])}"' for k in ("solref", "solimp") if k in g)
     return (f'<geom type="{g["type"]}" pos="{_s(g["pos"])}" {shape} euler="{_s(g["euler"])}" '
-            f'rgba="{rgba}" contype="1" conaffinity="1" group="0"{extra}/>')
+            f'{colour} contype="1" conaffinity="1" group="0"{extra}/>')
 
 
 def _marker_mjcf(m, name, rgba, extra=""):
