@@ -8,7 +8,7 @@
 
 - `hamsterball-bench [--backend cpu] [--secs 5] [--reps 3] [--copies N]`: prints a table of env steps/s (the median of `--reps` runs of `--secs` timed seconds) for `state` and `pixels` configs, on `flat` and `hfield` levels, at 1 and N copies, then the gate line. Exits 1 if the gate fails. N defaults to the performance cores (`sysctl hw.perflevel0.physicalcpu` on macOS, else every core).
 - `hamsterball-bench --backend warp [--device cuda:0] [--num-envs N]... [--secs 5] [--reps 3]`: the GPU-batched env (needs the `gpu` extra). Same table, with `envs` (worlds of one `WarpVectorEnv`; `--num-envs` repeats, default 16, 256, 4096) in place of copies, a header naming the GPU, and no gate: it exits 0 and prints `no gate`.
-- `hfield_level()`: the bench's hfield `Level`, built in memory.
+- `hfield_level()`: the bench's hfield `Level`, built in memory. `table(header, note, label, sizes, rate_of, secs, reps)`: the header, the table of medians and the returned rates, shared by both backends; the CPU gate and the warp footer are around it.
 - `warp_rate(kwargs, num_envs, secs, device)`: env steps/s of one `WarpVectorEnv`.
 - `rate(kwargs, copies, secs)`: env steps/s summed over the copies for `HamsterballEnv(**kwargs)`.
 
@@ -63,6 +63,7 @@
 - 2026-10-22, ticket hamsterball-v1/14: `bench` is one module, not a subpackage (spec §2 lists it among the subpackages), until it needs a second file, as with `env`.
 - 2026-10-22, ticket hamsterball-v1/14: the CLI uses Click, a new core dependency (`click>=8.1`) that spec §2's dependency table doesn't list, per the user's rule that new Python CLIs use Click.
 - 2026-10-27, ticket gpu-backend/11: `--backend warp` reuses the table's configs and levels and gates nothing (spec: "a throughput gate" is out of scope); `--backend` is `cpu` or `warp` as `make_vec`'s is, and `--device` defaults to `cuda:0` as `WarpVectorEnv`'s does.
+- 2026-10-27, code review of gpu-backend (6877534...028aa8c), user decision: `main_warp` and `main` share one `table` (header, loop, rows), so the two tables can't drift apart; the warp header's second line now reads `random actions; one WarpVectorEnv (...)`.
 
 ## Tried and rejected
 

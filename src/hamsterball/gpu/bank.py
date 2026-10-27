@@ -1,30 +1,55 @@
 """The level bank: a pool of levels compiled into one padded batch model, and the per-(level, task) tables the worlds
 read at each reset. See bank.md."""
 
-try:
-    import warp as wp
-except ImportError as e:  # a plain install has no warp
-    raise ImportError("the GPU backend needs the `gpu` extra: pip install 'hamsterball[gpu]'") from e
-
 import base64
 import itertools
 import math
+from typing import NamedTuple
 
 import mujoco
 import numpy as np
+import warp as wp
 
-from ..core.level import CONTACT, HAZARD_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, _free_mjcf, _sections
+from ..core.level import HAZARD_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, free_mjcf, sections
+from ..core.model import ROLL, TORSION
+from .env_step import BALL, FREE, HINGE
 
 TASK_NAMES = tuple(TASK_MARKERS)  # the goal one-hot's order, as env.TASKS
 STATIC_TYPES = ("plane", "hfield", "box", "sphere", "capsule")  # a level's solids, in slot order
 MARKER_TYPES = ("sphere", "capsule", "box")
 BODY_TYPES = ("box", "sphere", "capsule")  # a body's geoms (level.BODY_GEOMS), in slot order
-BODY_NAMES = {"b": "body", "h": "hinge", "n": "ball"}  # a body slot's kind (driven, hinge seesaw, ball seesaw): its model name
 SEESAW_RANGE = 170.0  # deg: a parked seesaw slot's joint range, wide because jnt_limited is shared across worlds
+vec5 = wp.types.vector(length=5, dtype=float)  # solimp (mujoco_warp's own `vec5f`)
+
+
+class Kind(NamedTuple):
+    """What one kind of body slot is, in every place that switches on it."""
+    name: str  # the slot's model body name stem: body0, hinge0, ball0
+    nq: int  # the joint's qpos and dof counts, which size the slot in the state vector
+    nv: int
+    attach: int  # how an attached marker reads the body's pose (env_step's FREE, BALL, HINGE)
+    seesaw: bool  # a passive joint with a pivot and per-world fields (seesaws.py), not a driven free body
+    joint: str  # the slot's MJCF joint attributes ("" for a free joint)
+    com: str  # the slot's inertial centre
+
+
+# the body kinds, in slot order: b driven (free joint), h hinge seesaw, n ball seesaw. A ball slot's centre of mass is off its
+# joint: MuJoCo marks a ball body with its centre at the joint "simple" (a diagonal block in the mass matrix) and Warp builds
+# that sparsity once, but a level's seesaw may not be
+KINDS = {
+    "b": Kind("body", 7, 6, FREE, False, "", "0 0 0"),
+    "h": Kind("hinge", 1, 1, HINGE, True, f'type="hinge" axis="1 0 0" range="-{SEESAW_RANGE!r} {SEESAW_RANGE!r}"', "0 0 0"),
+    "n": Kind("ball", 4, 3, BALL, True, f'type="ball" range="0 {SEESAW_RANGE!r}"', "0.1 0 0"),
+}
 GEOM_RGBA = (0.45, 0.5, 0.45, 1.0)  # a level solid's colour when it names none (level._geom_mjcf)
 PARK_DEPTH = 1000.0  # m below the kill plane an unused slot sits
 PARK_MARGIN = -1000.0  # an unused slot's geom_margin: nothing touches it (Warp shares contype across worlds)
-BATCHED = ("geom_pos", "geom_quat", "geom_size", "geom_rgba", "geom_margin", "geom_dataid", "geom_aabb", "geom_rbound")
+BATCHED = ("geom_pos", "geom_quat", "geom_size", "geom_rgba", "geom_margin", "geom_dataid", "geom_aabb", "geom_rbound",
+           "geom_friction", "geom_solref", "geom_solimp")
+# a solid slot's contact values compile as the shell's outer sphere mixes with a geom that sets none (friction max, solref and
+# solimp MuJoCo's defaults), at priority 1 like a level geom that sets some, so a world's slot takes its level's values whole
+SOLID_CONTACT = f'priority="1" condim="6" friction="1 {TORSION!r} {ROLL!r}"'
+SOLREF, SOLIMP = (0.02, 1.0), (0.9, 0.95, 0.001, 0.5, 2.0)  # MuJoCo's defaults
 
 
 def body_kind(body):
@@ -68,9 +93,6 @@ class Bank:
     def __init__(self, levels, tasks=TASK_NAMES, keep=()):
         self.n_pool = len(levels)
         pairs = [(lv, None) for lv in levels] + [(lv, t) for lv, t in keep]
-        for lv, _ in pairs:
-            if any(CONTACT.keys() & g.keys() for g in lv.geoms):
-                raise NotImplementedError("a geom with friction, solref or solimp is not batched yet")
         self.levels = [lv for lv, _ in pairs]
         self.tasks = tuple(tasks)
         self.entries = []  # (bank index, task name)
@@ -101,11 +123,14 @@ class Bank:
             self.marker_counts = {k: max(self.marker_counts[k], m[k]) for k in MARKER_TYPES}
         # the body pool: as many free-joint slots as the most driven bodies a level has, then the most hinge seesaws, then
         # the most ball seesaws, each with its geom slots per type at the most any entry's body in that slot holds
+        # ponytail: every world pays for the bank's largest level (the most bodies, seesaws, tiles and geoms of any entry): one
+        # outlier level pads them all, in model size and per-world memory; bucket the levels by size into several banks to lift it
         most = {k: max([sum(body_kind(b) == k for b in self.levels[i].bodies) for i, _ in self.entries], default=0)
-                for k in BODY_NAMES}
+                for k in KINDS}
         self.nbodies, self.nhinge, self.nball = most["b"], most["h"], most["n"]
-        self.body_prefix = [f"{k}{j}" for k in BODY_NAMES for j in range(most[k])]  # a body slot's geom-slot prefix
-        self.body_names = [f"{BODY_NAMES[k]}{j}" for k in BODY_NAMES for j in range(most[k])]  # and its model body name
+        self.body_kinds = [k for k in KINDS for j in range(most[k])]  # a body slot's kind
+        self.body_prefix = [f"{k}{j}" for k in KINDS for j in range(most[k])]  # its geom-slot prefix
+        self.body_names = [f"{KINDS[k].name}{j}" for k in KINDS for j in range(most[k])]  # and its model body name
         self.body_counts = [{k: 0 for k in BODY_TYPES} for _ in self.body_prefix]
         for i, _ in self.entries:
             for si, b in zip(self.slot_of(self.levels[i]), self.levels[i].bodies):
@@ -150,7 +175,7 @@ class Bank:
                 if is_body(kind):
                     continue  # a body's geoms are in its body (body_mjcf)
                 shape = 'hfield="hfield0"' if typ == "hfield" else 'size="1 1 1"'
-                out.append(f'<geom name="{self.name(slot)}" type="{typ}" {shape} contype="1" conaffinity="1" group="0"/>')
+                out.append(f'<geom name="{self.name(slot)}" type="{typ}" {shape} contype="1" conaffinity="1" group="0" {SOLID_CONTACT}/>')
             else:  # contact off, like a marker (level._marker_mjcf)
                 out.append(f'<geom name="{self.name(slot)}" type="{typ}" size="1 1 1" contype="0" conaffinity="0" group="0"/>')
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
@@ -162,22 +187,17 @@ class Bank:
         and an inertial of its own, which a world's level overwrites ([seesaws.md](seesaws.md)). "" for a bank without
         bodies."""
         out = []
-        for prefix, name, counts in zip(self.body_prefix, self.body_names, self.body_counts):
-            geoms = "".join(f'<geom name="{prefix}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
-                            for typ in BODY_TYPES for j in range(counts[typ]))
-            if prefix[0] == "b":
-                out.append(_free_mjcf(name, [0.0, 0.0, 0.0], geoms))
+        for kind, prefix, name, counts in zip(self.body_kinds, self.body_prefix, self.body_names, self.body_counts):
+            geoms = "".join(f'<geom name="{prefix}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0" '
+                            f'{SOLID_CONTACT}/>' for typ in BODY_TYPES for j in range(counts[typ]))
+            if not KINDS[kind].seesaw:
+                out.append(free_mjcf(name, [0.0, 0.0, 0.0], geoms))
                 continue
-            joint = (f'type="hinge" axis="1 0 0" range="-{SEESAW_RANGE!r} {SEESAW_RANGE!r}"' if prefix[0] == "h"
-                     else f'type="ball" range="0 {SEESAW_RANGE!r}"')
-            # a ball slot's centre of mass is off its joint: MuJoCo marks a ball body with its centre at the joint "simple"
-            # (a diagonal block in the mass matrix) and Warp builds that sparsity once, but a level's seesaw may not be
-            com = "0.1 0 0" if prefix[0] == "n" else "0 0 0"
-            out.append(f'<body name="{name}" pos="0 0 0" gravcomp="1"><joint {joint} limited="true" stiffness="0" damping="0"/>'
-                       f'<inertial pos="{com}" mass="1" diaginertia="1 1 1"/>{geoms}</body>')
+            out.append(f'<body name="{name}" pos="0 0 0" gravcomp="1"><joint {KINDS[kind].joint} limited="true" stiffness="0" '
+                       f'damping="0"/><inertial pos="{KINDS[kind].com}" mass="1" diaginertia="1 1 1"/>{geoms}</body>')
         if not out:
             return ""
-        return _sections(out, [("world", n) for n in self.body_names] + list(itertools.combinations(self.body_names, 2)))
+        return sections(out, [("world", n) for n in self.body_names] + list(itertools.combinations(self.body_names, 2)))
 
     def tile_mjcf(self):
         """MJCF sections for `core.model.build`'s `bodies`, after `body_mjcf()`'s: the tile slots `tile<k>`, each a kinematic
@@ -188,10 +208,10 @@ class Bank:
         names = [f"tile{k}" for k in range(self.ntiles)]
         out = []
         for k, n in enumerate(names):
-            geoms = "".join(f'<geom name="t{k}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
-                            for typ in BODY_TYPES for j in range(self.tile_counts[k][typ]))
-            out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
-        return _sections(out, [(a, t) for t in names for a in ["world", *self.body_names]] + list(itertools.combinations(names, 2)))
+            geoms = "".join(f'<geom name="t{k}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0" '
+                            f'{SOLID_CONTACT}/>' for typ in BODY_TYPES for j in range(self.tile_counts[k][typ]))
+            out.append(free_mjcf(n, [0.0, 0.0, 0.0], geoms))
+        return sections(out, [(a, t) for t in names for a in ["world", *self.body_names]] + list(itertools.combinations(names, 2)))
 
     def tables(self, mjm):
         """The slot tables as numpy, one row per entry: what each world's model fields take for that (level, task).
@@ -204,7 +224,8 @@ class Bank:
              "size": np.zeros((E, S, 3), np.float32), "aabb": np.zeros((E, S, 2, 3), np.float32),
              "rbound": np.zeros((E, S), np.float32), "xmat": np.zeros((E, S, 3, 3), np.float32),
              "rgba": np.zeros((E, S, 4), np.float32), "margin": np.zeros((E, S), np.float32),
-             "dataid": np.zeros((E, S), np.int32)}
+             "dataid": np.zeros((E, S), np.int32), "friction": np.zeros((E, S, 3), np.float32),
+             "solref": np.zeros((E, S, 2), np.float32), "solimp": np.zeros((E, S, 5), np.float32)}
         for e, (i, task) in enumerate(self.entries):
             lv = self.levels[i]
             solids = [("s", g["type"], _geom_row(g, self.hfields)) for g in lv.geoms]
@@ -228,7 +249,7 @@ class Bank:
                 g = ids[s]
                 if slot in filled:
                     row = filled[slot]
-                    pos, quat, size, aabb, rbound, rgba, dataid = row
+                    pos, quat, size, aabb, rbound, rgba, dataid, contact = row
                     mat = np.empty(9)
                     mujoco.mju_quat2Mat(mat, quat)
                     margin = 0.0
@@ -236,17 +257,21 @@ class Bank:
                     # compiled size and bounds stay
                     pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if is_body(slot[0]) else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
                     size, aabb, rbound = mjm.geom_size[g], mjm.geom_aabb[g].reshape(2, 3), mjm.geom_rbound[g]
-                    rgba, dataid = (*mjm.geom_rgba[g][:3], 0.0), int(mjm.geom_dataid[g])
+                    rgba, dataid, contact = (*mjm.geom_rgba[g][:3], 0.0), int(mjm.geom_dataid[g]), None
                 if slot[1] == "plane":  # the plane's bounds are infinite, so they are the compiled ones
                     aabb, rbound = mjm.geom_aabb[g].reshape(2, 3), mjm.geom_rbound[g]
                 t["pos"][e, s], t["quat"][e, s], t["size"][e, s] = pos, quat, size
                 t["aabb"][e, s], t["rbound"][e, s], t["xmat"][e, s] = aabb, rbound, np.reshape(mat, (3, 3))
                 t["rgba"][e, s], t["margin"][e, s], t["dataid"][e, s] = rgba, margin, dataid
+                if contact is None:  # a marker or a parked slot: the compiled values (nothing touches it)
+                    contact = mjm.geom_friction[g], mjm.geom_solref[g], mjm.geom_solimp[g]
+                t["friction"][e, s], t["solref"][e, s], t["solimp"][e, s] = contact
         return ids, t
 
 
 def _geom_row(g, hfields):
-    """(pos, quat, size, aabb, rbound, rgba, dataid) of a level solid, as MuJoCo compiles it."""
+    """(pos, quat, size, aabb, rbound, rgba, dataid, contact) of a level solid, as MuJoCo compiles it; `contact` is its
+    (friction, solref, solimp), the level's values (`level._geom_mjcf`) or what the shell's outer sphere mixes to when it sets none."""
     quat, _ = _quat_mat(g["euler"])
     size, typ, dataid = np.zeros(3), g["type"], -1
     size[:len(g["size"])] = g["size"]
@@ -263,7 +288,9 @@ def _geom_row(g, hfields):
         dataid = hfields[_hfield_key(g)]
     else:  # a plane: its bounds are the compiled ones
         aabb, rbound = [[0, 0, 0], [0, 0, 0]], 0.0
-    return g["pos"], quat, size, aabb, rbound, g.get("rgba", GEOM_RGBA), dataid
+    slide, roll = g.get("friction", [1.0, ROLL])
+    contact = (slide, TORSION, roll), g.get("solref", SOLREF), g.get("solimp", SOLIMP)
+    return g["pos"], quat, size, aabb, rbound, g.get("rgba", GEOM_RGBA), dataid, contact
 
 
 def _marker_row(m, rgba):
@@ -271,14 +298,14 @@ def _marker_row(m, rgba):
     typ = m["type"]
     if typ == "sphere":
         r = m["radius"]
-        return m["pos"], (1.0, 0, 0, 0), [r, 0, 0], [[0, 0, 0], [r] * 3], r, rgba, -1
+        return m["pos"], (1.0, 0, 0, 0), [r, 0, 0], [[0, 0, 0], [r] * 3], r, rgba, -1, None
     if typ == "box":
         size = np.array(m["size"], float)
-        return m["pos"], _quat_mat(m["euler"])[0], size, [[0, 0, 0], size], np.linalg.norm(size), rgba, -1
+        return m["pos"], _quat_mat(m["euler"])[0], size, [[0, 0, 0], size], np.linalg.norm(size), rgba, -1, None
     a, b = np.array(m["fromto"][:3]), np.array(m["fromto"][3:])
     quat, r, half = np.empty(4), m["radius"], np.linalg.norm(b - a) / 2
     mujoco.mju_quatZ2Vec(quat, b - a)
-    return (a + b) / 2, quat, [r, half, 0], [[0, 0, 0], [r, r, r + half]], r + half, rgba, -1
+    return (a + b) / 2, quat, [r, half, 0], [[0, 0, 0], [r, r, r + half]], r + half, rgba, -1, None
 
 
 class DeviceTables:
@@ -293,6 +320,7 @@ class DeviceTables:
         self.quat, self.rgba = f(t["quat"], wp.quat), f(t["rgba"], wp.vec4)
         self.aabb, self.xmat = f(t["aabb"], wp.vec3), f(t["xmat"], wp.mat33)
         self.rbound, self.margin, self.dataid = f(t["rbound"], float), f(t["margin"], float), f(t["dataid"], int)
+        self.friction, self.solref, self.solimp = f(t["friction"], wp.vec3), f(t["solref"], wp.vec2), f(t["solimp"], vec5)
         # the draw: pool levels that hold an entry for task t (row t), or any entry (the last row)
         nt, n = len(TASK_NAMES), bank.n_pool
         cand = np.zeros((nt + 1, max(n, 1)), np.int32)
@@ -314,9 +342,10 @@ class DeviceTables:
         """Write each masked world's slots from its entry: the model fields, and the world pose of a static geom."""
         n, s = entry.shape[0], self.slot_geom.shape[0]
         wp.launch(load_slots, (n, s), [mask, entry, self.slot_geom, self.pos, self.quat, self.size, self.aabb, self.rbound,
-                                       self.xmat, self.rgba, self.margin, self.dataid, model.geom_pos, model.geom_quat,
-                                       model.geom_size, model.geom_aabb, model.geom_rbound, model.geom_rgba,
-                                       model.geom_margin, model.geom_dataid, data.geom_xpos, data.geom_xmat])
+                                       self.xmat, self.rgba, self.margin, self.dataid, self.friction, self.solref, self.solimp,
+                                       model.geom_pos, model.geom_quat, model.geom_size, model.geom_aabb, model.geom_rbound,
+                                       model.geom_rgba, model.geom_margin, model.geom_dataid, model.geom_friction,
+                                       model.geom_solref, model.geom_solimp, data.geom_xpos, data.geom_xmat])
 
 
 @wp.kernel
@@ -333,6 +362,9 @@ def load_slots(
     t_rgba: wp.array2d(dtype=wp.vec4),
     t_margin: wp.array2d(dtype=float),
     t_dataid: wp.array2d(dtype=int),
+    t_friction: wp.array2d(dtype=wp.vec3),
+    t_solref: wp.array2d(dtype=wp.vec2),
+    t_solimp: wp.array2d(dtype=vec5),
     geom_pos: wp.array2d(dtype=wp.vec3),
     geom_quat: wp.array2d(dtype=wp.quat),
     geom_size: wp.array2d(dtype=wp.vec3),
@@ -341,6 +373,9 @@ def load_slots(
     geom_rgba: wp.array2d(dtype=wp.vec4),
     geom_margin: wp.array2d(dtype=float),
     geom_dataid: wp.array2d(dtype=int),
+    geom_friction: wp.array2d(dtype=wp.vec3),
+    geom_solref: wp.array2d(dtype=wp.vec2),
+    geom_solimp: wp.array2d(dtype=vec5),
     geom_xpos: wp.array2d(dtype=wp.vec3),
     geom_xmat: wp.array2d(dtype=wp.mat33),
 ):
@@ -358,6 +393,9 @@ def load_slots(
     geom_rgba[w, g] = t_rgba[e, s]
     geom_margin[w, g] = t_margin[e, s]
     geom_dataid[w, g] = t_dataid[e, s]
+    geom_friction[w, g] = t_friction[e, s]
+    geom_solref[w, g] = t_solref[e, s]
+    geom_solimp[w, g] = t_solimp[e, s]
     geom_xpos[w, g] = t_pos[e, s]  # a static geom's world pose is its local one, and forward never recomputes it
     geom_xmat[w, g] = t_xmat[e, s]
 

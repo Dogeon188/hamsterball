@@ -18,7 +18,9 @@ pytestmark = pytest.mark.gpu
 DEVICE = os.environ.get("HAMSTERBALL_WARP_DEVICE", "cpu")  # "cuda:0" runs the same tests on a GPU
 FLOAT32 = dict(rtol=1e-5, atol=1e-6)  # what the spec asks of the core-step kernels' writes
 LOOSE = dict(rtol=1e-4, atol=1e-5)  # shell and hamster dofs after a physics step; see batch_core.md
-HFIELD = (dict(rtol=1e-4, atol=3e-5), dict(rtol=1e-4, atol=2e-2))  # the same on a generated hfield: Warp's contacts; see batch_core.md
+# ponytail: the same on a generated hfield, where Warp caps contacts at 4 per pair (the CPU core keeps all it finds); see
+# batch_core.md. Tighten the bound if mujoco-warp lifts the cap.
+HFIELD = (dict(rtol=1e-4, atol=3e-5), dict(rtol=1e-4, atol=2e-2))
 GEN = ProceduralGenerator()
 STILL = np.zeros(2, np.float32)
 

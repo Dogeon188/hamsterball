@@ -141,7 +141,7 @@ class Level:
 
     def body_mjcf(self):
         """MJCF sections for model.build's `bodies`, after the view mocaps: each body `body<i>` with its geoms and the
-        markers attached to it (a kinematic body as `_free_mjcf`, a seesaw as `_seesaw_mjcf`), and a contact exclude
+        markers attached to it (a kinematic body as `free_mjcf`, a seesaw as `_seesaw_mjcf`), and a contact exclude
         from the world and from each other (the core poses or the joint moves them, so only the shell should touch
         them). "" for a level without bodies."""
         if not self.bodies:
@@ -153,30 +153,30 @@ class Level:
         for i, (n, b) in enumerate(zip(names, self.bodies)):
             mass = ' mass="0"' if "joint" in b else ""  # a marker on a seesaw weighs nothing
             marks = "".join(_marker_mjcf(m, mn, rgba, mass) for m, mn, rgba in attached if m["attach"] == i)
-            out.append(_free_mjcf(n, b["pos"], "".join(_geom_mjcf(g) for g in b["geoms"]) + marks)
+            out.append(free_mjcf(n, b["pos"], "".join(_geom_mjcf(g) for g in b["geoms"]) + marks)
                        if "motion" in b else _seesaw_mjcf(n, b, marks))
-        return _sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
+        return sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
 
     def tile_mjcf(self):
         """MJCF sections for model.build's `bodies`, after `body_mjcf()`'s: each collapsing tile `tile<i>`, a kinematic
-        body (`_free_mjcf`) at its geom's pos, excluded from the world, the bodies, and each other. "" for a level
+        body (`free_mjcf`) at its geom's pos, excluded from the world, the bodies, and each other. "" for a level
         without tiles."""
         if self.collapse is None:
             return ""
         tiles = [f"tile{i}" for i in range(len(self.collapse["tiles"]))]
-        out = [_free_mjcf(n, g["pos"], _geom_mjcf({**g, "pos": [0.0, 0.0, 0.0]}))
+        out = [free_mjcf(n, g["pos"], _geom_mjcf({**g, "pos": [0.0, 0.0, 0.0]}))
                for n, g in zip(tiles, self.collapse["tiles"])]
         others = ["world", *(f"body{i}" for i in range(len(self.bodies)))]
-        return _sections(out, [(a, t) for t in tiles for a in others] + list(itertools.combinations(tiles, 2)))
+        return sections(out, [(a, t) for t in tiles for a in others] + list(itertools.combinations(tiles, 2)))
 
 
-def _free_mjcf(name, pos, inner):
+def free_mjcf(name, pos, inner):
     """A kinematic body: a free joint, gravity compensated, heavy (BODY_MASS), holding the MJCF `inner`."""
     return (f'<body name="{name}" pos="{_s(pos)}" gravcomp="1"><freejoint/>'
             f'<inertial pos="0 0 0" mass="{BODY_MASS!r}" diaginertia="{_s([BODY_INERTIA] * 3)}"/>{inner}</body>')
 
 
-def _sections(bodies, excludes):
+def sections(bodies, excludes):
     """A `<worldbody>` of the bodies' MJCF and a `<contact>` excluding each (body1, body2) pair."""
     ex = "".join(f'<exclude body1="{a}" body2="{b}"/>' for a, b in excludes)
     return "<worldbody>\n{}\n</worldbody>\n<contact>{}</contact>".format("\n".join(bodies), ex)
