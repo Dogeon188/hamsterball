@@ -22,6 +22,8 @@ A tile slot a world's level uses sits at rest until `delay` after its trigger ti
 ## Invariants and checks
 
 - `uv run --extra gpu pytest tests/test_warp_tiles.py`: seam 1 (a bank of a 4-tile floor, boxes with a sphere and a capsule, the bundled 81-tile floor, a generated 63-tile floor and a level with no tile: CPU-layout round trips including `inf` triggers, one physics step against `Core` from the state just before a tile triggers and from states with tiles falling, the live fall against `Core` and the hold under the kill plane, a reset against `Core`) and seam 2 (recorded CPU episodes of collapse levels replayed through `step_to`, tile colours included, see [env_step.md](env_step.md)). `HAMSTERBALL_WARP_DEVICE=cuda:0` runs it on a GPU.
+- Measured (Warp CPU device): one physics step from the state just before a tile triggers and from states 30, 90 and 200 env steps in, on the six-level bank, the largest difference from `Core` in a tile's qpos was 8.7e-8, in its qvel 1.1e-5 (see Known quirks), in its trigger time 1.7e-9; through `step_to` the observation differed by at most 3.8e-6, the reward by 0, a tile's colour by 6e-8, flags and failure codes exactly. Memory per world with the 81-tile floor in the bank: about 196 KB against 53 KB without tiles ([batch_core.md](batch_core.md)).
+- CUDA run (2026-10-27, Warp 1.18.0, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu` passed 146 of 146 on the tree merged with the seesaw ticket, the 15 tests of `tests/test_warp_tiles.py` among them.
 
 ## Known quirks
 
@@ -42,3 +44,4 @@ A tile slot a world's level uses sits at rest until `delay` after its trigger ti
 ## History
 
 - 2026-10-27, ticket gpu-backend/08: first version.
+- 2026-10-27, ticket gpu-backend/08: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 146 of 146 `gpu` tests passed (see Invariants and checks). The first CUDA run of the pre-merge tree failed one test of mine, which asserted that a state had both touched and untouched tiles on a level where all four are touched together; the test moved to the level with three separate tiles.
