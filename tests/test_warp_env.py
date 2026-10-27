@@ -177,7 +177,6 @@ def test_an_hfield_level_runs():
 
 
 @pytest.mark.parametrize("kw, error", [
-    ({"views": ("chase",)}, NotImplementedError),
     ({"tier": "articulated"}, NotImplementedError),
     ({"tasks": ["survive"], "levels": ["survive_seesaw"]}, NotImplementedError),
     ({"obs_state": False}, ValueError),

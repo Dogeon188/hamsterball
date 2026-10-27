@@ -233,6 +233,17 @@ class BatchCore:
             else:
                 self._launch(n, post)
 
+    def launch(self, key, fn):
+        """Run `fn` (a callable that launches kernels) as one graph kept under `key` on CUDA, eagerly on the CPU device."""
+        with wp.ScopedDevice(self.device):
+            if not self.graph:
+                return fn()
+            if key not in self._graphs:
+                with wp.ScopedCapture() as capture:
+                    fn()
+                self._graphs[key] = capture.graph
+            wp.capture_launch(self._graphs[key])
+
     def _launch(self, n, post):
         for _ in range(n):
             self._physics_step(n)
