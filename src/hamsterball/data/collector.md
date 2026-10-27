@@ -7,18 +7,20 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 ## Interface
 
 - `Collector(env, **kw)`: a `minari.DataCollector` over a `gym.make`d hamsterball env (it needs `env.spec`). `kw` passes through to Minari (`action_space`, `jpeg_encoding`); the observation space (`OBSERVATION`), step callback, episode metadata callback, `record_infos`, and `data_format="arrow"` are fixed.
-- `reset`, `step`, `create_dataset(dataset_id, **kw)`, `close()`: Minari's.
+- `reset`, `close()`: Minari's.
+- `step(action, run_vector=None)`: Minari's; in the articulated tier `run_vector` (the 2-D run vector the torques came from) is stored as the step's `run_vector` info. Passing one in the abstract tier raises `ValueError`.
+- `create_dataset(dataset_id, low_level_policy=None, **kw)`: Minari's; `low_level_policy` (the policy's `name`) goes into the dataset metadata as `low_level_policy`. `add_to_dataset` leaves the metadata alone, so keep one policy per dataset.
 - `add_to_dataset(dataset)`: Minari's, but each appended episode keeps its seed and reset options and gets the episode metadata callback's fields, as in `create_dataset`.
 - `discard_episode()`: drops the episode in progress (an abandoned run). Call `reset` before stepping again.
 - `provenance()`: `{hamsterball_version, mujoco_version, platform}` of this build, `platform` as `<OS>-<arch>` from `platform.system()` and `platform.machine()`.
 - `SPACE_KWARGS`: the env kwargs written into the dataset's `env_spec`: the space-shaping ones, plus `truncate` and `time_limit_s`, which decide when an episode ends.
-- `OBSERVATION`: the stored observation space, `Dict(goal=Box(10), state=Box(21))` float32, whatever the env's.
+- `OBSERVATION`: the stored observation space of the abstract tier, `Dict(goal=Box(10), state=Box(21))` float32, whatever the env's views. `ARTICULATED_OBSERVATION` adds `proprio=Box(26)`; the Collector picks it when the env's tier is articulated.
 
 ## How it works
 
 - Per dataset: construction writes every `SPACE_KWARGS` attribute of the env into `env.unwrapped.spec.kwargs`, before Minari copies the spec, so defaults the caller left out are explicit and `recover_environment()` rebuilds the same spaces. `create_dataset` adds `provenance()` to the dataset metadata.
 - Per episode: `reset` replaces the buffered episode's options with the env's `info['reset_options']`, so an episode replays from its seed and options alone. The episode metadata callback adds Minari's reward statistics, the last step's `success` and `failure_reason`, `return`, and `length`.
-- Per step: the action, `info['state']` and `info['goal']` as the observation, and `info['core_state']` only. The step callback takes `state` and `goal` from `info`, which has them with `obs_state=False`, and drops the view pixels and the other info keys. `step` casts a `Box` action to the action space's dtype before stepping, so the env steps with exactly the float32 action Minari stores.
+- Per step: the action, `info['state']` and `info['goal']` as the observation (plus `info['proprio']` in the articulated tier), and `info['core_state']` (plus `run_vector` there) only. The step callback takes `state` and `goal` from `info`, which has them with `obs_state=False`, and drops the view pixels and the other info keys. `step` casts a `Box` action to the action space's dtype before stepping, so the env steps with exactly the float32 action Minari stores.
 - `core_state` is stored as a variable-length `list<double>` rather than Minari's fixed-size list: the collector module replaces Minari's `arrow_storage._encode_info` on import with one that encodes `core_state` that way (other info keys as Minari does). Its size depends on the level (kinematic bodies add qpos and qvel), and Minari reads a dataset as a union of per-episode Arrow files that must share one schema, so a fixed-size list fails on read once two sizes meet (`ArrowTypeError: ... fixed_size_list<item: double>[110] ... list<item: double>`). Reading needs no change: each episode's rows share a size, so Minari's `np.stack` returns `(steps, size)` float64 as before.
 
 ## Invariants and checks
@@ -38,7 +40,8 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - `levels` must be JSON-serialisable in the spec kwargs (names or paths, not `Level` objects), or Minari can't write `env_spec`. A `LevelGenerator` pool is the exception: the Collector drops `levels` and `difficulty` from the spec, since each episode's options hold its generated level and difficulty; the recovered env has the default pool.
 - `views` and `view_size` come back from `env_spec` as JSON lists; the env turns them into tuples.
 - A dataset written before ticket survive-movers/03 stores `core_state` as a fixed-size list, so appending a new episode to it (the game's per-player dataset) fails on read. Start a new dataset, or rewrite the old one.
-- Not yet: the low-level policy's run vector as an extra per-step field, and the game's overrun count.
+- The articulated tier always stores `run_vector`: NaN (float32, shape 2) when `step` got none, and at reset, because Minari records infos at reset and every step's infos must share keys, shapes and dtypes. An abstract dataset has no such field.
+- Not yet: the game's overrun count.
 
 ## Decisions
 
@@ -48,11 +51,15 @@ Records episodes of a hamsterball env to a Minari 0.5 dataset with Arrow storage
 - 2026-10-22, user ruling: Minari and pillow move out of the core dependencies into a `data` extra, so the env installs without jax (~58 MB). Spec §2 updated. `tests/test_data.py` skips without the extra.
 - 2026-10-22, ticket survive-movers/03: one dataset holds levels whose core states differ in size (the game's per-player dataset holds every level played; the default survive pool mixes levels with and without bodies), by storing `core_state` as a variable-length list.
 
+- 2026-10-27, ticket articulated-tier/05: the run vector rides on the step callback instance (set by `Collector.step`) rather than the env, since Minari builds that instance per collector and calls it right after the env step. `ARTICULATED_OBSERVATION` is a second constant, not a computed space, so `lerobot.py` can import it to tell views from the fixed keys.
+
 ## Tried and rejected
 
 - 2026-10-22, ticket survive-movers/03: considered and dropped without a run: padding the core state to a fixed size (no fixed maximum, and replay and re-render would have to strip it); a leaf type for the step info that Minari encodes as a variable list (its buffer stacks `np.ndarray` leaves into a fixed-size list, and pyarrow can't infer a type for `array.array`, tried); keying datasets by core-state size (splits a player's games).
 
 ## History
+
+- 2026-10-27, ticket articulated-tier/05: articulated recording (`proprio`, `run_vector`, `low_level_policy`). `tests/test_articulated_data.py`.
 
 - 2026-10-22, ticket hamsterball-v1/08: added. Found that minari 0.5.4's `DataCollector` imports `jax` and its Arrow storage imports `PIL`, neither in the `arrow` extra.
 - 2026-10-22, ticket hamsterball-v1/08: after merging ticket 06's views, the Collector stores `state` and `goal` from `info` instead of the env's observation, and writes `views`, `view_size`, and `obs_state` into `env_spec`.

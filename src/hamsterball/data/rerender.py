@@ -56,8 +56,8 @@ def rerender(dataset, views, view_size, out_id):
             rewards=ep.rewards, terminations=ep.terminations, truncations=ep.truncations, infos=ep.infos,
         )])
         out.storage.update_episode_metadata([meta], [int(ep.id)])
-    # the physics was recorded on the source's build and platform, not this one
-    out.storage.update_metadata({k: src[k] for k in provenance() if k in src})
+    # the physics was recorded on the source's build and platform, not this one; the torques came from the same policy
+    out.storage.update_metadata({k: src[k] for k in (*provenance(), "low_level_policy") if k in src})
     return minari.load_dataset(out_id)
 
 

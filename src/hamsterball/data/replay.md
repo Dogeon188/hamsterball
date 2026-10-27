@@ -29,6 +29,8 @@ Re-step replay (spec §12): a determinism check that recorded episodes reproduce
 
 - 2026-10-22, ticket hamsterball-v1/08: a mismatch raises `ReplayMismatch`, an `AssertionError`, rather than returning a report, so a test or script fails on it without extra checks.
 
+- 2026-10-27, ticket articulated-tier/05: no change for the articulated tier: replay steps the stored torques (the 8 joint dims plus any camera dims) and never reads `proprio` or `run_vector`, so it needs no policy code. `tests/test_articulated_data.py` replays a gait recording bit for bit.
+
 ## Tried and rejected
 
 ## History
