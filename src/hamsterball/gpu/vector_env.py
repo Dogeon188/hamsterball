@@ -79,7 +79,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         with wp.ScopedDevice(self.core.device):
             z = lambda shape, dt=float: wp.zeros(shape, dtype=dt)  # noqa: E731
             self.todo = wp.zeros((n, self.markers.max_targets), dtype=wp.bool)  # the targets left, padded with False
-            self.steps, self.phi, self.prev_pos = z(n, int), z(n), z(n, wp.vec3)
+            self.steps, self.phi, self.prev_pos, self.prev_t = z(n, int), z(n), z(n, wp.vec3), z(n)
             self.reward, self.event, self.time, self.shaping = z(n), z(n), z(n), z(n)
             self.terminated, self.truncated, self.success, self.done = (z(n, wp.bool) for _ in range(4))
             self.failure = z(n, int)
@@ -135,8 +135,8 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         bank = core.bank
         rows = [(t, bank.levels[i].tasks[t], bank.levels[i].hazards) for i, t in bank.entries]
         for task, block, hazards in rows:
-            if any("motion" in m or "attach" in m for m in [*hazards, *(m for _, m in E.targets(task, block))]):
-                raise NotImplementedError("moving and attached markers are not built on the GPU yet")
+            if any("attach" in m for m in [*hazards, *(m for _, m in E.targets(task, block))]):
+                raise NotImplementedError("markers attached to a body are not built on the GPU yet")
         self.levels = pool
         limit = lambda b: self.time_limit_s if self.time_limit_s is not None else b["time_limit_s"]  # noqa: E731
         # the epsilon keeps a whole number of env steps from rounding up to one more, as in HamsterballEnv
@@ -155,6 +155,10 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             for e, slots in enumerate(core.bank.row_slots):
                 geom[e, :len(slots)] = [core.bank.slot_ids[s] for s in slots]
             self.row_geom = f(geom.reshape(-1), int)
+            slot = np.zeros((len(rows), self.markers.stride), np.int32)  # and its slot, which the geom's authored pose is in
+            for e, slots in enumerate(core.bank.row_slots):
+                slot[e, :len(slots)] = slots
+            self.row_slot = f(slot.reshape(-1), int)
         return core
 
     def _seed_rng(self):
@@ -289,7 +293,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
     def _episode_args(self, mask):
         m = self.markers
         return [mask, self.core.data.qpos, m.centre, self.core.entry, m.stride, m.ntargets, m.mode, self.todo, self.steps,
-                self.prev_pos, self.phi]
+                self.prev_pos, self.phi, self.core.data.time, self.prev_t, m.motion]
 
     def _env_step(self):
         """What follows the physics: `_phase1`, then the same-step autoreset."""
@@ -306,7 +310,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
                                  self.entry_max_steps, int(self.truncate), int(self.shaped), self.shaping_gamma,
                                  self.todo, self.steps, self.prev_pos, self.phi,
                                  self.reward, self.terminated, self.truncated, self.success, self.failure, self.event,
-                                 self.time, self.shaping])
+                                 self.time, self.shaping, d.time, self.prev_t, m.motion])
         self._observe(self.all, self.success)
         wp.launch(E.either, n, [self.terminated, self.truncated, self.done])
         wp.launch(E.stash_final, n, [self.done, self.state, self.goal, self.final_state, self.final_goal])
@@ -333,10 +337,14 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self.renderer.render()
 
     def _look(self):
-        """The episode task's marker colours into each world's `geom_rgba`, from the targets left."""
-        m = self.markers
-        wp.launch(E.look_markers, self.num_envs, [self.todo, self.core.entry, m.stride, m.ntargets, m.mode, self.row_geom,
-                                                  m.role, m.base, self.core.model.geom_rgba])
+        """The episode task's marker colours into each world's `geom_rgba`, from the targets left, and each moving
+        marker's geom at its pose at the world's sim time (`_observe` does both on the CPU)."""
+        m, c = self.markers, self.core
+        wp.launch(E.look_markers, self.num_envs, [self.todo, c.entry, m.stride, m.ntargets, m.mode, self.row_geom,
+                                                  m.role, m.base, c.model.geom_rgba])
+        wp.launch(E.pose_movers, (self.num_envs, m.stride), [c.entry, m.stride, m.n, self.row_slot, self.row_geom, c.tables.pos,
+                                                             c.tables.quat, c.data.time, m.motion, c.model.geom_pos,
+                                                             c.model.geom_quat, c.data.geom_xpos, c.data.geom_xmat])
 
     def _observe(self, mask, success):
         """`state` and `goal` for the worlds in `mask`, after the derived quantities `mj_step` leaves behind are refreshed
@@ -352,4 +360,4 @@ class WarpVectorEnv(gym.vector.VectorEnv):
                                              c.obs_out["wall_contact"], self.markers.centre, self.todo, self.steps, c.entry,
                                              self.markers.stride, self.markers.ntargets, self.markers.mode,
                                              self.markers.survive, self.entry_max_steps, self.entry_kill_z, self.task_idx,
-                                             success, self.state, self.goal])
+                                             success, self.state, self.goal, d.time, self.markers.motion])

@@ -30,6 +30,8 @@ Needs the `gpu` extra (importing without it raises `ImportError` naming it).
 
 ## Known quirks
 
+- A moving marker's slot holds its authored pose in the tables; the env-step kernel `pose_movers` overwrites that slot's `geom_pos`, `geom_quat`, `geom_xpos` and `geom_xmat` each env step from the world's sim time ([env_step.md](env_step.md)), and the world's next reset reloads the authored pose. A capsule's table quaternion points its axis from the `fromto` start to its end, the compiler's the other way: the same capsule.
+
 - A pool whose levels have no entry for the env's tasks (a survive-only level in a reach_goal bank) still has a bank index, and `env.levels[i]` is it, but it is never drawn and a forced draw onto it is an error.
 - The caps grow with the largest level: one level with many boxes pads every world to that many.
 
