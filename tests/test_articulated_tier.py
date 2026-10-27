@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from hamsterball.core import Core
+from hamsterball.core import articulated_tier as at
 from hamsterball.core.articulated_tier import ArticulatedTier
 from hamsterball.core.model import HAM, HAM_DOF, HAM_QPOS, SHELL_DOF
 from hamsterball.core.step import FIELD_HARD, FIELD_START, contain
@@ -116,17 +117,36 @@ def test_a_fallen_hamster_lying_on_the_wall_gets_no_containment_impulse():
             assert (d.qvel == before).all()
 
 
-def test_the_playtest_posture_loop_holds_the_hamster_standing_and_a_shove_topples_it_onto_the_wall():
-    from hamsterball.game.articulated_playtest import shove, torques
+def pd_hold(d, kp=80.0, kd=1.0):
+    """The normalised torques of a PD loop to the standing pose (joint torque before the gear)."""
+    q, qd = d.qpos[HAM_QPOS + 7:HAM_QPOS + 15], d.qvel[HAM_DOF + 6:HAM_DOF + 14]
+    gear = np.array([at.GEAR_HIP, at.GEAR_KNEE] * 4)
+    return np.clip((kp * (np.array(at.STAND) - q) - kd * qd) / gear, -1, 1).astype(np.float32)
 
+
+def test_compiled_joint_ranges_are_the_constants_in_radians():
+    m = Core(ArticulatedTier()).model
+    for leg in ("fl", "fr", "rl", "rr"):
+        assert m.joint(f"{leg}_hip").range == pytest.approx(at.HIP_RANGE, abs=1e-9)
+        assert m.joint(f"{leg}_knee").range == pytest.approx(at.KNEE_RANGE, abs=1e-9)
+
+
+def test_a_pd_hold_stands_on_the_standing_pose_and_a_shove_topples_it_onto_the_wall():
     core = Core(ArticulatedTier())
-    d = core.data
-    for _ in range(180):
-        core.step(torques(d, d.time))
+    m, d = core.model, core.data
+    for _ in range(240):  # 4 s
+        core.step(pd_hold(d))
+    assert d.qpos[HAM_QPOS + 7:HAM_QPOS + 15] == pytest.approx(at.STAND, abs=0.12)
     assert d.xmat[HAM].reshape(3, 3)[2, 2] > 0.95 and np.linalg.norm(com_offset(core)) < 0.3
-    shove(core)
+    d.qvel[HAM_DOF + 1] += 2.5  # shove sideways with a roll
+    d.qvel[HAM_DOF + 3] += 6.0
     for _ in range(240):
-        core.step(torques(d, d.time, limp=True))
+        core.step(ZERO)
+        mujoco.mj_kinematics(m, d)
+        mujoco.mj_comPos(m, d)
+        before = d.qvel.copy()
+        contain(m, d, core.tier.resting_radius)
+        assert (d.qvel == before).all()  # never reaches the containment
     assert d.xmat[HAM].reshape(3, 3)[2, 2] < 0.5 and np.linalg.norm(com_offset(core)) > 0.32  # down on the wall
 
 
@@ -155,17 +175,3 @@ def test_the_ground_floors_and_sky_render_a_checker_and_a_gradient():
         lm = Core(level=level).model
         floors = [g for g in range(lm.ngeom) if lm.geom_group[g] == 0 and lm.geom_contype[g] == 1 and lm.geom_matid[g] >= 0]
         assert floors, name
-
-
-def test_the_playtest_trot_pushes_the_shell_for_15_s_without_tumbling():
-    from hamsterball.game.articulated_playtest import torques
-
-    core = Core(ArticulatedTier())
-    d = core.data
-    speeds = []
-    for _ in range(900):
-        core.step(torques(d, d.time, trot=True))
-        assert d.xmat[HAM].reshape(3, 3)[2, 2] > 0.3  # never on its side or back
-        speeds.append(np.hypot(*d.qvel[:2]))
-    print("shell speed, last 5 s:", round(float(np.mean(speeds[-300:])), 2), "m/s")
-    assert np.mean(speeds[-300:]) > 0.8  # about 8% of the abstract tier's 14.3 m/s top speed

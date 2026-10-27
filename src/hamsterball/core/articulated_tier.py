@@ -19,7 +19,7 @@ THIGH, SHIN, FOOT_R = 0.09, 0.09, 0.02
 MASS = {"torso": 1.38, "head": 0.30, "thigh": 0.10, "shin": 0.06, "foot": 0.02}  # sums to M_HAM over 4 legs
 HIP_RANGE, KNEE_RANGE = (-1.5, 1.5), (-1.8, 0.05)
 GEAR_HIP, GEAR_KNEE = 16.0, 12.8  # peak torques
-DAMPING, ARMATURE = 0.05, 0.002
+DAMPING, ARMATURE = 0.5, 0.01  # damping and armature keep a 60 Hz PD (kd up to 1) stable on 0.0003 kg m^2 legs
 STAND = (0.28, -0.87) * 4  # hip, knee per leg (hip swings the foot backward, knee bends the shin forward)
 # Resting radius: the subtree COM's largest distance from the shell centre, lying on the wall (see the doc).
 RESTING_RADIUS = 0.40
@@ -33,13 +33,16 @@ _HEAD = 'rgba="1 .88 .62 1"'
 _VISUAL = 'mass="0" contype="0" conaffinity="0" group="2"'  # marker geoms: no mass, no contact
 
 
+DEG = math.degrees  # MJCF's compiler angle is degrees (the levels rely on it); the ranges are written in degrees
+
+
 def _leg(name, sx, sy):
     return (
         f'<body name="{name}_thigh" pos="{sx * HIP_X} {sy * HIP_Y} {HIP_Z}">'
-        f'<joint name="{name}_hip" axis="0 1 0" range="{HIP_RANGE[0]} {HIP_RANGE[1]}" damping="{DAMPING}" armature="{ARMATURE}"/>'
+        f'<joint name="{name}_hip" axis="0 1 0" range="{DEG(HIP_RANGE[0])} {DEG(HIP_RANGE[1])}" damping="{DAMPING}" armature="{ARMATURE}"/>'
         f'<geom type="capsule" fromto="0 0 0 0 0 {-THIGH}" size="0.015" mass="{MASS["thigh"]}" {_FROZEN} {_LEG}/>'
         f'<body name="{name}_shin" pos="0 0 {-THIGH}">'
-        f'<joint name="{name}_knee" axis="0 1 0" range="{KNEE_RANGE[0]} {KNEE_RANGE[1]}" damping="{DAMPING}" armature="{ARMATURE}"/>'
+        f'<joint name="{name}_knee" axis="0 1 0" range="{DEG(KNEE_RANGE[0])} {DEG(KNEE_RANGE[1])}" damping="{DAMPING}" armature="{ARMATURE}"/>'
         f'<geom type="capsule" fromto="0 0 0 0 0 {-SHIN}" size="0.012" mass="{MASS["shin"]}" {_FROZEN} {_LEG}/>'
         f'<geom name="{name}_foot" type="sphere" pos="0 0 {-SHIN}" size="{FOOT_R}" mass="{MASS["foot"]}" {_GEOM} '
         f'margin="0.002" condim="3" rgba=".25 .15 .1 1"/>'
