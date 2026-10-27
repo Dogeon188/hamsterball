@@ -8,9 +8,9 @@ The env-step kernels: what `HamsterballEnv._advance` and `_observe` ([env.md](..
 
 Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 
-- `Markers(goal, hazards, device)`: the marker table on the device, row 0 the goal, then the hazards. Each row is a sphere, a capsule (a sphere is a capsule of zero length), or a box, in the form `core.marker` reads (the box's frame is built with the same `mju_euler2Quat` and `mju_quat2Mat` calls).
+- `Markers(entries, device)`: the marker tables on the device, one block of `stride` rows per bank entry (`entries` is a list of marker lists, goal first, then hazards; `n[e]` counts the rows, the rest of the block is padding), `stride` the longest list. Each row is a sphere, a capsule (a sphere is a capsule of zero length), or a box, in the form `core.marker` reads (the box's frame is built with the same `mju_euler2Quat` and `mju_quat2Mat` calls).
 - `FAILURE_CODES = ("none", "hazard", "kill_plane", "left_region")`: the table for `info["failure_reason"]`, an int32 per world, the index into this tuple. `left_region` is for survive and unused so far.
-- Kernels, named for the CPU function they port: `advance` (`_advance`), `observe` (`_observe`'s `state` and `goal`), `stash_final` and `reset_episode` (autoreset), `either` (an or of two masks).
+- Kernels, named for the CPU function they port: `advance` (`_advance`), `observe` (`_observe`'s `state` and `goal`), `stash_final` and `reset_episode` (autoreset), `set_spawn` (the spawn pose of the masked worlds from their entry's table), `either` (an or of two masks). `advance`, `observe` and `reset_episode` read each world's entry (the bank's (level, task) pair) for its marker rows, kill plane height and step limit.
 - Helpers: `seg_seg_dist`, `box_dist`, `seg_box_dist`, `touches` (`core.marker`'s `_seg_seg_dist`, `_seg_box_dist` and `crosses` with reach `R`).
 
 ## How it works
@@ -42,3 +42,4 @@ Needs the `gpu` extra. Nothing but [vector_env.py](vector_env.md) calls it.
 ## History
 
 - 2026-10-27, ticket gpu-backend/03: first version, reach_goal on one level. Parity with the CPU env on 8 recorded scenarios (sphere, capsule and box goals and hazards, a fall, a truncation): largest observation difference 5.7e-6, largest reward difference 4.7e-8.
+- 2026-10-27, ticket gpu-backend/05: the marker table and the kill plane and step limit became per-entry tables indexed by each world's entry, for a bank of levels; the kernels' logic is unchanged.

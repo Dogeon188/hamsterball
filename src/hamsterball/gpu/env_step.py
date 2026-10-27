@@ -22,14 +22,17 @@ _SHELL, _HAM, _SHELL_DOF = wp.constant(1), wp.constant(2), wp.constant(0)  # mod
 
 
 class Markers:
-    """The marker table on the device: row 0 the goal, then the hazards, each a sphere, capsule, or box in the
-    kernels' form (`a`, `b` the segment's ends, `rot` and `half` the box's frame and half-sizes)."""
+    """The marker tables on the device, one block of `stride` rows per bank entry: row 0 the goal, then the hazards, each
+    a sphere, capsule, or box in the kernels' form (`a`, `b` the segment's ends, `rot` and `half` the box's frame and
+    half-sizes). `entries` is one list of marker dicts per entry, goal first; `n[e]` counts entry e's rows, and the rest
+    of its block is padding."""
 
-    def __init__(self, goal, hazards, device):
-        rows = [goal, *hazards]
-        self.n = len(rows)
+    def __init__(self, entries, device):
+        self.stride = max(len(rows) for rows in entries)
+        self.n = wp.array([len(rows) for rows in entries], dtype=int, device=device)
         kind, a, b, rad, rot, half, centre = [], [], [], [], [], [], []
-        for m in rows:
+        pad = {"type": "sphere", "pos": [0, 0, 0], "radius": 0.0}
+        for m in (m for rows in entries for m in [*rows, *[pad] * (self.stride - len(rows))]):
             kind.append({"sphere": SPHERE, "capsule": CAPSULE, "box": BOX}[m["type"]])
             if m["type"] == "capsule":
                 a.append(m["fromto"][:3]), b.append(m["fromto"][3:])
@@ -135,9 +138,11 @@ def advance(
     rot: wp.array(dtype=wp.mat33),
     half: wp.array(dtype=wp.vec3),
     centre: wp.array(dtype=wp.vec3),
-    nmarkers: int,
-    kill_z: float,
-    max_steps: int,
+    entry: wp.array(dtype=int),
+    stride: int,
+    nmarkers: wp.array(dtype=int),
+    kill_z: wp.array(dtype=float),
+    max_steps: wp.array(dtype=int),
     truncate: int,
     shaped: int,
     gamma: float,
@@ -157,19 +162,21 @@ def advance(
     success over failure, the time penalty, the shaping term, truncation. Updates the episode's step count, previous
     shell position, and potential."""
     w = wp.tid()
+    e = entry[w]
+    row = e * stride
     steps[w] = steps[w] + 1
     pos = wp.vec3(qpos[w, 0], qpos[w, 1], qpos[w, 2])
     prev = prev_pos[w]
     event = float(0.0)
     fail = int(0)
-    won = touches(0, kind, a, b, rad, rot, half, prev, pos)
+    won = touches(row, kind, a, b, rad, rot, half, prev, pos)
     if won:
         event = 1.0
     else:
-        for i in range(1, nmarkers):
-            if fail == 0 and touches(i, kind, a, b, rad, rot, half, prev, pos):
+        for i in range(1, nmarkers[e]):
+            if fail == 0 and touches(row + i, kind, a, b, rad, rot, half, prev, pos):
                 fail = 1  # hazard
-        if fail == 0 and pos[2] < kill_z:
+        if fail == 0 and pos[2] < kill_z[e]:
             fail = 2  # kill_plane
         if fail != 0:
             event = -1.0
@@ -177,7 +184,7 @@ def advance(
     done = won or fail != 0
     new_phi = float(0.0)
     if not done:
-        new_phi = _PHI_SCALE * wp.length(centre[0] - pos)
+        new_phi = _PHI_SCALE * wp.length(centre[row] - pos)
     shaping = float(0.0)
     if shaped != 0:
         shaping = gamma * new_phi - phi[w]
@@ -185,7 +192,7 @@ def advance(
     success[w] = won
     failure[w] = fail
     terminated[w] = done
-    truncated[w] = truncate != 0 and not done and steps[w] >= max_steps
+    truncated[w] = truncate != 0 and not done and steps[w] >= max_steps[e]
     event_out[w] = event
     time_out[w] = _TIME_PENALTY
     shaping_out[w] = shaping
@@ -208,15 +215,17 @@ def observe(
     userdata: wp.array2d(dtype=float),
     wall_contact: wp.array(dtype=wp.bool),
     target: wp.array(dtype=wp.vec3),
-    kill_z: float,
-    task: int,
+    entry: wp.array(dtype=int),
+    stride: int,
+    kill_z: wp.array(dtype=float),
+    task: wp.array(dtype=int),
     success: wp.array(dtype=wp.bool),
     state: wp.array2d(dtype=float),
     goal: wp.array2d(dtype=float),
 ):
     """HamsterballEnv._observe's `state` and `goal` for the worlds in `mask`; needs fresh xpos, xmat, subtree_com and
-    subtree_linvel, which the caller refreshes. The goal's target is row 0 of `target`; its fraction remaining is
-    1, reach_goal's one target left."""
+    subtree_linvel, which the caller refreshes. The goal's target is the first row of the world's entry in `target`; its
+    fraction remaining is 1, reach_goal's one target left."""
     w = wp.tid()
     if not mask[w]:
         return
@@ -236,7 +245,7 @@ def observe(
         state[w, 11 + i] = ws[i]
         state[w, 14 + i] = rel[i]
         state[w, 17 + i] = relv[i]
-    state[w, 3] = c[2] - kill_z
+    state[w, 3] = c[2] - kill_z[entry[w]]
     state[w, 4] = sy
     state[w, 5] = cy
     state[w, 6] = wp.sin(userdata[w, _PITCH])
@@ -246,9 +255,9 @@ def observe(
         state[w, 20] = 1.0
     for i in range(10):
         goal[w, i] = 0.0
-    goal[w, 5 + task] = 1.0
+    goal[w, 5 + task[w]] = 1.0
     if not success[w]:
-        g = to_facing(target[0] - c, sy, cy)
+        g = to_facing(target[entry[w] * stride] - c, sy, cy)
         for i in range(3):
             goal[w, i] = g[i]
         goal[w, 3] = 1.0
@@ -278,6 +287,8 @@ def reset_episode(
     mask: wp.array(dtype=wp.bool),
     qpos: wp.array2d(dtype=float),
     centre: wp.array(dtype=wp.vec3),
+    entry: wp.array(dtype=int),
+    stride: int,
     steps: wp.array(dtype=int),
     prev_pos: wp.array(dtype=wp.vec3),
     phi: wp.array(dtype=float),
@@ -289,7 +300,17 @@ def reset_episode(
     pos = wp.vec3(qpos[w, 0], qpos[w, 1], qpos[w, 2])
     steps[w] = 0
     prev_pos[w] = pos
-    phi[w] = _PHI_SCALE * wp.length(centre[0] - pos)
+    phi[w] = _PHI_SCALE * wp.length(centre[entry[w] * stride] - pos)
+
+
+@wp.kernel
+def set_spawn(mask: wp.array(dtype=wp.bool), entry: wp.array(dtype=int), t_spawn: wp.array(dtype=wp.vec3),
+              t_yaw: wp.array(dtype=float), spawn: wp.array(dtype=wp.vec3), facing: wp.array(dtype=float)):
+    """The masked worlds' spawn pose from their entry's table."""
+    w = wp.tid()
+    if mask[w]:
+        spawn[w] = t_spawn[entry[w]]
+        facing[w] = t_yaw[entry[w]]
 
 
 @wp.kernel
