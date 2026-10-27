@@ -14,6 +14,7 @@ Needs the `gpu` extra; importing `hamsterball.gpu.batch_core` without it raises 
 - `states()`: every world's state in the padded layout, `(num_envs, padded state size)`; the CPU layout when no level in the bank has bodies. `cpu_states()`: a list of each world's state in the CPU layout of its level (vectors differ in length when the levels' bodies do).
 - `step(action, n=FRAME_SKIP, post=None)`: `action` is `(num_envs, adim)`, numpy or torch, with `turn` and `cam_pitch` last under the camera flag; one action per world, held over `n` physics steps. `post`, a callable that launches kernels, runs after the `n` steps inside the same graph (the vector env's env-step kernels); pass the same one every call, since the graph is kept per `n`. On CUDA the `n` steps are captured once per `n` as one graph and relaunched; on the CPU device they run eagerly.
 - `launch(key, fn)`: runs `fn`, a callable that launches kernels, as one graph kept under `key` on CUDA and eagerly on the CPU device. The vector env uses it for the autoreset when views make it run apart from the step graph ([vector_env.md](vector_env.md)).
+- `drag_k`: the shell's drag coefficient, `core.step.DRAG_K` unless set (a plain attribute read when a step launches; the feel test sets 0 to measure acceleration uncapped, before the first step, because a CUDA graph keeps the value it captured).
 - `obs()`: the tier's observation after the last step, `{"wall_contact": bool array}` for the abstract tier.
 - `set_states(states)`: `set_state` for every world: a `(num_envs, size)` array or a list of one vector per world, each in the CPU layout of the level that world is on (a wrong length raises `ValueError`).
 - `state(world)` and `set_state(world, s)`: the `mjSTATE_INTEGRATION` vector `Core.state()` returns for the world's level, at float32 precision, because Warp stores float32. A float32-exact vector round-trips exactly; any other comes back rounded to float32. `set_state` carries the solver warm start, as the CPU vector does, and the positions refresh at the next step.
@@ -28,6 +29,7 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 
 - One physics step from a shared state matches `Core`: `xfrc_applied` and the userdata slots at `rtol=1e-5, atol=1e-6`; qpos, qvel and time at the looser bound below. Cases: resting, running forward and sideways, inside the containment field, past the hard stop, airborne past the grace, facing wrapping at pi, pitch at both limits.
 - Three env steps (30 physics steps) from a running state stay within the same bounds.
+- Feel (`tests/test_warp_feel.py`, ticket 11): the spec §5 measurements on the batched core within 3% of the spec values and the containment sink rows within 3 mm of the CPU core's, measured in the same test; about 2 minutes on the Warp CPU device, 10 s on a GPU.
 - `uv run pytest tests/test_batch_core.py` (skipped with a stated reason when the extra is missing); `HAMSTERBALL_WARP_DEVICE=cuda:0` runs the same tests on a GPU. `BatchCore(graph=False)` runs CUDA eagerly, for the graph-versus-eager test.
 
 ## Known quirks
@@ -39,6 +41,30 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 - `contain` calls no forward pass past the hard stop. The CPU calls `mj_forward` there; the only thing the rest of the step reads from it is fresh positions (`xpos`, `xipos`, `xmat`, `subtree_com`), and `mj_step` recomputes everything else. So the kernel refreshes positions again for every world after `contain`, which gives a world that did not move the same values back. It is two cheap kernels, not a per-world masked forward.
 - **CUDA run** (2026-10-27, Warp 1.18.0, CUDA 13.4, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest tests/test_batch_core.py` passed, 16 of 16. The one-physics-step deviations from `Core` matched the CPU device's: qpos 1.6e-7 and qvel 7.0e-7 at most, `xfrc_applied` 1.1e-5 on forces of about 20 N, userdata 1.8e-7. The captured graph (three env steps of 10 physics steps) matched eager launches with a max difference of 0.0 in the state vector. Not bitwise against the CPU, as expected.
 - `float32` time: `data.time` is float32 on Warp, so very long episodes lose resolution (at 1000 s a step is about 3 ulps). The vector env's episodes are far shorter.
+- **Feel on the batched core** (2026-10-27, ticket gpu-backend/11; `tests/test_warp_feel.py`, the runs of `tests/test_feel.py` stepped one physics step at a time along +x, worlds side by side; Warp CPU device, and an NVIDIA GeForce RTX 2080 Ti, sm_75, Warp 1.18.0, on a GPU cluster). Spec §5 values against the measured:
+
+  | measurement | spec | Warp CPU device | RTX 2080 Ti |
+  |---|---|---|---|
+  | acceleration 1 to 3 s, uncapped (m/s^2) | 4.06 | 4.090 (+0.7%) | 4.083 (+0.6%) |
+  | speed at 3 s, half effort (m/s) | 5.6 | 5.598 (0.0%) | 5.576 (-0.4%) |
+  | speed at 3 s, full effort (m/s) | 9.6 | 9.804 (+2.1%) | 9.820 (+2.3%) |
+  | mean lean, 2 to 3 s (deg) | 54 | 53.94 (-0.1%) | 53.94 (-0.1%) |
+  | top speed at 20 s (m/s) | 14.3 | 14.25 (-0.3%) | 14.30 (0.0%) |
+  | coast loss (m/s^2) | 2.49 | 2.513 (+0.9%) | 2.503 (+0.5%) |
+  | 20 degree climb in 3 s (m) | 5.1 | 5.168 (+1.3%) | 5.168 (+1.3%) |
+
+  The containment sink after a throw at 0, 4, 8 and 12 m/s (worst of three directions, mm): 13.8, 16.5, 19.8, 22.8 on the CPU device and the same on CUDA, against 14, 17, 20, 23 on `Core` (within 1.2 mm; the test bound is 3 mm). Speed at 3 s on full effort is the row nearest its 3% bound; the CPU test holds every row to 2% and measured it within 1.3% on an M2.
+- **Hfield contact-cap drift** (2026-10-27, ticket gpu-backend/11; `tests/measure_hfield_drift.py`, an NVIDIA GeForce RTX 2080 Ti on a GPU cluster, Warp 1.18.0, 200 drops per level, the shell dropped 0.6 m above the terrain's highest point at random spots inside 90% of the hfield and left still for 3 s, rest position on `Core` against the batched core). CUDA is not deterministic, so counts move by a few between runs (two runs: 16 and 13 spots over 1 cm at difficulty 0.3).
+
+  | level | median dz | 90th percentile dz | spots with dz over 1 cm | spots with xy over 1 cm | dz over 1 cm where xy matched |
+  |---|---|---|---|---|---|
+  | `hill` (bundled) | 0.00 mm | 0.01 mm | 0 | 38 | 0 of 162 |
+  | rolling bench terrain (120 m, 0.6 m high) | 0.04 mm | 0.68 mm | 0 | 45 | 0 of 155 |
+  | generated reach_goal, difficulty 0.3 | 0.13 mm | 4.4 to 5.1 mm | 13 to 16 | 141 | 0 of 59 |
+  | generated, difficulty 0.6 | 0.03 mm | 21 to 25 mm | 26 to 27 | 187 | 0 of 13 |
+  | generated, difficulty 0.9 | 0.08 mm | 100 to 105 mm | 40 to 42 | 197 | 0 of 3 |
+
+  Reading: on the one bundled hfield level and the smooth bench terrain the cap does nothing visible: rest heights agree to under 4 mm at every spot. On rough generated terrain most balls have not come to rest after 3 s (they roll down the slope), and a ball that rolls to a different place ends at a different height: those are the spots over 1 cm (up to 17 m, a ball that rolled off a different edge). Where both backends left the ball within 1 cm of each other in xy, no spot differed in height by over 1 cm. So the contact cap shows as trajectories that part on rough slopes, as issue 20 found (32 of 200 over 1 cm on Warp), not as a rest-height offset. Rerun: `uv run --extra gpu python tests/measure_hfield_drift.py --device cuda:0`.
 
 ## Decisions
 
@@ -51,6 +77,7 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 - 2026-10-27, ticket gpu-backend/02: state goes through `mjw.get_state`/`set_state` (the official layout), not a hand-built vector.
 - 2026-10-27, ticket gpu-backend/03: the vector env's env-step kernels join the physics graph through `step(post=)`, and its autoreset uses `reset_masked`, a device-array form of `reset`, so no host sync sits between a finished world and its reset.
 - 2026-10-27, ticket gpu-backend/05: the model is padded from a `Bank` of `Level`s (the older MJCF-sections form of `levels` is gone), and `reset_masked` loads each world's level slots before the physics resets, so a level draw inside the graph needs no host step.
+- 2026-10-27, ticket gpu-backend/11: the drag coefficient is an argument of the `drag` kernel (the core's `drag_k`), not a baked-in constant, so the feel test can measure acceleration uncapped as the CPU test does by patching `DRAG_K`; the value is read at launch, so it must be set before the first step on CUDA.
 
 ## Tried and rejected
 
@@ -66,3 +93,4 @@ The padded model is compiled once (`core.model.build` on `Bank.mjcf()`, so the i
 - 2026-10-27, ticket gpu-backend/03: added `post`, `reset_masked` and `set_states`; a nonexistent CUDA device now raises `RuntimeError` as documented (Warp raises `ValueError`, which the first version let through).
 - 2026-10-27, ticket gpu-backend/05: the bank: padded slots, per-world level loading, `states()`, `keep` and `tasks`.
 - 2026-10-27, ticket gpu-backend/10: added `launch`.
+- 2026-10-27, ticket gpu-backend/11: the §5 feel test on the batched core, the hfield drift measurement, and the CUDA run (159 `gpu` tests passed on an NVIDIA GeForce RTX 2080 Ti; see Known quirks).

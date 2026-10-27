@@ -51,6 +51,16 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
   | 16 | 44.1 ms | 49.3 ms | 30.3 ms | 123.5 ms | 86 ms | 216 ms |
 
   On an NVIDIA GeForce RTX 2080 Ti on a GPU cluster (not asked for, measured for context): one render call for all worlds takes 0.56 ms at N=16 and 64 (the launch floor) and 0.7 to 1.0 ms at 256 for one view, and 3.2, 3.5 and 2.5 ms for `chase`, `follow` and `first_person` at N=1024 (about 3 microseconds per world and view); all three views cost 8.8 ms at N=1024. The whole env step (captured physics graph plus the render) takes 4.6 ms at N=16 (3,500 env steps/s) without views and 5.3 ms with all three (3,000/s); at N=1024, 7.9 ms (130,000/s) without and 15.1 ms (68,000/s) with. The render runs outside the captured graph, so a step with views at small batches is bound by kernel launches, not by drawing.
+- **Throughput** (2026-10-27, ticket gpu-backend/11, an NVIDIA GeForce RTX 2080 Ti, 11 GiB, on a GPU cluster, Warp 1.18.0; `hamsterball-bench --backend warp`, one bank level, `reach_goal`, random actions, env steps/s summed over the worlds; see [../bench.md](../bench.md)):
+
+| config | level | 16 envs | 256 envs | 1024 envs | 4096 envs |
+|---|---|---|---|---|---|
+| state | flat | 4,008 | 36,346 | 111,174 | 213,816 |
+| state | hfield | 2,877 | 27,529 | 65,894 | 102,096 |
+| pixels | flat | 2,753 | 27,790 | 64,065 | 93,014 |
+| pixels | hfield | 2,349 | 18,416 | 31,167 | 36,509 |
+
+  Sizing: below about 256 worlds a step is bound by kernel launches (about 4 ms per env step, so 4,000 steps/s at 16 worlds), above 1,024 the physics fills the device and the rate grows about 2x for 4x the worlds on flat ground and 1.5x on hfield. State-only needs about 1,024 worlds for 100,000 env steps/s on flat ground and 4,096 on an hfield level. Views cut the rate to 36 to 58% of the state-only rate at 1,024 and 4,096 worlds, more as the terrain gets heavier (the ray tracer draws the hfield mesh in every view). Memory is about 61 KB per world plus the bank's hfields (see [batch_core.md](batch_core.md)).
 
 ## Decisions
 
@@ -85,3 +95,4 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - 2026-10-27, ticket gpu-backend/10: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 90 of 90 `gpu` tests passed, and the render costs above measured.
 - 2026-10-27, ticket gpu-backend/07: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 117 of 117 `gpu` tests passed (see bodies.md); the bodies were driven inside the captured graph.
 - 2026-10-27, ticket gpu-backend/08: collapsing tiles (see tiles.md); the unsupported-kwarg test no longer lists a tile level.
+- 2026-10-27, ticket gpu-backend/11: throughput measured at 16 to 4,096 worlds on an RTX 2080 Ti (see Known quirks); the full `gpu` suite passed on it, 159 of 159.

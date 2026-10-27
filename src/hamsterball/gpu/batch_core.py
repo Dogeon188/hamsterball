@@ -24,7 +24,7 @@ from .tiles import TileTables
 # core.step's constants, as kernel constants
 _SHELL, _HAM, _SHELL_DOF, _HAM_DOF, _SHELL_QPOS, _HAM_QPOS = (wp.constant(x) for x in (SHELL, HAM, SHELL_DOF, HAM_DOF, SHELL_QPOS, HAM_QPOS))
 _FACING, _PITCH = wp.constant(FACING), wp.constant(PITCH)
-_DRAG_K, _FIELD_START, _FIELD_HARD, _MU = (wp.constant(x) for x in (DRAG_K, FIELD_START, FIELD_HARD, MU))
+_FIELD_START, _FIELD_HARD, _MU = (wp.constant(x) for x in (FIELD_START, FIELD_HARD, MU))
 _M_HAM, _M_SHELL = wp.constant(M_HAM), wp.constant(M_SHELL)
 _PITCH_MIN, _PITCH_MAX, _PITCH_DEFAULT = (wp.constant(x) for x in (PITCH_MIN, PITCH_MAX, PITCH_DEFAULT))
 _TURN_STEP, _PITCH_STEP, _TAU, _PI = (wp.constant(x) for x in (TURN_STEP, PITCH_STEP, TAU, TAU / 2))
@@ -67,11 +67,11 @@ def camera_pitch(action: wp.array2d(dtype=float), pitch_col: int, n: int, userda
 
 
 @wp.kernel
-def drag(qvel: wp.array2d(dtype=float), xfrc_applied: wp.array2d(dtype=wp.spatial_vector)):
+def drag(k: float, qvel: wp.array2d(dtype=float), xfrc_applied: wp.array2d(dtype=wp.spatial_vector)):
     """-k |v| v on the shell, grounded or not."""
     w = wp.tid()
     v = wp.vec3(qvel[w, _SHELL_DOF], qvel[w, _SHELL_DOF + 1], qvel[w, _SHELL_DOF + 2])
-    xfrc_applied[w, _SHELL] = xfrc_applied[w, _SHELL] + wp.spatial_vector(-_DRAG_K * wp.length(v) * v, wp.vec3())
+    xfrc_applied[w, _SHELL] = xfrc_applied[w, _SHELL] + wp.spatial_vector(-k * wp.length(v) * v, wp.vec3())
 
 
 @wp.kernel
@@ -140,6 +140,7 @@ class BatchCore:
         except ValueError as e:  # Warp's error for a device it doesn't have
             raise RuntimeError(f"no Warp device {device!r}: {e}") from e
         self.tier, self.num_envs, self.camera_action = tier, num_envs, camera_action
+        self.drag_k = DRAG_K  # N s^2/m^2; the feel test sets 0 to measure acceleration uncapped (before the first step: a graph keeps it)
         self.graph = graph and self.device.is_cuda
         valid = np.flatnonzero(self.bank.first_entry >= 0)
         if not len(valid):
@@ -220,7 +221,7 @@ class BatchCore:
         self._refresh()
         wp.launch(turn_facing, nw, [self.action, turn_col, n, d.userdata])
         wp.launch(camera_pitch, nw, [self.action, turn_col + 1 if turn_col >= 0 else -1, n, d.userdata])
-        wp.launch(drag, nw, [d.qvel, d.xfrc_applied])
+        wp.launch(drag, nw, [self.drag_k, d.qvel, d.xfrc_applied])
         wp.launch(contain, nw, [self.tier.resting_radius, d.xpos, d.subtree_com, d.qpos, d.qvel])
         # contain's hard stop moved qpos: refresh again where the CPU calls mj_forward. mj_step recomputes everything
         # else, and a world that didn't move gets the same positions back

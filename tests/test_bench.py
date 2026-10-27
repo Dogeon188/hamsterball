@@ -19,3 +19,14 @@ def test_the_bench_prints_every_configuration_and_the_gate():
     gate = re.search(r"^gate: .*: [\d,]+ env steps/s, (PASS|FAIL)$", result.output, re.M)
     assert gate, result.output
     assert result.exit_code == (0 if gate[1] == "PASS" else 1)
+
+
+@pytest.mark.gpu
+def test_the_warp_bench_prints_every_configuration_and_no_gate():
+    result = CliRunner().invoke(main, ["--backend", "warp", "--device", "cpu", "--secs", "0.3", "--reps", "1", "--num-envs", "2", "--num-envs", "3"])
+    assert result.exit_code == 0, result.output
+    rows = re.findall(r"^(state|pixels)\s+(flat|hfield)\s+(\d+)\s+[\d,]+$", result.output, re.M)
+    assert {(c, lv, int(n)) for c, lv, n in rows} == {
+        (c, lv, n) for c in ("state", "pixels") for lv in ("flat", "hfield") for n in (2, 3)
+    }
+    assert not re.search(r"PASS|FAIL", result.output)  # it gates nothing
