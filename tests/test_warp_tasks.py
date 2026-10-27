@@ -217,11 +217,3 @@ def test_each_bundled_static_task_level_runs_through_make_vec():
         assert (info["task_index"].cpu().numpy() == TASKS.index(task)).all()
         assert (obs["goal"][:, 5 + TASKS.index(task)] == 1).all()
         venv.step(np.zeros((2, 2), np.float32))
-
-
-@pytest.mark.parametrize("lv, task", [
-    (bundled("survive_collapse"), "survive"),  # tiles
-])
-def test_levels_with_seesaws_or_tiles_raise(lv, task):
-    with pytest.raises(NotImplementedError):
-        warp_env(lv, task, 1)

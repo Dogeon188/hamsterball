@@ -19,6 +19,7 @@ from .abstract_tier import WarpAbstractTier
 from .bank import BATCHED, TASK_NAMES, Bank, DeviceTables, body_kind
 from .bodies import BodyTables
 from .seesaws import SEESAW_FIELDS, SeesawTables
+from .tiles import TileTables
 
 # core.step's constants, as kernel constants
 _SHELL, _HAM, _SHELL_DOF, _HAM_DOF, _SHELL_QPOS, _HAM_QPOS = (wp.constant(x) for x in (SHELL, HAM, SHELL_DOF, HAM_DOF, SHELL_QPOS, HAM_QPOS))
@@ -128,7 +129,7 @@ class BatchCore:
                  tasks=TASK_NAMES, keep=()):
         """`levels`: the bank, a list of `Level`s, padded into one model (see bank.py); `tasks` limits the (level, task)
         entries a world can be on, and `keep` appends entries a world still needs (see `bank.Bank`). `device`: "cpu" or
-        "cuda:N". Collapsing tiles raise `NotImplementedError`."""
+        "cuda:N"."""
         tier = tier or AbstractTier()
         if type(tier) not in TIERS:
             raise NotImplementedError(f"{type(tier).__name__} has no batched drive/obs yet")
@@ -144,7 +145,7 @@ class BatchCore:
         if not len(valid):
             raise ValueError("no level in the bank has an entry for the tasks")
         self.level_index = np.full(num_envs, valid[0], np.int32)
-        self.cpu_model = build(tier, self.bank.mjcf(), GAME_SIZE, self.bank.body_mjcf())
+        self.cpu_model = build(tier, self.bank.mjcf(), GAME_SIZE, self.bank.body_mjcf() + self.bank.tile_mjcf(), self.bank.ntiles)
         self.adim = tier.action_space().shape[0] + 2 * camera_action
         with wp.ScopedDevice(self.device):
             seesaws = self.bank.nhinge + self.bank.nball > 0
@@ -155,6 +156,7 @@ class BatchCore:
             self.tables = DeviceTables(self.bank, self.cpu_model, self.device)
             self.bodies = BodyTables(self.bank, self.cpu_model, self.device)
             self.seesaws = SeesawTables(self.bank, self.cpu_model, self.device)
+            self.tiles = TileTables(self.bank, self.cpu_model, tier, self.device)
             self.on = wp.ones(num_envs, dtype=wp.bool)
             self.entry = wp.zeros(num_envs, dtype=int)  # each world's (level, task) entry in the bank's tables
             self.warp_tier = TIERS[type(tier)](tier, self.device)
@@ -190,7 +192,9 @@ class BatchCore:
         can run inside a captured graph."""
         mjw.reset_data(self.model, self.data, mask)
         self.load_levels(mask)
+        self.tiles.init(mask, self.entry, self.data.userdata)
         self.bodies.drive(mask, self.entry, self.data.time, self.data.qpos, self.data.qvel)
+        self.tiles.drive(mask, self.entry, self.data.time, self.data.userdata, self.data.qpos, self.data.qvel)
         wp.launch(_shell_spawn, self.num_envs, [mask, spawns, facings, self.data.qpos, self.data.userdata])
         self.warp_tier.reset(self.num_envs, mask, spawns, self.data)
         self._refresh()
@@ -212,6 +216,7 @@ class BatchCore:
         turn_col = self.adim - 2 if self.camera_action else -1
         d.xfrc_applied.zero_()
         self.bodies.drive(self.on, self.entry, d.time, d.qpos, d.qvel)
+        self.tiles.drive(self.on, self.entry, d.time, d.userdata, d.qpos, d.qvel)
         self._refresh()
         wp.launch(turn_facing, nw, [self.action, turn_col, n, d.userdata])
         wp.launch(camera_pitch, nw, [self.action, turn_col + 1 if turn_col >= 0 else -1, n, d.userdata])
@@ -222,6 +227,7 @@ class BatchCore:
         self._refresh()
         self.warp_tier.drive(nw, self.action, d)
         mjw.step(m, d)
+        self.tiles.touch(m, d, self.entry)
 
     def step(self, action, n=FRAME_SKIP, post=None):
         """Hold one action per world, shape (num_envs, action dim), over n physics steps: one graph launch on CUDA.
@@ -264,8 +270,9 @@ class BatchCore:
     def _state_layouts(self):
         """The padded state vector's sizes per segment (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap,
         userdata), the address of each body slot in the segments that hold bodies, and the template of a world with none
-        of its slots in use. The slots are the last bodies, joints and dofs of the model, in `bank.body_names` order; a
-        level's own bodies take the slots `bank.slot_of` gives (see `_layout`)."""
+        of its slots in use. The body slots, then the tile slots, are the last bodies, joints and dofs of the model, in
+        `bank.body_names` order; a level's own bodies take the slots `bank.slot_of` gives, and its tiles the first tile
+        slots (see `_layout`). The tile slots are also the last userdata slots."""
         m = self.cpu_model
         sizes = [1, m.nq, m.nv, m.nv, m.nv, 6 * m.nbody, 3 * m.nmocap, 4 * m.nmocap, m.nuserdata]
         assert sum(sizes) == self.nstate, (sizes, self.nstate)
@@ -279,24 +286,31 @@ class BatchCore:
     def _layout(self, level):
         """The indices into the padded state vector that make up the CPU core-state vector of `level`: each segment's
         prefix (the shell, the hamster, the views), then the level's bodies in its own order, each at its slot's address.
-        Cached per sequence of body kinds."""
+        then its collapsing tiles, each at its slot's address, and the first tile slots of userdata. Cached per sequence of
+        body kinds and tile count."""
         sizes, slots, _ = self._layouts
+        tiles = self.tiles.slots
+        nt = len(level.collapse["tiles"]) if level.collapse else 0
         kinds = tuple(body_kind(b) for b in level.bodies)
-        if kinds not in self._layout_cache:
+        if (kinds, nt) not in self._layout_cache:
             m = self.cpu_model
-            nq0, nv0, nb0 = (slots[0][0], slots[0][1], slots[0][2]) if slots else (m.nq, m.nv, m.nbody)
+            first = (slots + tiles)[0] if slots or tiles else (m.nq, m.nv, m.nbody)
+            nq0, nv0, nb0 = first
             size = {"b": (7, 6), "h": (1, 1), "n": (4, 3)}
             off = np.cumsum([0] + sizes)
             qa, da, ba = [np.arange(nq0)], [np.arange(nv0)], [np.arange(nb0)]
             for si, k in zip(self.bank.slot_of(level), kinds):
                 nq, nv = size[k]
                 qa.append(slots[si][0] + np.arange(nq)), da.append(slots[si][1] + np.arange(nv)), ba.append([slots[si][2]])
+            for q, d, b in tiles[:nt]:
+                qa.append(q + np.arange(7)), da.append(d + np.arange(6)), ba.append([b])
             qa, da, ba = (np.concatenate(x).astype(int) for x in (qa, da, ba))
             xf = (6 * ba[:, None] + np.arange(6)).ravel()
             parts = [np.arange(1), off[1] + qa, off[2] + da, off[3] + da, off[4] + da, off[5] + xf]
-            parts += [np.arange(off[j], off[j + 1]) for j in (6, 7, 8)]
-            self._layout_cache[kinds] = np.concatenate(parts)
-        return self._layout_cache[kinds]
+            parts += [np.arange(off[j], off[j + 1]) for j in (6, 7)]
+            parts.append(off[8] + np.arange(m.nuserdata - len(tiles) + nt))  # the tier's slots, then the level's tiles'
+            self._layout_cache[kinds, nt] = np.concatenate(parts)
+        return self._layout_cache[kinds, nt]
 
     def _level_of(self, world_or_entry, entry=False):
         """The `Level` a world (or an entry) is on."""
