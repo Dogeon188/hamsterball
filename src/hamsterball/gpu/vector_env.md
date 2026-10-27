@@ -61,3 +61,4 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - 2026-10-27, ticket gpu-backend/05: level bank, sampling, reset options, `set_levels`, generator pools.
 - 2026-10-27, ticket gpu-backend/06: moving markers (see env_step.md for the parity measurement).
 - 2026-10-27, ticket gpu-backend/05: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 79 of 79 `gpu` tests passed (see batch_core.md); the draw, the level load and the autoreset ran inside the captured graph.
+- 2026-10-27, ticket gpu-backend/06: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 90 of 90 `gpu` tests passed (see env_step.md); the marker poses were written inside the captured graph.
