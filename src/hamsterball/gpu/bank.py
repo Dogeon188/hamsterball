@@ -7,16 +7,18 @@ except ImportError as e:  # a plain install has no warp
     raise ImportError("the GPU backend needs the `gpu` extra: pip install 'hamsterball[gpu]'") from e
 
 import base64
+import itertools
 import math
 
 import mujoco
 import numpy as np
 
-from ..core.level import CONTACT, HAZARD_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS
+from ..core.level import CONTACT, HAZARD_RGBA, MARKER_LISTS, MARKER_RGBA, TASK_MARKERS, _free_mjcf, _sections
 
 TASK_NAMES = tuple(TASK_MARKERS)  # the goal one-hot's order, as env.TASKS
 STATIC_TYPES = ("plane", "hfield", "box", "sphere", "capsule")  # a level's solids, in slot order
 MARKER_TYPES = ("sphere", "capsule", "box")
+BODY_TYPES = ("box", "sphere", "capsule")  # a body's geoms (level.BODY_GEOMS), in slot order
 GEOM_RGBA = (0.45, 0.5, 0.45, 1.0)  # a level solid's colour when it names none (level._geom_mjcf)
 PARK_DEPTH = 1000.0  # m below the kill plane an unused slot sits
 PARK_MARGIN = -1000.0  # an unused slot's geom_margin: nothing touches it (Warp shares contype across worlds)
@@ -25,12 +27,13 @@ BATCHED = ("geom_pos", "geom_quat", "geom_size", "geom_rgba", "geom_margin", "ge
 
 def marker_rows(level, task):
     """The markers a world on (level, task) draws, as (marker, rgba): the task's markers in task order, then the level's
-    hazards."""
+    hazards. A marker attached to a body is a row too: it is authored in the body's frame, and the env-step kernels
+    pose its slot on the body each step."""
     block = level.tasks[task]
     rows = []
     for k in TASK_MARKERS[task]:
         rows += [(m, MARKER_RGBA[k]) for m in (block[k] if k in MARKER_LISTS else [block[k]])]
-    return [r for r in rows if "attach" not in r[0]] + [(h, HAZARD_RGBA) for h in level.hazards]
+    return rows + [(h, HAZARD_RGBA) for h in level.hazards]
 
 
 def _quat_mat(euler_deg):
@@ -54,8 +57,10 @@ class Bank:
         self.n_pool = len(levels)
         pairs = [(lv, None) for lv in levels] + [(lv, t) for lv, t in keep]
         for lv, _ in pairs:
-            if lv.bodies or lv.collapse:
-                raise NotImplementedError("levels with bodies, seesaws or collapsing tiles come with later tickets")
+            if any("joint" in b for b in lv.bodies):
+                raise NotImplementedError("seesaws come with a later ticket")
+            if lv.collapse:
+                raise NotImplementedError("collapsing tiles come with a later ticket")
             if any(CONTACT.keys() & g.keys() for g in lv.geoms):
                 raise NotImplementedError("a geom with friction, solref or solimp is not batched yet")
         self.levels = [lv for lv, _ in pairs]
@@ -86,8 +91,17 @@ class Bank:
                 m[mk["type"]] += 1
             self.static_counts = {k: max(self.static_counts[k], n[k]) for k in STATIC_TYPES}
             self.marker_counts = {k: max(self.marker_counts[k], m[k]) for k in MARKER_TYPES}
+        # the body pool: as many free-joint slots as the most bodies a level has, each with its geom slots per type at the
+        # most any entry's body in that slot holds
+        self.nbodies = max([len(self.levels[i].bodies) for i, _ in self.entries], default=0)
+        self.body_counts = [{k: 0 for k in BODY_TYPES} for _ in range(self.nbodies)]
+        for i, _ in self.entries:
+            for slot, b in zip(self.body_counts, self.levels[i].bodies):
+                for k in BODY_TYPES:
+                    slot[k] = max(slot[k], sum(g["type"] == k for g in b["geoms"]))
         self.slots = [("s", k, j) for k in STATIC_TYPES for j in range(self.static_counts[k])] + [
-            ("m", k, j) for k in MARKER_TYPES for j in range(self.marker_counts[k])]
+            ("m", k, j) for k in MARKER_TYPES for j in range(self.marker_counts[k])] + [
+            (f"b{b}", k, j) for b in range(self.nbodies) for k in BODY_TYPES for j in range(self.body_counts[b][k])]
 
     def name(self, slot):
         return "/".join(map(str, slot))
@@ -102,12 +116,28 @@ class Bank:
         out = []
         for slot in self.slots:
             kind, typ, _ = slot
-            if kind == "s":  # contact on, like a level solid (level._geom_mjcf)
+            if kind != "m":  # contact on, like a level solid (level._geom_mjcf)
+                if kind[0] == "b":
+                    continue  # a body's geoms are in its body (body_mjcf)
                 shape = 'hfield="hfield0"' if typ == "hfield" else 'size="1 1 1"'
                 out.append(f'<geom name="{self.name(slot)}" type="{typ}" {shape} contype="1" conaffinity="1" group="0"/>')
             else:  # contact off, like a marker (level._marker_mjcf)
                 out.append(f'<geom name="{self.name(slot)}" type="{typ}" size="1 1 1" contype="0" conaffinity="0" group="0"/>')
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
+
+    def body_mjcf(self):
+        """MJCF sections for `core.model.build`'s `bodies`: the body slots `body<k>`, each a kinematic body as the CPU
+        compiles one (`level._free_mjcf`) at the origin holding its geom slots, and a contact exclude from the world and
+        from each other. "" for a bank without bodies."""
+        if not self.nbodies:
+            return ""
+        names = [f"body{b}" for b in range(self.nbodies)]
+        out = []
+        for b, n in enumerate(names):
+            geoms = "".join(f'<geom name="b{b}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
+                            for typ in BODY_TYPES for j in range(self.body_counts[b][typ]))
+            out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
+        return _sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
 
     def tables(self, mjm):
         """The slot tables as numpy, one row per entry: what each world's model fields take for that (level, task).
@@ -123,6 +153,7 @@ class Bank:
         for e, (i, task) in enumerate(self.entries):
             lv = self.levels[i]
             solids = [("s", g["type"], _geom_row(g, self.hfields)) for g in lv.geoms]
+            solids += [(f"b{b}", g["type"], _geom_row(g, self.hfields)) for b, body in enumerate(lv.bodies) for g in body["geoms"]]
             marks = [("m", m["type"], _marker_row(m, rgba)) for m, rgba in marker_rows(lv, task)]
             used, filled = {}, {}
             self.row_slots.append([])
@@ -140,8 +171,9 @@ class Bank:
                     mat = np.empty(9)
                     mujoco.mju_quat2Mat(mat, quat)
                     margin = 0.0
-                else:  # parked: far under the kill plane, no contacts, invisible; its compiled size and bounds stay
-                    pos, quat, mat, margin = (0.0, 0.0, park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
+                else:  # parked: far under the kill plane (a body's geom, far under its body), no contacts, invisible; its
+                    # compiled size and bounds stay
+                    pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if slot[0][0] == "b" else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
                     size, aabb, rbound = mjm.geom_size[g], mjm.geom_aabb[g].reshape(2, 3), mjm.geom_rbound[g]
                     rgba, dataid = (*mjm.geom_rgba[g][:3], 0.0), int(mjm.geom_dataid[g])
                 if slot[1] == "plane":  # the plane's bounds are infinite, so they are the compiled ones

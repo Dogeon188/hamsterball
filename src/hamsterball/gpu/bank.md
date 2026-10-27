@@ -8,14 +8,16 @@ The **level bank** of the GPU-batched backend: a pool of levels compiled into on
 
 Needs the `gpu` extra (importing without it raises `ImportError` naming it).
 
-- `Bank(levels, tasks=TASK_NAMES, keep=())` (host): `levels` is the pool, indexed by bank index; `tasks` limits the entries to those tasks; `keep` is a list of `(Level, task)` pairs appended after the pool that a running world still needs (they can't be drawn). An **entry** is one (level, task) pair; `entries`, `entry_of[bank index, task index]` (-1 for none), `first_entry`, `keep_entry`, and `n_pool` describe them; after `tables()`, `slot_ids` (each slot's geom id) and `row_slots` (per entry, the slot of each marker row) say where the env-step kernels write marker colours. A pool with bodies, seesaws or collapsing tiles raises `NotImplementedError` (tickets 07 to 09), as does a geom with `friction`, `solref` or `solimp` (see Decisions).
-- `Bank.mjcf()`: the padded MJCF sections for `core.model.build`. `Bank.tables(model)`: the slot tables as numpy.
+- `Bank(levels, tasks=TASK_NAMES, keep=())` (host): `levels` is the pool, indexed by bank index; `tasks` limits the entries to those tasks; `keep` is a list of `(Level, task)` pairs appended after the pool that a running world still needs (they can't be drawn). An **entry** is one (level, task) pair; `entries`, `entry_of[bank index, task index]` (-1 for none), `first_entry`, `keep_entry`, and `n_pool` describe them; after `tables()`, `slot_ids` (each slot's geom id) and `row_slots` (per entry, the slot of each marker row) say where the env-step kernels write marker colours. A pool with seesaws or collapsing tiles raises `NotImplementedError` (tickets 08 and 09), as does a geom with `friction`, `solref` or `solimp` (see Decisions). Kinematic bodies are built (ticket 07): `nbodies` and `body_counts` are the body pool's size.
+- `Bank.mjcf()`, `Bank.body_mjcf()`: the padded MJCF sections for `core.model.build`'s level and `bodies` arguments (the second is "" without bodies). `Bank.tables(model)`: the slot tables as numpy.
 - `DeviceTables(bank, model, device)`: the tables on the device, `load(mask, entry, model, data)` (the kernel that writes each masked world's slots), and the draw's candidate tables.
 - Kernels `load_slots`, `seed_rng`, `draw`; constants `STATIC_TYPES`, `MARKER_TYPES`, `TASK_NAMES` (the goal one-hot's order), `BATCHED` (the model fields that carry a world axis), `PARK_DEPTH`, `PARK_MARGIN`.
 
 ## How it works
 
 - **Slots.** One MJCF compiled from the bank, with one geom per slot, named `s/<type>/<i>` for a level's solids and `m/<type>/<i>` for its markers. The counts are the largest any entry holds: per solid type (`plane`, `hfield`, `box`, `sphere`, `capsule`) and per marker type (`sphere`, `capsule`, `box`; a task's markers, then the level's hazards, as `marker_rows`). Nothing is declared by level authors or the generator. Solids have contact on, markers off, as `Level.mjcf()` writes them.
+- **Body pool** (ticket 07). `nbodies` free-joint body slots `body<k>` (the most bodies any entry's level has), compiled as the CPU compiles a body (`level._free_mjcf`: gravity compensated, 1000 kg, the same inertia) at the origin, excluded from the world and from each other. Slot k holds geom slots `b<k>/<type>/<j>` per type (box, sphere, capsule) at the most any entry's body k holds; their table rows are the body's geoms in the body's frame, and `load_slots` writes them like any slot. An entry whose level has fewer bodies or fewer geoms of a type parks the rest: margin -1000, alpha 0, and a position 1000 m below the body (a body's geom is dynamic, so it moves with its body; the body slot itself rests at the origin, unused, with a unit quaternion). The poses are driven by [bodies.py](bodies.md). Tiles (ticket 09) join this pool.
+- **Attached markers.** A marker attached to a body (survive's region on a raft or platform) is an ordinary marker row, with a marker slot in the world, authored in its body's frame; the env-step kernels pose that slot on the body from its qpos each step ([env_step.md](env_step.md)). The CPU draws it inside the body instead; the geom's world pose is the same.
 - **Hfields.** Every distinct hfield in the bank is a model asset (deduplicated by size and samples); the hfield slots start on asset 0, and each world's `geom_dataid` points the slot at its own. Warp reads the hfield's size from `hfield_size[dataid]`, and the slot's `geom_size` only for bounds.
 - **Per-world fields** (`BATCHED`, each `(num_envs, ngeom)`): `geom_pos`, `geom_quat`, `geom_size`, `geom_rgba`, `geom_margin`, `geom_dataid`, `geom_aabb`, `geom_rbound`. `load_slots` writes one world's row for every slot from its entry's table. A world-attached geom's world pose is computed once at `make_data` and skipped by forward, so the kernel also writes `data.geom_xpos` and `geom_xmat`. The bounds are the compiler's formulas (box: the half-diagonal; capsule: radius plus half-length; hfield: `sqrt(hx^2 + hy^2 + max(top, base)^2)` and the box of the slab; a plane keeps its compiled infinite ones), checked against the compiler's own values for every geom type in a scratch comparison (worst difference 8e-7).
 - **Parked slots** (unused by an entry): the pose is `(0, 0, kill_plane_z - 1000)`, `geom_margin` is -1000, alpha is 0, the compiled size and bounds stay. Warp shares `geom_contype` across worlds, so the margin is what keeps a parked slot from touching the ball (ticket 01); setting an hfield's `geom_dataid` to -1 would not.
@@ -37,6 +39,9 @@ Needs the `gpu` extra (importing without it raises `ImportError` naming it).
 
 ## Decisions
 
+- 2026-10-27, ticket gpu-backend/07: body slots are sized by the most bodies any level has, with geom slots per type per slot, and slot k is the same body slot in every level (bodies keep their order), so a level's CPU-layout state is the padded state with the unused slots' tails cut (see [batch_core.md](batch_core.md)).
+- 2026-10-27, ticket gpu-backend/07: an attached marker's geom is a world marker slot posed on the body each step, not a geom inside the body slot: it needs no per-body marker geom slots, and the env-step kernels already pose marker slots.
+
 - 2026-10-27, ticket gpu-backend/05: slots are per solid type at the bank's maximum, including `plane` and `hfield` (a plane slot and an hfield slot for today's levels), rather than special-casing terrain.
 - 2026-10-27, ticket gpu-backend/05: tables are per entry (a level and a task), with the level's solids repeated for each of its tasks, so one kernel loads solids and markers together. A level of five tasks costs five rows of a few slots each.
 - 2026-10-27, ticket gpu-backend/05: a geom with contact values raises. `geom_priority` and `geom_condim` are shared across worlds, so a slot can't be plain in one level and contact-valued in another; slots per (type, contact) would fix it, and no bundled or generated level has such a geom.
@@ -47,5 +52,7 @@ Needs the `gpu` extra (importing without it raises `ImportError` naming it).
 - Reading rbound and aabb from a compile of each level: it costs a full model compile per level, which a 1024-level bank can't afford.
 
 ## History
+
+- 2026-10-27, ticket gpu-backend/07: the body pool and attached markers as rows of the marker table.
 
 - 2026-10-27, ticket gpu-backend/05: first version.

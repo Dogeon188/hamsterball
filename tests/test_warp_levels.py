@@ -93,12 +93,12 @@ def test_a_forced_draw_the_pool_cannot_make_is_an_error():
         venv.reset(options={"level": "x"})
 
 
-def test_a_pool_with_bodies_raises_until_they_are_built():
+def test_a_pool_with_seesaws_raises_until_they_are_built():
     raft = Level.from_dict({
         "kill_plane_z": -5, "geoms": [], "bodies": [{"pos": [0, 0, -0.1], "geoms": [{"type": "box", "size": [2, 2, 0.1]}],
-                                                      "motion": {"type": "path", "points": [[0, 0, 0], [6, 0, 0]], "period": 8}}],
+                                                      "joint": {"type": "ball", "stiffness": 50, "range": 15}}],
         "tasks": {"reach_goal": {"spawn": {"pos": [0, 0, 0.5]}, "goal": SPHERE, "time_limit_s": 30}}})
-    with pytest.raises(NotImplementedError, match="bodies"):
+    with pytest.raises(NotImplementedError, match="seesaws"):
         warp_env(2, [level(SPHERE), raft])
 
 

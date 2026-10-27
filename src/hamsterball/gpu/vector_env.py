@@ -134,15 +134,12 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         core = BatchCore(AbstractTier(), pool, self.num_envs, self.camera_action, self.device_name, tasks=self.tasks, keep=keep)
         bank = core.bank
         rows = [(t, bank.levels[i].tasks[t], bank.levels[i].hazards) for i, t in bank.entries]
-        for task, block, hazards in rows:
-            if any("attach" in m for m in [*hazards, *(m for _, m in E.targets(task, block))]):
-                raise NotImplementedError("markers attached to a body are not built on the GPU yet")
         self.levels = pool
         limit = lambda b: self.time_limit_s if self.time_limit_s is not None else b["time_limit_s"]  # noqa: E731
         # the epsilon keeps a whole number of env steps from rounding up to one more, as in HamsterballEnv
         steps = [math.ceil(limit(b) / (self.frame_skip * DT) - 1e-9) for _, b, _ in rows]
         with wp.ScopedDevice(core.device):
-            self.markers = E.Markers(rows, core.device)
+            self.markers = E.Markers(rows, core.device, core.bodies.qadr)
             f = lambda x, dt: wp.array(x, dtype=dt)  # noqa: E731
             blocks = [b for _, b, _ in rows]
             self.entry_spawn = f(np.array([b["spawn"]["pos"] for b in blocks], np.float32), wp.vec3)
@@ -173,7 +170,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         pool at its next reset (its `level_index` is -1 until then, unless the new pool holds that very `Level`)."""
         pool, difficulty = self._pool(levels, difficulty)
         old = self.core
-        states, entry, old_todo = old.states(), old.entry.numpy(), self.todo.numpy()
+        states, entry, old_todo = old.cpu_states(), old.entry.numpy(), self.todo.numpy()
         new_level = np.full(self.num_envs, -1, np.int32)
         direct, keep = {}, []  # old entry -> (pool index) or kept entry index
         for e in sorted(set(entry.tolist())):
@@ -343,7 +340,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         wp.launch(E.look_markers, self.num_envs, [self.todo, c.entry, m.stride, m.ntargets, m.mode, self.row_geom,
                                                   m.role, m.base, c.model.geom_rgba])
         wp.launch(E.pose_movers, (self.num_envs, m.stride), [c.entry, m.stride, m.n, self.row_slot, self.row_geom, c.tables.pos,
-                                                             c.tables.quat, c.data.time, m.motion, c.model.geom_pos,
+                                                             c.tables.quat, c.data.time, c.data.qpos, m.motion, c.model.geom_pos,
                                                              c.model.geom_quat, c.data.geom_xpos, c.data.geom_xmat])
 
     def _observe(self, mask, success):
@@ -356,7 +353,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         mjw.com_vel(c.model, d)
         mjw.subtree_vel(c.model, d)
         c.warp_tier.obs(self.num_envs, d, c.obs_out)
-        wp.launch(E.observe, self.num_envs, [mask, d.xpos, d.xmat, d.qvel, d.subtree_com, d.subtree_linvel, d.userdata,
+        wp.launch(E.observe, self.num_envs, [mask, d.xpos, d.xmat, d.qpos, d.qvel, d.subtree_com, d.subtree_linvel, d.userdata,
                                              c.obs_out["wall_contact"], self.markers.centre, self.todo, self.steps, c.entry,
                                              self.markers.stride, self.markers.ntargets, self.markers.mode,
                                              self.markers.survive, self.entry_max_steps, self.entry_kill_z, self.task_idx,
