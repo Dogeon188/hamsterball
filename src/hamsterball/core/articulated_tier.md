@@ -18,7 +18,7 @@ The articulated control tier ([spec](../../../.scratch/articulated-tier/spec.md)
 - `drive(...)`: `ctrl[:8] = action`. Touches no `xfrc_applied`.
 - `obs(...)`: `{"wall_contact": bool, "proprio": float32 (26,)}`. `wall_contact` is true when any hamster geom touches a tile. `proprio` is 8 joint positions, 8 joint velocities, 4 foot-contact flags (fl fr rl rr, that foot on a tile), the torso's forward and up axes in the facing frame (a standing hamster along the facing reads forward (0, 1, 0), up (0, 0, 1)); the env exposes it (see [env.md](../env.md)). It runs `mj_kinematics` and `mj_collision` first, since after `mj_step` the contact list belongs to the previous state; neither writes the core state.
 
-Play-test viewer: `uv run --extra game python -m hamsterball.game.articulated_playtest` (`game/articulated_playtest.py`, no doc of its own). Keys: W/S all hips, A/D all knees (posture offsets over a PD stand), T canned trot, F limp, Space shove-and-roll, R reset, Q/E orbit, Z/X zoom, Esc quit.
+Play-test viewer: `uv run --extra game python -m hamsterball.game.articulated_playtest [--gait NAME] [--level hill]` (`game/articulated_playtest.py`, no doc of its own). Keys: G gait on/off ([lowlevel.md](../lowlevel.md)), W/A/S/D or the arrows the run vector (camera-relative), K 20 degree slope toggle, F limp, Space shove-and-roll, R reset, Q/E orbit, Z/X zoom, Esc quit.
 
 ## How it works
 
@@ -47,7 +47,7 @@ Resting radius: limp hamsters dropped in 24 random orientations and run for 1.5 
 
 ## Invariants and checks
 
-- The play-test's canned trot (`game/articulated_playtest.py`) belongs to an earlier skeleton and is not checked; pushing the shell is tested with the scripted gait (ticket 04).
+- Pushing the shell, climbing and steering are tested with the scripted gait (ticket 04, [lowlevel.md](../lowlevel.md)); the play-test no longer has a canned trot.
 - Torso tests: the hip joints lie inside the torso capsules' skins, and every torso geom is a frictionless capsule.
 - `uv run pytest tests/test_articulated_tier.py`: the fragment contract (free root `hamster`, 2.4 kg, group 2, `hamster_eye`, only MJX-supported joint, geom and actuator types), reset stands with its feet on the inner wall and the torso along the facing, a stored core state reproduces the run bit for bit with `ctrl` included, thrown hamsters sink no further than the hard stop plus a step (measured 0 / 20 / 20 / 20 mm for 0 / 4 / 8 / 12 m/s), a fallen hamster gets no containment impulse, the compiled joint ranges equal the constants in radians, and a 60 Hz PD hold of the standing pose (kp 80, kd 1) keeps the joints within 0.2 rad of it and the torso upright (kp 15, kd 0.1, the gait's gains); once the torques go to zero after a shove the hamster collapses onto the wall (COM over 0.36 m from the shell centre, belly down) with no containment impulse.
 
@@ -83,3 +83,4 @@ Resting radius: limp hamsters dropped in 24 random orientations and run for 1.5 
 - 2026-10-27, third play-test (user): signed off at about 1 m/s. Half the abstract top speed is out of reach with this skeleton and an open-loop trot; the user chose to accept it and leave push speed to the scripted gait (ticket 04), whose posture loop closes the balance the canned trot lacks. Matching the abstract feel stays out of scope.
 - 2026-10-27, ticket articulated-tier/03: `obs()` gains `proprio`; the env builds `tier="articulated"` from it.
 - 2026-10-27, bug found during ticket 04: the joint `range` attributes were radians but MJCF's compiler angle is degrees, so the compiled ranges were ±0.026 rad (hips) and −0.031..0.0009 rad (knees): the legs sat on near-zero stops and the standing keyframe lay outside them. Every earlier play-test (including the "about 1 m/s" sign-off) ran on that near-rigid skeleton, so the sign-off is void and is redone on the scripted gait's play-test. Fix: write the ranges with `math.degrees`; the model's compiler angle stays degrees, so levels are untouched. Real joints made the 60 Hz PD (kp 80, kd 1, ctrl held across 10 physics steps) unstable with damping 0.05 and armature 0.002 (the legs tumble in 2 s): damping 0.5 and armature 0.01 stabilise kd from 0.05 to 1 and kp 20 to 120. Peak torques, standing pose, masses, lengths and the resting radius check are unchanged. A test now compares the compiled ranges to the constants.
+- 2026-10-27, final play-test (user): the `fast` skeleton with the wide torso and the `scripted_trot_v1` gait are signed off as is. This closes ticket 02.
