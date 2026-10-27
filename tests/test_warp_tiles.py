@@ -50,6 +50,9 @@ MIXED = Level.from_dict(survive(geoms=[{"type": "box", "pos": [4, 0, -0.5], "siz
 BOTH = Level.from_dict(survive(collapse={"delay": 0.2, "tiles": [{"type": "box", "pos": [0, 0, -0.1], "size": [1, 1, 0.1]}]},
                                bodies=[{"pos": [0, 6, 0.4], "geoms": [{"type": "box", "size": [0.25, 1.5, 0.4]}],
                                         "motion": {"type": "oscillate", "axis": [1, 0, 0], "amplitude": 2, "period": 4, "phase": 0.25}}]))
+# delay 0: the touched tile is the warning colour at once, the untouched one keeps its own (main's _tile_fractions)
+ZERO = Level.from_dict(survive(collapse={"delay": 0, "tiles": [
+    {"type": "box", "pos": [x, 0, -0.1], "size": [0.74, 0.74, 0.1], "rgba": [0.2, 0.4, 0.6, 1]} for x in (0, 3)]}))
 SURVIVE_COLLAPSE = bundled("survive_collapse")  # 81 tiles
 GENERATED = GEN("survive", 9, 0.5)  # 63 tiles, delay 1.25 s
 FLOOR = Level.from_dict(survive(geoms=[{"type": "box", "pos": [0, 0, -0.5], "size": [10, 10, 0.5]}]))
@@ -257,6 +260,7 @@ SCENARIOS = {
     "generated_floor_rolled_east_off_the_edge": (GENERATED, "east", {"time_limit_s": 30}, "left_region"),
     "small_floor_a_still_ball_falls_through": (SMALL, "still", {"time_limit_s": 5}, "left_region"),
     "mixed_shapes_a_still_ball_falls_through": (MIXED, "still", {"time_limit_s": 5}, "left_region"),
+    "zero_delay_a_still_ball_falls_through_one_tile": (ZERO, "still", {"time_limit_s": 5}, "left_region"),
 }
 POLICIES = {"still": lambda obs, i: STILL, "east": go_east}
 

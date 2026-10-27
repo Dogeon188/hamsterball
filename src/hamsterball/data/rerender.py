@@ -12,6 +12,14 @@ from .collector import provenance
 CARRIED = ("algorithm_name", "author", "author_email", "code_permalink", "description", "requirements")
 
 
+def walk(env, ep, meta):
+    """Yield `env`'s reset observation, then its `step_to` observation for each later core state of episode `ep`."""
+    # reset is mj_resetData plus the spawn, no physics stepped: it sets the stored first core state exactly
+    yield env.reset(seed=meta.get("seed"), options=meta["options"])[0]
+    for s in ep.infos["core_state"][1:]:
+        yield env.step_to(s)[0]
+
+
 def episodes(dataset, views, view_size, ids=None):
     """Yield (episode, its metadata, observations) per episode, observations re-rendered from the stored core states.
 
@@ -23,9 +31,7 @@ def episodes(dataset, views, view_size, ids=None):
     ids = dataset.episode_indices if ids is None else ids
     try:
         for ep, meta in zip(dataset.iterate_episodes(ids), dataset.storage.get_episode_metadata(ids)):
-            # reset is mj_resetData plus the spawn, no physics stepped: it sets the stored first core state exactly
-            obs = [env.reset(seed=meta.get("seed"), options=meta["options"])[0]]
-            obs += [env.step_to(s)[0] for s in ep.infos["core_state"][1:]]
+            obs = list(walk(env, ep, meta))
             yield ep, meta, {k: np.stack([o[k] for o in obs]) for k in obs[0]}
     finally:
         env.close()

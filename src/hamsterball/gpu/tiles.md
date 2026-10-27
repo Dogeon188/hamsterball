@@ -17,7 +17,7 @@ A tile slot a world's level uses sits at rest until `delay` after its trigger ti
 
 `touch_tiles` runs right after `mjw.step` and reads the contacts the step leaves, which are those of the state the step started from: for each contact between the shell (body 1) and a tile body of the world's level whose slot is `+inf`, it stores the world's sim time (after the step, as the CPU does). Every contact of a tile writes the same value, so concurrent writes agree.
 
-`look_tiles` writes each tile's `geom_rgba`: its authored colour (the bank's table) plus `clamp((t - trigger) / delay, 0, 1)` of the way to `TILE_WARN_RGBA`; an untouched tile is its own colour (`t - inf` is `-inf`), and a delay of 0 gives the warning colour throughout, as the CPU's `_look_tiles` does.
+`look_tiles` writes each tile's `geom_rgba`: its authored colour (the bank's table) plus `clamp((t - trigger) / delay, 0, 1)` of the way to `TILE_WARN_RGBA`; an untouched tile (trigger `+inf`) is its own colour whatever the delay, and a touched tile with a delay of 0 is the warning colour, as the CPU's `_tile_fractions` gives.
 
 ## Invariants and checks
 
@@ -45,3 +45,4 @@ A tile slot a world's level uses sits at rest until `delay` after its trigger ti
 
 - 2026-10-27, ticket gpu-backend/08: first version.
 - 2026-10-27, ticket gpu-backend/08: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 146 of 146 `gpu` tests passed (see Invariants and checks). The first CUDA run of the pre-merge tree failed one test of mine, which asserted that a state had both touched and untouched tiles on a level where all four are touched together; the test moved to the level with three separate tiles.
+- 2026-10-27, merge of main (pose-stream): main's `_tile_fractions` makes an untouched tile 0 whatever the delay (it was 1 at delay 0); `look_tiles` follows it, so a delay-0 level's untouched tiles draw their own colour instead of the warning colour. Pixels and `geom_rgba` only.

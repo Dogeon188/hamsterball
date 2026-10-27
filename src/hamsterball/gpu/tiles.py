@@ -181,17 +181,19 @@ def look_tiles(
     userdata: wp.array2d(dtype=float),
     geom_rgba: wp.array2d(dtype=wp.vec4),
 ):
-    """HamsterballEnv._look_tiles: each tile's colour blended from its authored one toward TILE_WARN_RGBA over `delay` from
-    its trigger (a delay of 0 is the warning colour throughout, as on the CPU; an untouched tile is its own)."""
+    """HamsterballEnv._look_tiles via _tile_fractions: each tile's colour blended from its authored one toward
+    TILE_WARN_RGBA over `delay` from its trigger (an untouched tile is its own whatever the delay; a touched tile with
+    delay 0 is the warning colour)."""
     w, k = wp.tid()
     e = entry[w]
     if k >= count[e]:
         return
     s = tile_slot[e * T + k]
-    f = float(1.0)
-    if delay[e] != wp.float64(0.0):
-        f = float((wp.float64(time[w]) - wp.float64(userdata[w, first + k])) / delay[e])
-        f = wp.min(f, 1.0)
-    f = wp.max(0.0, f)
+    f = float(0.0)
+    if not wp.isinf(userdata[w, first + k]):
+        f = float(1.0)
+        if delay[e] != wp.float64(0.0):
+            f = float((wp.float64(time[w]) - wp.float64(userdata[w, first + k])) / delay[e])
+            f = wp.max(0.0, wp.min(f, 1.0))
     base = t_rgba[e, s]
     geom_rgba[w, slot_geom[s]] = base + f * (_WARN - base)
