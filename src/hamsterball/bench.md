@@ -6,7 +6,7 @@
 
 ## Interface
 
-- `hamsterball-bench [--secs 5] [--reps 3] [--copies N]`: prints a table of env steps/s (the median of `--reps` runs of `--secs` timed seconds) for `state` and `pixels` configs, on `flat` and `hfield` levels, at 1 and N copies, then the gate line. Exits 1 if the gate fails. N defaults to the performance cores (`sysctl hw.perflevel0.physicalcpu` on macOS, else every core).
+- `hamsterball-bench [--tier abstract|articulated] [--secs 5] [--reps 3] [--copies N]`: prints a table of env steps/s (the median of `--reps` runs of `--secs` timed seconds) for `state` and `pixels` configs, on `flat` and `hfield` levels, at 1 and N copies, then the gate line. Exits 1 if the gate fails. With `--tier articulated` it prints the same table and no gate line (exit 0): the gate is the abstract tier's. N defaults to the performance cores (`sysctl hw.perflevel0.physicalcpu` on macOS, else every core).
 - `hfield_level()`: the bench's hfield `Level`, built in memory.
 - `rate(kwargs, copies, secs)`: env steps/s summed over the copies for `HamsterballEnv(**kwargs)`.
 
@@ -15,6 +15,7 @@
 - Levels: `flat` is the bundled `first_goal` (a box platform). `hfield` is issue 22's terrain: 256×256 samples of rolling sines over 120 m square, 0.6 m high, with the goal 50 m out. The bundled `hill` is mostly box, so it would understate the hfield cost.
 - Configs: `state` is the default env (`state` and `goal` only); `pixels` adds the three views at 84×84.
 - One copy is a plain `HamsterballEnv` stepped in a loop that resets on episode end. N copies is `make_vec` (`AsyncVectorEnv`, spawn on macOS), which resets itself. Actions are uniform random from the action space, seeded 0. The first 20 env steps are untimed (compilation of the first renderer).
+- `--tier` goes into every config's env kwargs. The articulated tier steps at about 0.7 to 0.9 of the abstract tier's rate on state configs (a collision pass per observation, 8 joints, more bodies) and 0.5 to 0.9 on pixels (laptop, 4 copies, 2 s runs, noisy).
 - The gate reads the `state`/`hfield`/1-copy median against `GATE` = 1,500.
 
 ## Invariants and checks
@@ -53,3 +54,4 @@
 ## History
 
 - 2026-10-22, ticket hamsterball-v1/14: added. Agent finding while running the gate: before `Level` cached its id, a reset on the 256×256 hfield level cost about 0.63 s of YAML serialisation (see [core/level.md](core/level.md)), which cut a straight-run probe that fell off the edge every 472 steps to about 870 env steps/s. With the cache the gate run above passed. A cProfile of steady stepping on that level put about 41% of an env step in `mj_step`, 27% in the abstract tier's `drive`, and the rest in the step's other Python (`mj_kinematics`, camera yaw, drag, containment, marker test, observation).
+- 2026-10-27, ticket articulated-tier/03: `--tier` option; the articulated tier reports throughput with no gate. Test: `tests/test_bench.py` (rows only, no gate line).

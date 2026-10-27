@@ -90,6 +90,7 @@ class ArticulatedTier:
     features = False  # no tail or ears: its own head and torso show which way it points
     resting_radius = RESTING_RADIUS
     fragment = _fragment()
+    _feet = None  # foot geom ids, found on first obs (the model is not known here)
     sections = _sections()  # top-level MJCF after the worldbody: the motors and the standing keyframe
 
     def action_space(self):
@@ -109,12 +110,25 @@ class ArticulatedTier:
         data.ctrl[:N_JOINTS] = action
 
     def obs(self, model, data, facing):
-        """wall_contact: any hamster geom touches a tile. Runs collision on the current state (see step.md)."""
+        """wall_contact: any hamster geom touches a tile; proprio: 8 joint positions, 8 joint velocities, 4 foot-contact
+        flags (fl fr rl rr, a foot on a tile), the torso's forward then up axis in the facing frame (26 floats).
+        Runs collision on the current state (see step.md)."""
         mujoco.mj_kinematics(model, data)
         mujoco.mj_collision(model, data)
+        if self._feet is None:  # one tier object per compiled model
+            self._feet = [model.geom(f"{n}_foot").id for n, _, _ in LEGS]
         root = model.body_rootid
+        wall, feet = False, np.zeros(4, np.float32)
         for g1, g2 in data.contact.geom[:data.ncon].tolist():
             b1, b2 = model.geom_bodyid[g1], model.geom_bodyid[g2]
             if (b1 == 1 and root[b2] == HAM) or (b2 == 1 and root[b1] == HAM):
-                return {"wall_contact": True}
-        return {"wall_contact": False}
+                wall = True
+                for i, name in enumerate(self._feet):
+                    feet[i] = feet[i] or name in (g1, g2)
+        axes = data.xmat[HAM].reshape(3, 3)[:, [0, 2]]  # torso forward (+x) and up (+z), world
+        cy, sy = math.cos(facing), math.sin(facing)  # world -> facing frame: rotate by -facing about z
+        axes = np.array([[cy, sy, 0], [-sy, cy, 0], [0, 0, 1]]) @ axes
+        proprio = np.concatenate([
+            data.qpos[HAM_QPOS + 7:HAM_QPOS + 7 + N_JOINTS], data.qvel[HAM_DOF + 6:HAM_DOF + 6 + N_JOINTS],
+            feet, axes.T.ravel()], dtype=np.float32)
+        return {"wall_contact": wall, "proprio": proprio}

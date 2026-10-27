@@ -16,7 +16,7 @@ The articulated control tier ([spec](../../../.scratch/articulated-tier/spec.md)
 - `action_space()`: `Box(-1, 1, (8,), float32)`, the torques, normalised by the gears.
 - `reset(model, data, spawn)`: copies the keyframe's pose (relative to the shell) to `spawn`, torso yawed so its forward axis points along the facing (`userdata[FACING]`, which `Core.reset` now sets before calling the tier), joint velocities and `ctrl` zero.
 - `drive(...)`: `ctrl[:8] = action`. Touches no `xfrc_applied`.
-- `obs(...)`: `{"wall_contact": bool}`, true when any hamster geom touches a tile. It runs `mj_kinematics` and `mj_collision` first, since after `mj_step` the contact list belongs to the previous state; neither writes the core state.
+- `obs(...)`: `{"wall_contact": bool, "proprio": float32 (26,)}`. `wall_contact` is true when any hamster geom touches a tile. `proprio` is 8 joint positions, 8 joint velocities, 4 foot-contact flags (fl fr rl rr, that foot on a tile), the torso's forward and up axes in the facing frame (a standing hamster along the facing reads forward (0, 1, 0), up (0, 0, 1)); the env exposes it (see [env.md](../env.md)). It runs `mj_kinematics` and `mj_collision` first, since after `mj_step` the contact list belongs to the previous state; neither writes the core state.
 
 Play-test viewer: `uv run --extra game python -m hamsterball.game.articulated_playtest` (`game/articulated_playtest.py`, no doc of its own). Keys: W/S all hips, A/D all knees (posture offsets over a PD stand), T canned trot, F limp, Space shove-and-roll, R reset, Q/E orbit, Z/X zoom, Esc quit.
 
@@ -74,3 +74,4 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 - 2026-10-27, ticket articulated-tier/02 play-test (user): "model is off (three floating spheres with unknown purpose), and the uni-color ground makes it hard to observe hamster behavior"; the constants are not yet judged.
 - 2026-10-27, second play-test (user): "Stronger push". It stands and falls fine, but barely moves the shell. Retuned the gears (5.0/4.0 to 16.0/12.8 N m), hip range (±0.9 to ±1.5 rad), standing pose and the canned trot (see Tried and rejected); the shell constants are untouched. Measured about 1 m/s of shell speed, tumble-free over 15 s; the new play-test verdict is pending.
 - 2026-10-27, third play-test (user): signed off at about 1 m/s. Half the abstract top speed is out of reach with this skeleton and an open-loop trot; the user chose to accept it and leave push speed to the scripted gait (ticket 04), whose posture loop closes the balance the canned trot lacks. Matching the abstract feel stays out of scope.
+- 2026-10-27, ticket articulated-tier/03: `obs()` gains `proprio`; the env builds `tier="articulated"` from it.

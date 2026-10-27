@@ -17,6 +17,7 @@ import numpy as np
 
 from . import _worker_env
 from .core.abstract_tier import AbstractTier
+from .core.articulated_tier import ArticulatedTier
 from .core.generator import LevelGenerator
 from .core.level import (LOCKED_RGBA, MARKER_LISTS, MARKER_RGBA, PASSED_RGBA, TASK_MARKERS, TILE_WARN_RGBA, Level,
                          body_frame)
@@ -59,7 +60,7 @@ def _levels(x):
     return [Level.load(p if p.suffix else LEVELS_DIR / f"{x}.yaml")]
 
 
-TIERS = {"abstract": AbstractTier}  # tier name -> constructor: the one lookup every compiled core goes through
+TIERS = {"abstract": AbstractTier, "articulated": ArticulatedTier}  # tier name -> constructor: the one lookup every compiled core goes through
 
 
 class HamsterballEnv(gym.Env):
@@ -83,7 +84,7 @@ class HamsterballEnv(gym.Env):
         difficulty=DIFFICULTY,
     ):
         if tier not in TIERS:
-            raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
+            raise NotImplementedError(f"tier {tier!r}: choose from {sorted(TIERS)}")
         self.views = tuple(views)
         if unknown := set(self.views) - set(V.VIEWS):
             raise ValueError(f"unknown views {sorted(unknown)}; choose from {V.VIEWS}")
@@ -110,6 +111,8 @@ class HamsterballEnv(gym.Env):
         if obs_state:
             spaces["state"] = gym.spaces.Box(-inf, inf, (21,), np.float32)
             spaces["goal"] = gym.spaces.Box(-inf, inf, (10,), np.float32)
+            if tier == "articulated":
+                spaces["proprio"] = gym.spaces.Box(-inf, inf, (26,), np.float32)
         for v in self.views:
             spaces[v] = gym.spaces.Box(0, 255, (*self.view_size, 3), np.uint8)
         self.observation_space = gym.spaces.Dict(spaces)
@@ -400,6 +403,7 @@ class HamsterballEnv(gym.Env):
         v_shell = d.qvel[SHELL_DOF : SHELL_DOF + 3]
         # free-joint angular velocity is in the body frame
         w_shell = d.xmat[SHELL].reshape(3, 3) @ d.qvel[SHELL_DOF + 3 : SHELL_DOF + 6]
+        tier_obs = self.core.tier.obs(m, d, facing)
         state = np.array(
             [
                 *c,
@@ -412,7 +416,7 @@ class HamsterballEnv(gym.Env):
                 *to_facing(w_shell),
                 *to_facing(d.subtree_com[HAM] - c),
                 *to_facing(d.subtree_linvel[HAM] - v_shell),
-                float(self.core.tier.obs(m, d, facing)["wall_contact"]),
+                float(tier_obs["wall_contact"]),
             ],
             np.float32,
         )
@@ -424,6 +428,8 @@ class HamsterballEnv(gym.Env):
             # fraction remaining; survive's is time left over the time limit, in env steps
             goal[4] = 1 - self._steps / self._max_steps if self.task == "survive" else len(self._todo) / self._n_targets
         vec = {"state": state, "goal": goal}
+        if "proprio" in tier_obs:
+            vec["proprio"] = tier_obs["proprio"]
         obs = dict(vec) if self.obs_state else {}
         if self.views:
             mujoco.mj_kinematics(m, d)  # carry the new mocap poses to their bodies,
