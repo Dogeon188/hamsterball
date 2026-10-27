@@ -46,11 +46,15 @@ MIXED = Level.from_dict(survive(geoms=[{"type": "box", "pos": [4, 0, -0.5], "siz
     {"type": "box", "pos": [0, 0, -0.1], "size": [1, 1, 0.1]},
     {"type": "sphere", "pos": [2.2, 0, -0.4], "size": [0.5]},
     {"type": "capsule", "pos": [0, 2, -0.2], "size": [0.3, 1.0], "euler": [0, 90, 0]}]}))
+# tiles and a driven body in one level (the bodies come before the tiles in the state), and a level with only a body
+BOTH = Level.from_dict(survive(collapse={"delay": 0.2, "tiles": [{"type": "box", "pos": [0, 0, -0.1], "size": [1, 1, 0.1]}]},
+                               bodies=[{"pos": [0, 6, 0.4], "geoms": [{"type": "box", "size": [0.25, 1.5, 0.4]}],
+                                        "motion": {"type": "oscillate", "axis": [1, 0, 0], "amplitude": 2, "period": 4, "phase": 0.25}}]))
 SURVIVE_COLLAPSE = bundled("survive_collapse")  # 81 tiles
 GENERATED = GEN("survive", 9, 0.5)  # 63 tiles, delay 1.25 s
 FLOOR = Level.from_dict(survive(geoms=[{"type": "box", "pos": [0, 0, -0.5], "size": [10, 10, 0.5]}]))
-assert [len(lv.collapse["tiles"]) if lv.collapse else 0 for lv in (SMALL, MIXED, SURVIVE_COLLAPSE, GENERATED, FLOOR)] == [4, 3, 81, 63, 0]
-BANK = [SMALL, MIXED, SURVIVE_COLLAPSE, GENERATED, FLOOR]
+assert [len(lv.collapse["tiles"]) if lv.collapse else 0 for lv in (SMALL, MIXED, SURVIVE_COLLAPSE, GENERATED, FLOOR, BOTH)] == [4, 3, 81, 63, 0, 1]
+BANK = [SMALL, MIXED, SURVIVE_COLLAPSE, GENERATED, FLOOR, BOTH]
 
 
 def batch(levels, **kw):

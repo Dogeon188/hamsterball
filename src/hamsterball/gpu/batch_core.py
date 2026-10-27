@@ -296,6 +296,7 @@ class BatchCore:
             m = self.cpu_model
             first = (slots + tiles)[0] if slots or tiles else (m.nq, m.nv, m.nbody)
             nq0, nv0, nb0 = first
+            size = {"b": (7, 6), "h": (1, 1), "n": (4, 3)}
             off = np.cumsum([0] + sizes)
             qa, da, ba = [np.arange(nq0)], [np.arange(nv0)], [np.arange(nb0)]
             for si, k in zip(self.bank.slot_of(level), kinds):
