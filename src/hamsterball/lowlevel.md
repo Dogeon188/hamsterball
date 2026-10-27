@@ -50,3 +50,4 @@ Target check, measured on a CPU cluster on fresh seeds (5001 to 5004, joint nois
 - 2026-10-27, ticket articulated-tier/02 fix: the joint ranges were degrees in disguise (see articulated_tier.md); the first gait of ticket 04 had been tuned on that broken skeleton and was rewritten.
 - 2026-10-27, ticket articulated-tier/04 redo: the first gait did not climb, so the user chose to rethink the skeleton (target: 20 degree climb, about 2 m/s on flat ground, no tumbling). The prototype found `fast`; the gait here is its gait, ported without a retune (the user's anatomy fix, a wide torso covering the hips, left it unchanged). `scripted_trot_v1` now means this gait.
 - 2026-10-27, ticket articulated-tier/04: **Play-test verdict: pending** (the user judges that it runs, climbs, steers and looks right).
+- 2026-10-27, final play-test (user): signed off as is. The partial-effort instability (Known quirks) stays a known quirk for now.
