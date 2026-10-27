@@ -56,7 +56,8 @@ def test_reset_stands_with_its_feet_on_the_inner_wall_and_the_torso_along_the_fa
     assert fwd[:2] == pytest.approx([-math.sin(facing), math.cos(facing)], abs=1e-9)
     assert (d.xmat[HAM].reshape(3, 3)[2, 2]) == pytest.approx(1)  # upright
     feet = [d.geom(f"{n}_foot").xpos for n in ("fl", "fr", "rl", "rr")]
-    assert all(abs(np.linalg.norm(f - d.xpos[1]) - 0.47 + 0.02) < 0.004 for f in feet)  # on the 0.47 m inner wall
+    gaps = [0.47 - 0.02 - np.linalg.norm(f - d.xpos[1]) for f in feet]  # to the 0.47 m inner wall
+    assert min(gaps) > -0.004 and max(gaps) < 0.015  # the lowest feet on it, the rest within 15 mm (the wall curves up)
     assert np.linalg.norm(com_offset(core)) < core.tier.resting_radius - 0.1  # standing, deep inside the radius
     # the hamster holds the pose for a moment on its own (no gait: only the contact), and does not explode
     core.step(ZERO, n=30)
@@ -154,3 +155,17 @@ def test_the_ground_floors_and_sky_render_a_checker_and_a_gradient():
         lm = Core(level=level).model
         floors = [g for g in range(lm.ngeom) if lm.geom_group[g] == 0 and lm.geom_contype[g] == 1 and lm.geom_matid[g] >= 0]
         assert floors, name
+
+
+def test_the_playtest_trot_pushes_the_shell_for_15_s_without_tumbling():
+    from hamsterball.game.articulated_playtest import torques
+
+    core = Core(ArticulatedTier())
+    d = core.data
+    speeds = []
+    for _ in range(900):
+        core.step(torques(d, d.time, trot=True))
+        assert d.xmat[HAM].reshape(3, 3)[2, 2] > 0.3  # never on its side or back
+        speeds.append(np.hypot(*d.qvel[:2]))
+    print("shell speed, last 5 s:", round(float(np.mean(speeds[-300:])), 2), "m/s")
+    assert np.mean(speeds[-300:]) > 0.8  # about 8% of the abstract tier's 14.3 m/s top speed

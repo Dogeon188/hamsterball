@@ -17,10 +17,10 @@ HEAD_R, HEAD_POS = 0.045, (0.17, 0, 0.025)
 HIP_X, HIP_Y, HIP_Z = 0.08, 0.085, -0.02  # hip offsets from the torso centre (x sign: front +, rear -; y: left +)
 THIGH, SHIN, FOOT_R = 0.09, 0.09, 0.02
 MASS = {"torso": 1.38, "head": 0.30, "thigh": 0.10, "shin": 0.06, "foot": 0.02}  # sums to M_HAM over 4 legs
-HIP_RANGE, KNEE_RANGE = (-0.9, 0.9), (-1.8, 0.05)
-GEAR_HIP, GEAR_KNEE = 5.0, 4.0  # peak torques
+HIP_RANGE, KNEE_RANGE = (-1.5, 1.5), (-1.8, 0.05)
+GEAR_HIP, GEAR_KNEE = 16.0, 12.8  # peak torques
 DAMPING, ARMATURE = 0.05, 0.002
-STAND = (0.4, -0.8) * 4  # hip, knee per leg (hip swings the foot backward, knee bends the shin forward)
+STAND = (0.28, -0.87) * 4  # hip, knee per leg (hip swings the foot backward, knee bends the shin forward)
 # Resting radius: the subtree COM's largest distance from the shell centre, lying on the wall (see the doc).
 RESTING_RADIUS = 0.40
 
@@ -68,11 +68,8 @@ def _sections():
     return f'<actuator>{motors}</actuator><keyframe><key name="stand" qpos="{key}"/></keyframe>'
 
 
-class ArticulatedTier:
-    nuserdata = 0
-    features = False  # no tail or ears: its own head and torso show which way it points
-    resting_radius = RESTING_RADIUS
-    fragment = (
+def _fragment():
+    return (
         f'<body name="hamster" pos="0 0 {R + _stand_height()!r}"><freejoint/>'
         f'<geom type="capsule" fromto="{-TORSO_HALF} 0 0 {TORSO_HALF} 0 0" size="{TORSO_R}" mass="{MASS["torso"]}" '
         f'{_FROZEN} {_RGBA}/>'
@@ -85,7 +82,14 @@ class ArticulatedTier:
         f'<site name="hamster_eye" pos="0.03 0 0.01"/></body>'
         + "".join(_leg(*leg) for leg in LEGS)
         + '</body>'
-    )
+)
+
+
+class ArticulatedTier:
+    nuserdata = 0
+    features = False  # no tail or ears: its own head and torso show which way it points
+    resting_radius = RESTING_RADIUS
+    fragment = _fragment()
     sections = _sections()  # top-level MJCF after the worldbody: the motors and the standing keyframe
 
     def action_space(self):

@@ -15,9 +15,10 @@ from ..core.articulated_tier import GEAR_HIP, GEAR_KNEE, N_JOINTS, STAND, Articu
 from ..core.model import HAM, HAM_DOF, HAM_QPOS, SHELL
 
 PERIOD = 1 / 60
-KP, KD = 40.0, 1.0  # the posture loop, N m/rad and N m s/rad, in joint torque before the gear
+KP, KD = 80.0, 1.0  # the posture loop, N m/rad and N m s/rad, in joint torque before the gear
 GEAR = np.array([GEAR_HIP, GEAR_KNEE] * 4)
-TROT_AMP, TROT_HZ = 0.55, 3.0  # hip swing (rad) and stride frequency of the canned push
+TROT_AMP, TROT_LIFT, TROT_HZ, TROT_BIAS = 1.15, 0.5, 7.5, -0.3  # hip swing and knee lift (rad), stride Hz, hip offset
+PITCH_KNEE, PITCH_HIP = 3.5, -0.8  # nose-down feedback: front legs lengthen, rear shorten; front hips swing (rad per unit)
 OFFSET = 0.5  # rad the held W/S (all hips) and A/D (all knees) keys move the posture target
 SHOVE = 2.5  # m/s of the space-bar shove, sideways with a roll
 
@@ -31,11 +32,16 @@ def torques(data, t, hips=0.0, knees=0.0, trot=False, limp=False):
     target = np.array(STAND, float)
     target[0::2] += hips
     target[1::2] += knees
+    fz = data.xmat[HAM][6]  # the torso's forward axis height: below 0 is nose down
     if trot:
+        target[0::2] += TROT_BIAS
         for leg in range(4):
             p = 2 * math.pi * TROT_HZ * t + (0.0 if leg in (0, 3) else math.pi)
             target[2 * leg] += TROT_AMP * math.sin(p)
-            target[2 * leg + 1] -= TROT_AMP * max(0.0, -math.cos(p))
+            target[2 * leg + 1] -= TROT_LIFT * max(0.0, -math.cos(p))
+            front = 1.0 if leg < 2 else -1.0
+            target[2 * leg + 1] -= front * PITCH_KNEE * fz
+            target[2 * leg] -= front * PITCH_HIP * fz
     return np.clip((KP * (target - q) - KD * qd) / GEAR, -1, 1).astype(np.float32)
 
 
