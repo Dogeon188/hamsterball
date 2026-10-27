@@ -18,7 +18,7 @@ The articulated control tier ([spec](../../../.scratch/articulated-tier/spec.md)
 - `drive(...)`: `ctrl[:8] = action`. Touches no `xfrc_applied`.
 - `obs(...)`: `{"wall_contact": bool, "proprio": float32 (26,)}`. `wall_contact` is true when any hamster geom touches a tile. `proprio` is 8 joint positions, 8 joint velocities, 4 foot-contact flags (fl fr rl rr, that foot on a tile), the torso's forward and up axes in the facing frame (a standing hamster along the facing reads forward (0, 1, 0), up (0, 0, 1)); the env exposes it (see [env.md](../env.md)). It runs `mj_kinematics` and `mj_collision` first, since after `mj_step` the contact list belongs to the previous state; neither writes the core state.
 
-Play-test viewer: `uv run --extra game python -m hamsterball.game.articulated_playtest` (`game/articulated_playtest.py`, no doc of its own). Keys: W/S all hips, A/D all knees (posture offsets over a PD stand), T canned trot, F limp, Space shove-and-roll, R reset, Q/E orbit, Z/X zoom, Esc quit.
+Play-test viewer: `uv run --extra game python -m hamsterball.game.articulated_playtest` (`game/articulated_playtest.py`, no doc of its own). Keys: W/S all hips, A/D all knees (posture offsets over a PD stand), T canned trot, F limp, Space shove-and-roll, R reset, Q/E orbit, Z/X zoom, Esc quit; G switches on the scripted gait of [lowlevel.md](../lowlevel.md) (`--gait NAME`), WASD or the arrows then give its run vector.
 
 ## How it works
 

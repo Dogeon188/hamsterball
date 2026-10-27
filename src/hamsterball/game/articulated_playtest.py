@@ -1,6 +1,7 @@
 """Play-test viewer for the articulated tier's skeleton: a Core on a flat level, no env, no task.
 
-Run: `uv run --extra game python -m hamsterball.game.articulated_playtest`. Needs the `game` extra.
+Run: `uv run --extra game python -m hamsterball.game.articulated_playtest [--gait NAME]`. Needs the `game` extra.
+G switches on the scripted gait (see lowlevel.md), steered by W/A/S/D or the arrows as a run vector in the camera's frame.
 """
 
 import math
@@ -13,6 +14,7 @@ import numpy as np
 from ..core import Core
 from ..core.articulated_tier import GEAR_HIP, GEAR_KNEE, N_JOINTS, STAND, ArticulatedTier
 from ..core.model import HAM, HAM_DOF, HAM_QPOS, SHELL
+from ..lowlevel import DEFAULT, get
 
 PERIOD = 1 / 60
 KP, KD = 80.0, 1.0  # the posture loop, N m/rad and N m s/rad, in joint torque before the gear
@@ -52,7 +54,7 @@ def shove(core):
     d.qvel[HAM_DOF + 3] += 6.0
 
 
-def run():
+def run(gait=DEFAULT):
     from imgui_bundle import imgui  # before glfw, as in window.py
 
     import glfw
@@ -69,7 +71,8 @@ def run():
     cam = mujoco.MjvCamera()
     cam.type, cam.distance, cam.azimuth, cam.elevation = mujoco.mjtCamera.mjCAMERA_FREE, 1.6, 90.0, -15.0
     opt = V.option("chase")
-    trot = limp = False
+    trot = limp = walk = False
+    policy = get(gait)
     held = lambda *keys: any(imgui.is_key_down(k) for k in keys)
     pressed = lambda k: imgui.is_key_pressed(k, False)
     last = time.perf_counter()
@@ -80,16 +83,30 @@ def run():
                 break
             if pressed(imgui.Key.r):
                 core.reset()
-                trot = limp = False
-            trot ^= pressed(imgui.Key.t)
+                trot = limp = walk = False
+                policy.reset()
+            if pressed(imgui.Key.t):
+                trot, walk = not trot, False
+            if pressed(imgui.Key.g):
+                walk, trot = not walk, False
+                policy.reset()
             limp ^= pressed(imgui.Key.f)
             if pressed(imgui.Key.space):
                 shove(core)
             cam.azimuth += 2.0 * (held(imgui.Key.e) - held(imgui.Key.q))
             cam.distance = min(max(cam.distance + 0.03 * (held(imgui.Key.x) - held(imgui.Key.z)), 0.8), 5.0)
-            hips = OFFSET * (held(imgui.Key.w) - held(imgui.Key.s))
-            knees = OFFSET * (held(imgui.Key.d) - held(imgui.Key.a))
-            core.step(torques(d, d.time, hips, knees, trot, limp))
+            if walk and not limp:
+                keys = np.array([held(imgui.Key.d, imgui.Key.right_arrow) - held(imgui.Key.a, imgui.Key.left_arrow),
+                                 held(imgui.Key.w, imgui.Key.up_arrow) - held(imgui.Key.s, imgui.Key.down_arrow)], float)
+                az = math.radians(cam.azimuth)  # the camera looks along (cos az, sin az); keys are relative to that
+                run_vector = keys[0] * np.array([math.sin(az), -math.cos(az)]) + keys[1] * np.array([math.cos(az), math.sin(az)])
+                if np.linalg.norm(run_vector) > 1:
+                    run_vector /= np.linalg.norm(run_vector)
+                core.step(policy.act(core.tier.obs(m, d, core.facing), run_vector))
+            else:
+                hips = OFFSET * (held(imgui.Key.w) - held(imgui.Key.s))
+                knees = OFFSET * (held(imgui.Key.d) - held(imgui.Key.a))
+                core.step(torques(d, d.time, hips, knees, trot, limp))
 
             cam.lookat[:] = d.xpos[SHELL]
             mujoco.mj_kinematics(m, d)
@@ -102,8 +119,8 @@ def run():
             off = d.subtree_com[HAM] - d.xpos[SHELL]
             _hud([
                 "articulated tier play-test",
-                "W/S hips  A/D knees  T trot (push)  F limp (fall)  Space shove  R reset  Q/E orbit  Z/X zoom  Esc quit",
-                f"mode: {'LIMP' if limp else 'trot' if trot else 'stand'}   shell speed {np.hypot(*d.qvel[:2]):.2f} m/s",
+                "W/S hips  A/D knees  T canned trot  G gait (WASD / arrows run)  F limp  Space shove  R reset  Q/E orbit  Z/X zoom  Esc",
+                f"mode: {'LIMP' if limp else policy.name if walk else 'trot' if trot else 'stand'}   shell speed {np.hypot(*d.qvel[:2]):.2f} m/s",
                 f"hamster COM {np.linalg.norm(off):.3f} m from shell centre (resting radius {core.tier.resting_radius})",
             ])
             _end_frame(window)
@@ -116,9 +133,10 @@ def run():
 
 
 @click.command()
-def main():
-    """Articulated tier play-test: keys apply posture offsets, a canned trot pushes the shell, and F or Space makes the hamster fall."""
-    run()
+@click.option("--gait", default=DEFAULT, show_default=True, help="The low-level policy G switches on.")
+def main(gait):
+    """Articulated tier play-test: keys apply posture offsets, a canned trot or the scripted gait pushes the shell, and F or Space makes the hamster fall."""
+    run(gait)
 
 
 if __name__ == "__main__":
