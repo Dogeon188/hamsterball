@@ -24,6 +24,7 @@ Needs the `gpu` extra (importing without it raises `ImportError` naming it).
 
 ## Invariants and checks
 
+- CUDA: the same tests passed on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster (see [batch_core.md](batch_core.md)).
 - `tests/test_bank.py`: round trips and one-step parity on worlds of different levels (plane, solids, hfield, floor, generated hfield) against `Core`; a world in the mixed bank steps as it does in a bank of its own level alone (`atol=1e-6`), which is what shows padding and parking change nothing.
 - `tests/test_warp_levels.py`: draws cover the pool, a seed replays them, forced draws, errors, set_levels.
 
