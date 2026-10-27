@@ -17,10 +17,12 @@ from ..core.abstract_tier import AbstractTier
 from ..core.generator import LevelGenerator
 from ..core.model import DT
 from ..core.step import FRAME_SKIP, Core
+from ..core.views import VIEWS
 from ..env import DIFFICULTY, LEVELS_DIR, TASKS, _file_pool_difficulty, _levels
 from . import bank as B
 from . import env_step as E
 from .batch_core import BatchCore
+from .views import Views
 
 class WarpVectorEnv(gym.vector.VectorEnv):
     """`num_envs` worlds of `HamsterballEnv`, each on a (level, task) it draws from a level bank at every reset. `step`, `reset` and
@@ -51,9 +53,10 @@ class WarpVectorEnv(gym.vector.VectorEnv):
     ):
         if tier != "abstract":
             raise NotImplementedError(f"tier {tier!r}: v1 builds only the abstract tier")
-        if tuple(views):
-            raise NotImplementedError("views: pixel views are not built on the GPU yet")
-        if not obs_state:
+        self.views, self.view_size, self.obs_state = tuple(views), tuple(view_size), obs_state
+        if unknown := set(self.views) - set(VIEWS):
+            raise ValueError(f"unknown views {sorted(unknown)}; choose from {VIEWS}")
+        if not self.views and not obs_state:
             raise ValueError("obs_state=False needs at least one view")
         self.num_envs, self.frame_skip, n = num_envs, frame_skip, num_envs
         self.tasks, self.camera_action, self.bank_size, self.device_name = list(tasks), camera_action, bank_size, device
@@ -64,8 +67,10 @@ class WarpVectorEnv(gym.vector.VectorEnv):
 
         self.single_action_space = Core(AbstractTier(), camera_action=camera_action).action_space
         inf = np.float32(np.inf)
-        self.single_observation_space = gym.spaces.Dict({
-            "state": gym.spaces.Box(-inf, inf, (21,), np.float32), "goal": gym.spaces.Box(-inf, inf, (10,), np.float32)})
+        spaces = {"state": gym.spaces.Box(-inf, inf, (21,), np.float32),
+                  "goal": gym.spaces.Box(-inf, inf, (10,), np.float32)} if obs_state else {}
+        spaces.update({v: gym.spaces.Box(0, 255, (*self.view_size, 3), np.uint8) for v in self.views})
+        self.single_observation_space = gym.spaces.Dict(spaces)
         self.observation_space = gym.vector.utils.batch_space(self.single_observation_space, n)
         self.action_space = gym.vector.utils.batch_space(self.single_action_space, n)
 
@@ -85,13 +90,24 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.rng = z(n, wp.uint32)
             self.force_level, self.force_task = wp.full(n, -1, dtype=int), wp.full(n, -1, dtype=int)
         t = wp.to_torch
-        self._obs = {"state": t(self.state), "goal": t(self.goal)}
-        self._final_obs = {"state": t(self.final_state), "goal": t(self.final_goal)}
+        self._obs = {"state": t(self.state), "goal": t(self.goal)} if obs_state else {}
+        self._final_obs = {"state": t(self.final_state), "goal": t(self.final_goal)} if obs_state else {}
+        self._pixels()
         terms = {"event": t(self.event), "time": t(self.time), "shaping": t(self.shaping)}
         self._step_info = {"success": t(self.success), "failure_reason": t(self.failure), "reward_terms": terms,
                            "level_index": t(self.level_index), "task_index": t(self.task_idx)}
         self._done = t(self.done)
         self._seed_rng()
+
+    def _pixels(self):
+        """The renderer for the current core (it poses the view mocaps even with no views, as the CPU env does), and
+        the observation dicts' view entries (torch views of its buffers)."""
+        with wp.ScopedDevice(self.core.device):
+            self.renderer = Views(self.core, self.views, self.view_size, self.entry_follow_yaw)
+            self.final_pixels = {v: wp.zeros_like(a) for v, a in self.renderer.pixels.items()}
+        for v in self.views:
+            self._obs[v] = wp.to_torch(self.renderer.pixels[v])
+            self._final_obs[v] = wp.to_torch(self.final_pixels[v])
 
     def _pool(self, levels, difficulty):
         """Validate a pool (`HamsterballEnv.set_levels`'s forms) and make it a list of levels: a file pool as given, a
@@ -133,6 +149,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.entry_yaw = f(np.radians([b["spawn"]["yaw_deg"] for b in blocks]).astype(np.float32), float)
             self.entry_kill_z = f(np.array([bank.levels[i].kill_plane_z for i, _ in bank.entries], np.float32), float)
             self.entry_max_steps = f(np.array(steps, np.int32), int)
+            self.entry_follow_yaw = f(np.radians([bank.levels[i].follow_yaw_deg for i, _ in bank.entries]).astype(np.float32), float)
             # each marker row's geom in the padded model: its slot, found when the bank's tables were built
             geom = np.zeros((len(rows), self.markers.stride), np.int32)
             for e, slots in enumerate(core.bank.row_slots):
@@ -181,6 +198,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             todo[:, :k] = old_todo[:, :k]
             self.todo = wp.array(todo, dtype=wp.bool)
             self._look()
+        self._pixels()
         self._seed_rng()
 
     def reset(self, *, seed=None, options=None):
@@ -196,6 +214,9 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             wp.launch(E.reset_episode, self.num_envs, self._episode_args(self.all))
             self._observe(self.all, self.none)
             self._look()
+            self.renderer.pose()
+            if self.views:
+                self.renderer.render()
             self.force_level.fill_(-1)  # the autoreset draws freely
             self.force_task.fill_(-1)
         for a in (self.reward, self.event, self.time, self.shaping, self.terminated, self.truncated, self.success, self.done):
@@ -238,7 +259,9 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         `reward_terms`, `level_index`, `task_index`, and for worlds that ended, `final_obs` and `final_info` with their
         `_final_obs` and `_final_info` masks."""
         a = torch.as_tensor(action, dtype=torch.float32, device=self.torch_device).contiguous()
-        self.core.step(a, self.frame_skip, post=self._env_step)
+        self.core.step(a, self.frame_skip, post=self._phase1 if self.views else self._env_step)
+        if self.views:
+            self._render()
         return self._outputs()
 
     def step_to(self, core_states):
@@ -248,7 +271,12 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             core_states = core_states.cpu().numpy()
         self.core.set_states(core_states)
         with wp.ScopedDevice(self.core.device):
-            self._env_step()
+            if self.views:
+                self._phase1()
+            else:
+                self._env_step()
+        if self.views:
+            self._render()
         return self._outputs()
 
     def _outputs(self):
@@ -264,7 +292,14 @@ class WarpVectorEnv(gym.vector.VectorEnv):
                 self.prev_pos, self.phi]
 
     def _env_step(self):
-        """The kernels after the physics (HamsterballEnv._advance and _observe), then the same-step autoreset."""
+        """What follows the physics: `_phase1`, then the same-step autoreset."""
+        self._phase1()
+        self._phase2()
+
+    def _phase1(self):
+        """The kernels after the physics (HamsterballEnv._advance and _observe) up to the ended episodes' final
+        observation. With views, the markers' looks and the mocap poses are written too, so the final views can be drawn
+        before the reset."""
         n, m, d = self.num_envs, self.markers, self.core.data
         wp.launch(E.advance, n, [d.qpos, m.kind, m.a, m.b, m.rad, m.rot, m.half, m.centre, self.core.entry, m.stride,
                                  m.ntargets, m.n, m.mode, m.goal_row, m.survive, m.time_penalty, self.entry_kill_z,
@@ -275,11 +310,27 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self._observe(self.all, self.success)
         wp.launch(E.either, n, [self.terminated, self.truncated, self.done])
         wp.launch(E.stash_final, n, [self.done, self.state, self.goal, self.final_state, self.final_goal])
+        if self.views:
+            self._look()
+            self.renderer.pose()
+
+    def _phase2(self):
+        """The same-step autoreset of the worlds that ended, and their first observation, markers and views' poses."""
+        n = self.num_envs
         self._draw(self.done)
         self.core.reset_masked(self.done, self.spawn, self.facing)
         wp.launch(E.reset_episode, n, self._episode_args(self.done))
         self._observe(self.done, self.none)
         self._look()
+        self.renderer.pose()
+
+    def _render(self):
+        """After `_phase1` (outside the graph: the ray tracer's calls are not captured): the ended worlds' final views if
+        any ended, then the autoreset, then every world's views."""
+        if bool(self._done.any()):  # the one host sync of a step with views
+            self.renderer.render(self.final_pixels)
+        self.core.launch("autoreset", self._phase2)
+        self.renderer.render()
 
     def _look(self):
         """The episode task's marker colours into each world's `geom_rgba`, from the targets left."""
