@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The env-step kernels: what `HamsterballEnv._advance` and `_observe` ([env.md](../env.md)) do after the physics, one thread per world, so the Warp vector env ([vector_env.md](vector_env.md)) runs them inside the step graph. It covers all five tasks, with moving markers (a drifting region, moving hazards) tested on their relative path and posed per world each env step; markers attached to a kinematic body ride it (a seesaw's come with its ticket).
+The env-step kernels: what `HamsterballEnv._advance` and `_observe` ([env.md](../env.md)) do after the physics, one thread per world, so the Warp vector env ([vector_env.md](vector_env.md)) runs them inside the step graph. It covers all five tasks, with moving markers (a drifting region, moving hazards) tested on their relative path and posed per world each env step; markers attached to a kinematic body or a seesaw ride it (`Motion.frame` says how to read the body's qpos: a free joint, a ball's quaternion about a pivot, a hinge's angle about an axis; [seesaws.md](seesaws.md)).
 
 ## Interface
 
