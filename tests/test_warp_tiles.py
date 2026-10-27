@@ -351,7 +351,7 @@ def test_live_physics_collapses_each_world_from_its_own_trigger():
 
 def test_a_generator_pool_with_collapse_layouts_trains_on_the_device():
     """A bank of generated survive levels, collapse floors among them, steps, ends and resets worlds in the same step."""
-    venv = venv_for(GEN, 4, bank_size=8, difficulty=0.5)
+    venv = venv_for(GEN, 4, bank_size=64, difficulty=0.5)  # the constructor draws unseeded: 8 levels held no collapse floor 1 time in 4
     assert venv.core.bank.ntiles >= 1
     obs, info = venv.reset(seed=3)
     for _ in range(60):
