@@ -19,3 +19,12 @@ def test_the_bench_prints_every_configuration_and_the_gate():
     gate = re.search(r"^gate: .*: [\d,]+ env steps/s, (PASS|FAIL)$", result.output, re.M)
     assert gate, result.output
     assert result.exit_code == (0 if gate[1] == "PASS" else 1)
+
+
+@pytest.mark.gl
+def test_the_bench_runs_the_articulated_tier_and_prints_throughput_with_no_gate():
+    result = CliRunner().invoke(main, ["--tier", "articulated", "--secs", "0.3", "--reps", "1", "--copies", "2"])
+    assert result.exit_code == 0, result.output
+    rows = re.findall(r"^(state|pixels)\s+(flat|hfield)\s+(\d+)\s+[\d,]+$", result.output, re.M)
+    assert len(rows) == 8
+    assert "articulated" in result.output and "gate" not in result.output

@@ -71,13 +71,16 @@ def performance_cores():
 @click.option("--secs", default=5.0, show_default=True, help="Timed seconds per run.")
 @click.option("--reps", default=3, show_default=True, help="Runs per configuration; the median is printed.")
 @click.option("--copies", type=int, default=None, help="N, the vector env's copies.  [default: performance cores]")
-def main(secs, reps, copies):
+@click.option("--tier", type=click.Choice(["abstract", "articulated"]), default="abstract", show_default=True,
+              help="Control tier; the articulated tier prints its rates with no gate.")
+def main(secs, reps, copies, tier):
     """Print env steps/s for state-only and pixel envs, 1 and N copies, flat and hfield levels, and the M2 gate.
 
-    Exits 1 if one state-only process on the hfield level runs under 1,500 env steps/s (spec §14)."""
+    Exits 1 if one state-only process on the hfield level runs under 1,500 env steps/s (spec §14); the gate is
+    the abstract tier's, so another tier only prints its rates."""
     copies = copies or performance_cores()
     click.echo(f"{platform.platform()}, Python {platform.python_version()}, mujoco {mujoco.__version__}")
-    click.echo(f"median of {reps} x {secs:g} s, random actions; N copies run in make_vec's AsyncVectorEnv\n")
+    click.echo(f"median of {reps} x {secs:g} s, random actions, {tier} tier; N copies run in make_vec's AsyncVectorEnv\n")
     click.echo(f"{'config':<8}{'level':<8}{'copies':>6}  {'env steps/s':>11}")
     levels = {"flat": "first_goal", "hfield": hfield_level()}
     configs = {"state": {}, "pixels": {"views": VIEWS}}  # pixels: the three views at 84x84, plus the vectors
@@ -85,11 +88,13 @@ def main(secs, reps, copies):
     for config, extra in configs.items():
         for name, level in levels.items():
             for n in sorted({1, copies}):
-                kwargs = {"tasks": ["reach_goal"], "levels": [level], **extra}
+                kwargs = {"tasks": ["reach_goal"], "levels": [level], "tier": tier, **extra}
                 r = statistics.median(rate(kwargs, n, secs) for _ in range(reps))
                 click.echo(f"{config:<8}{name:<8}{n:>6}  {r:>11,.0f}")
                 if (config, name, n) == ("state", "hfield", 1):
                     gate = r
+    if tier != "abstract":
+        return
     ok = gate >= GATE
     click.echo(f"\ngate: one state-only process on hfield >= {GATE:,}: {gate:,.0f} env steps/s, {'PASS' if ok else 'FAIL'}")
     raise SystemExit(0 if ok else 1)
