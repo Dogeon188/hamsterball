@@ -38,16 +38,22 @@ arrow_storage._encode_info = _encode_core_state  # Minari internal: every arrow 
 
 
 class _StepData(StepDataCallback):
-    """Stores `state` and `goal` (from info, so with or without views or `obs_state`) and `core_state`.
+    """Stores `state` and `goal` (from info, so with or without views or `obs_state`) and `core_state`, and in the
+    articulated tier `proprio` and the `run_vector` the Collector left on `self.run_vector` (NaN when none was given).
 
     No pixels: re-render makes them from the core states. reset's `reset_options` goes per episode instead.
     """
+
+    run_vector = NO_RUN_VECTOR = np.full(2, np.nan, np.float32)
 
     def __call__(self, env, **kw):
         step = super().__call__(env, **kw)
         info = step["info"]
         step["observation"] = {"state": info["state"], "goal": info["goal"]}
         step["info"] = {"core_state": info["core_state"]}
+        if "proprio" in info:  # the articulated tier; reset has no run vector, so its placeholder keeps the infos' shape
+            step["observation"]["proprio"] = info["proprio"]
+            step["info"]["run_vector"] = self.run_vector
         return step
 
 
@@ -56,6 +62,9 @@ _inf = np.float32(np.inf)
 # episode buffer writes them in, so add_to_dataset (which re-encodes in the space's order) writes the same Arrow schema
 OBSERVATION = gym.spaces.Dict(
     goal=gym.spaces.Box(-_inf, _inf, (10,), np.float32), state=gym.spaces.Box(-_inf, _inf, (21,), np.float32)
+)
+ARTICULATED_OBSERVATION = gym.spaces.Dict(
+    goal=OBSERVATION["goal"], proprio=gym.spaces.Box(-_inf, _inf, (26,), np.float32), state=OBSERVATION["state"]
 )
 # every env kwarg that shapes a space or the steps, so recover_environment() rebuilds an env with the same spaces and
 # the same episode ending (truncate, time_limit_s)
@@ -98,16 +107,24 @@ class Collector(minari.DataCollector):
 
         super().__init__(
             env, step_data_callback=_StepData, episode_metadata_callback=Metadata, record_infos=True,
-            data_format="arrow", observation_space=OBSERVATION, **kw,
+            data_format="arrow", observation_space=ARTICULATED_OBSERVATION if u.tier == "articulated" else OBSERVATION, **kw,
         )
 
     def reset(self, *, seed=None, options=None):
+        self._step_data_callback.run_vector = _StepData.NO_RUN_VECTOR
         obs, info = super().reset(seed=seed, options=options)
         # the env's own options name the level and task it drew, so the episode replays from them alone
         self._buffer = dataclasses.replace(self._buffer, options=info["reset_options"])
         return obs, info
 
-    def step(self, action):
+    def step(self, action, run_vector=None):
+        """Step with `action`; in the articulated tier `run_vector` (the 2-D run vector the torques came from) is
+        stored as the step's `run_vector` info, NaN when not given."""
+        if run_vector is not None and self.env.unwrapped.tier != "articulated":
+            raise ValueError("run_vector is stored only in the articulated tier")
+        self._step_data_callback.run_vector = (
+            _StepData.NO_RUN_VECTOR if run_vector is None else np.asarray(run_vector, np.float32)
+        )
         if isinstance(self.action_space, gym.spaces.Box):
             # step with the action as it will be stored, so a replay of the stored action steps identically
             action = np.asarray(action, self.action_space.dtype)
@@ -116,10 +133,11 @@ class Collector(minari.DataCollector):
         self._outcomes[episode] = {"success": info["success"], "failure_reason": info["failure_reason"]}
         return obs, rew, terminated, truncated, info
 
-    def create_dataset(self, dataset_id, **kw):
-        """Minari's create_dataset, with `provenance()` added to the dataset metadata."""
+    def create_dataset(self, dataset_id, low_level_policy=None, **kw):
+        """Minari's create_dataset, with `provenance()` and the name of the `low_level_policy` that made the torques
+        (articulated tier) added to the dataset metadata."""
         ds = super().create_dataset(dataset_id, **kw)
-        ds.storage.update_metadata(provenance())
+        ds.storage.update_metadata({**provenance(), **({"low_level_policy": low_level_policy} if low_level_policy else {})})
         return ds
 
     def add_to_dataset(self, dataset):

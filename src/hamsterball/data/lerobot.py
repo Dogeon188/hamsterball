@@ -5,14 +5,15 @@ from fractions import Fraction
 import numpy as np
 
 from ..core.model import DT
-from .collector import OBSERVATION
+from .collector import ARTICULATED_OBSERVATION
 
 
 def to_lerobot(dataset, repo_id, root, use_videos=True):
     """Write `dataset`, a re-rendered Minari dataset (see `rerender`), as LeRobot v3 dataset `repo_id` at `root`.
 
     Each frame pairs observation t with action t, so an episode's last observation (it has no action) is dropped.
-    `state` and `goal` map to `observation.state` and `observation.goal`, each view to `observation.images.<view>`,
+    `state`, `goal` and (articulated tier) `proprio` map to `observation.state`, `observation.goal` and
+    `observation.proprio`, each view to `observation.images.<view>`,
     the reward and episode end to `next.reward` and `next.done`, and the episode's task to LeRobot's task string.
     `use_videos=True` (LeRobot's default) encodes lossy video; False stores lossless PNG frames.
     """
@@ -22,16 +23,18 @@ def to_lerobot(dataset, repo_id, root, use_videos=True):
     fps = Fraction(1 / (DT * kw["frame_skip"])).limit_denominator(1000)
     if fps.denominator != 1:
         raise ValueError(f"LeRobot needs a whole-number fps; frame_skip {kw['frame_skip']} gives {fps}")
-    views = [k for k in dataset.observation_space.keys() if k not in OBSERVATION.spaces]
+    views = [k for k in dataset.observation_space.keys() if k not in ARTICULATED_OBSERVATION.spaces]
     if not views:
         raise ValueError("no views in the observations: rerender the dataset first")
     act = dataset.action_space
+    proprio = "proprio" in dataset.observation_space.spaces
     features = {
         "action": {"dtype": "float32", "shape": act.shape, "names": None},
         "observation.state": {"dtype": "float32", "shape": (21,), "names": None},
         "observation.goal": {"dtype": "float32", "shape": (10,), "names": None},
         "next.reward": {"dtype": "float32", "shape": (1,), "names": None},
         "next.done": {"dtype": "bool", "shape": (1,), "names": None},
+        **({"observation.proprio": {"dtype": "float32", "shape": (26,), "names": None}} if proprio else {}),
         **{
             f"observation.images.{v}": {
                 "dtype": "video" if use_videos else "image",
@@ -53,6 +56,7 @@ def to_lerobot(dataset, repo_id, root, use_videos=True):
                 "observation.goal": obs["goal"][t],
                 "next.reward": np.array([ep.rewards[t]], np.float32),
                 "next.done": np.array([done[t]]),
+                **({"observation.proprio": obs["proprio"][t]} if proprio else {}),
                 **{f"observation.images.{v}": obs[v][t] for v in views},
                 "task": meta["options"]["task"],
             })

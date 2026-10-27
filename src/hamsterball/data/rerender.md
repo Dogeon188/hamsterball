@@ -37,6 +37,8 @@ Re-render (spec §12): turns a state-only dataset from the [Collector](collector
 
 - 2026-10-27, ticket pose-stream/03: the reset-then-`step_to` loop became `walk`, so the pose stream reuses it rather than copying it; `episodes` behaves as before.
 
+- 2026-10-27, ticket articulated-tier/05: articulated datasets re-render with no change: `proprio`, the wall-contact flag in `state`, and progress are recomputed by the env from each core state (collision included) and stack like any observation key; the stored `run_vector` info carries over, and the dataset metadata key `low_level_policy` is copied with the provenance keys. `tests/test_articulated_data.py` checks the three equal the live record with `physics_step` disabled.
+
 ## Tried and rejected
 
 ## History

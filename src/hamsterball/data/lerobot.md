@@ -31,6 +31,8 @@ LeRobot export (spec §12): a one-way copy of a [re-rendered](rerender.md) Minar
 
 - 2026-10-22, ticket hamsterball-v1/09: `state` and `goal` stay two features, `observation.state` and `observation.goal`, rather than one concatenated `observation.state`, so nothing is relabelled.
 
+- 2026-10-27, ticket articulated-tier/05: a dataset with `proprio` gets an `observation.proprio` feature (26, float32) beside state and goal; `proprio` is excluded from the views by `ARTICULATED_OBSERVATION`. The action feature is the dataset's own (8 torques, plus 2 camera dims with `camera_action`).
+
 ## Tried and rejected
 
 - 2026-10-22, ticket hamsterball-v1/09: `lerobot` without a version bound resolved to 0.1.0 (pre-v3 format), since 0.6 conflicts with `pillow>=13` and `av>=18` and needs Python ≥ 3.12. Bounded to `>=0.6`, with the marker above.
