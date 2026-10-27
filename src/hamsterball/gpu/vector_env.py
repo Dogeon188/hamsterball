@@ -1,5 +1,5 @@
-"""The Warp vector env: `make_vec(..., backend="warp")`. N worlds of one level on one device, with the env-step logic
-as kernels in the same graph as the physics. See vector_env.md."""
+"""The Warp vector env: `make_vec(..., backend="warp")`. N worlds on one device, each on a (level, task) of a level bank,
+with the env-step logic as kernels in the same graph as the physics. See vector_env.md."""
 
 import math
 
@@ -22,11 +22,8 @@ from . import bank as B
 from . import env_step as E
 from .batch_core import BatchCore
 
-TASK = "reach_goal"  # the one task this slice runs; its slot in the goal one-hot is TASKS.index(TASK)
-
-
 class WarpVectorEnv(gym.vector.VectorEnv):
-    """`num_envs` worlds of `HamsterballEnv`, all on one level and one task (reach_goal) so far. `step`, `reset` and
+    """`num_envs` worlds of `HamsterballEnv`, each on a (level, task) it draws from a level bank at every reset. `step`, `reset` and
     `step_to` take and return float32 torch tensors on the device; a finished world resets inside the same `step`
     (`AutoresetMode.SAME_STEP`). The tensors are views of buffers the next call overwrites: clone what you keep."""
 
@@ -76,6 +73,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self.torch_device = torch.device(self.core.device.alias if self.core.device.is_cuda else "cpu")
         with wp.ScopedDevice(self.core.device):
             z = lambda shape, dt=float: wp.zeros(shape, dtype=dt)  # noqa: E731
+            self.todo = wp.zeros((n, self.markers.max_targets), dtype=wp.bool)  # the targets left, padded with False
             self.steps, self.phi, self.prev_pos = z(n, int), z(n), z(n, wp.vec3)
             self.reward, self.event, self.time, self.shaping = z(n), z(n), z(n), z(n)
             self.terminated, self.truncated, self.success, self.done = (z(n, wp.bool) for _ in range(4))
@@ -100,41 +98,46 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         generator's `bank_size` levels drawn now. Returns it and the difficulty the generator was called with."""
         if isinstance(levels, LevelGenerator):
             self.generator = levels
-            if [t for t in self.tasks if t in levels.tasks] != [TASK]:
-                raise NotImplementedError(f"the GPU backend runs {TASK} so far; the generator supports {levels.tasks}")
+            allowed = [t for t in self.tasks if t in levels.tasks]
+            if not allowed:
+                raise ValueError(f"the generator supports none of {self.tasks}")
             if difficulty is not None:
                 self.difficulty = difficulty
             seeds = self.np_random.integers(2**63, size=self.bank_size)
-            return [levels(TASK, int(seed), self.difficulty) for seed in seeds], self.difficulty
+            picks = self.np_random.integers(len(allowed), size=self.bank_size)
+            return [levels(allowed[p], int(seed), self.difficulty) for seed, p in zip(seeds, picks)], self.difficulty
         _file_pool_difficulty(difficulty)
         pool = [lv for x in levels for lv in _levels(x)]
-        allowed = [t for t in self.tasks if any(t in lv.tasks for lv in pool)]
-        if not allowed:
+        if not any(t in lv.tasks for lv in pool for t in self.tasks):
             raise ValueError(f"no level in the pool supports any of {self.tasks}")
-        if allowed != [TASK]:
-            raise NotImplementedError(f"the GPU backend runs {TASK} so far; the pool supports {allowed}")
         self.generator, self.difficulty = None, DIFFICULTY
         return pool, DIFFICULTY
 
     def _build_core(self, pool, difficulty, keep=()):
         """A batched core on the pool and the tables the env-step kernels read per (level, task) entry."""
-        for lv in pool:
-            if TASK in lv.tasks and any("motion" in h for h in lv.hazards):
-                raise NotImplementedError("moving hazards are not built on the GPU yet")
         core = BatchCore(AbstractTier(), pool, self.num_envs, self.camera_action, self.device_name, tasks=self.tasks, keep=keep)
+        bank = core.bank
+        rows = [(t, bank.levels[i].tasks[t], bank.levels[i].hazards) for i, t in bank.entries]
+        for task, block, hazards in rows:
+            if any("motion" in m or "attach" in m for m in [*hazards, *(m for _, m in E.targets(task, block))]):
+                raise NotImplementedError("moving and attached markers are not built on the GPU yet")
         self.levels = pool
-        bank, entries = core.bank, core.bank.entries
-        blocks = [bank.levels[i].tasks[t] for i, t in entries]
         limit = lambda b: self.time_limit_s if self.time_limit_s is not None else b["time_limit_s"]  # noqa: E731
         # the epsilon keeps a whole number of env steps from rounding up to one more, as in HamsterballEnv
-        steps = [math.ceil(limit(b) / (self.frame_skip * DT) - 1e-9) for b in blocks]
+        steps = [math.ceil(limit(b) / (self.frame_skip * DT) - 1e-9) for _, b, _ in rows]
         with wp.ScopedDevice(core.device):
-            self.markers = E.Markers([[b["goal"], *bank.levels[i].hazards] for (i, _), b in zip(entries, blocks)], core.device)
+            self.markers = E.Markers(rows, core.device)
             f = lambda x, dt: wp.array(x, dtype=dt)  # noqa: E731
+            blocks = [b for _, b, _ in rows]
             self.entry_spawn = f(np.array([b["spawn"]["pos"] for b in blocks], np.float32), wp.vec3)
             self.entry_yaw = f(np.radians([b["spawn"]["yaw_deg"] for b in blocks]).astype(np.float32), float)
-            self.entry_kill_z = f(np.array([bank.levels[i].kill_plane_z for i, _ in entries], np.float32), float)
+            self.entry_kill_z = f(np.array([bank.levels[i].kill_plane_z for i, _ in bank.entries], np.float32), float)
             self.entry_max_steps = f(np.array(steps, np.int32), int)
+            # each marker row's geom in the padded model: its slot, found when the bank's tables were built
+            geom = np.zeros((len(rows), self.markers.stride), np.int32)
+            for e, slots in enumerate(core.bank.row_slots):
+                geom[e, :len(slots)] = [core.bank.slot_ids[s] for s in slots]
+            self.row_geom = f(geom.reshape(-1), int)
         return core
 
     def _seed_rng(self):
@@ -149,7 +152,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         pool at its next reset (its `level_index` is -1 until then, unless the new pool holds that very `Level`)."""
         pool, difficulty = self._pool(levels, difficulty)
         old = self.core
-        states, entry = old.states(), old.entry.numpy()
+        states, entry, old_todo = old.states(), old.entry.numpy(), self.todo.numpy()
         new_level = np.full(self.num_envs, -1, np.int32)
         direct, keep = {}, []  # old entry -> (pool index) or kept entry index
         for e in sorted(set(entry.tolist())):
@@ -173,6 +176,11 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.level_index.assign(new_level)
             new.set_states(states)
             new.load_levels(self.all)
+            todo = np.zeros((self.num_envs, self.markers.max_targets), bool)
+            k = min(todo.shape[1], old_todo.shape[1])
+            todo[:, :k] = old_todo[:, :k]
+            self.todo = wp.array(todo, dtype=wp.bool)
+            self._look()
         self._seed_rng()
 
     def reset(self, *, seed=None, options=None):
@@ -187,6 +195,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
             self.core.reset_masked(self.all, self.spawn, self.facing)
             wp.launch(E.reset_episode, self.num_envs, self._episode_args(self.all))
             self._observe(self.all, self.none)
+            self._look()
             self.force_level.fill_(-1)  # the autoreset draws freely
             self.force_task.fill_(-1)
         for a in (self.reward, self.event, self.time, self.shaping, self.terminated, self.truncated, self.success, self.done):
@@ -250,15 +259,17 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         return (self._obs, wp.to_torch(self.reward), wp.to_torch(self.terminated), wp.to_torch(self.truncated), info)
 
     def _episode_args(self, mask):
-        return [mask, self.core.data.qpos, self.markers.centre, self.core.entry, self.markers.stride, self.steps, self.prev_pos,
-                self.phi]
+        m = self.markers
+        return [mask, self.core.data.qpos, m.centre, self.core.entry, m.stride, m.ntargets, m.mode, self.todo, self.steps,
+                self.prev_pos, self.phi]
 
     def _env_step(self):
         """The kernels after the physics (HamsterballEnv._advance and _observe), then the same-step autoreset."""
         n, m, d = self.num_envs, self.markers, self.core.data
-        wp.launch(E.advance, n, [d.qpos, m.kind, m.a, m.b, m.rad, m.rot, m.half, m.centre, self.core.entry, m.stride, m.n,
-                                 self.entry_kill_z, self.entry_max_steps,
-                                 int(self.truncate), int(self.shaped), self.shaping_gamma, self.steps, self.prev_pos, self.phi,
+        wp.launch(E.advance, n, [d.qpos, m.kind, m.a, m.b, m.rad, m.rot, m.half, m.centre, self.core.entry, m.stride,
+                                 m.ntargets, m.n, m.mode, m.goal_row, m.survive, m.time_penalty, self.entry_kill_z,
+                                 self.entry_max_steps, int(self.truncate), int(self.shaped), self.shaping_gamma,
+                                 self.todo, self.steps, self.prev_pos, self.phi,
                                  self.reward, self.terminated, self.truncated, self.success, self.failure, self.event,
                                  self.time, self.shaping])
         self._observe(self.all, self.success)
@@ -268,6 +279,13 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         self.core.reset_masked(self.done, self.spawn, self.facing)
         wp.launch(E.reset_episode, n, self._episode_args(self.done))
         self._observe(self.done, self.none)
+        self._look()
+
+    def _look(self):
+        """The episode task's marker colours into each world's `geom_rgba`, from the targets left."""
+        m = self.markers
+        wp.launch(E.look_markers, self.num_envs, [self.todo, self.core.entry, m.stride, m.ntargets, m.mode, self.row_geom,
+                                                  m.role, m.base, self.core.model.geom_rgba])
 
     def _observe(self, mask, success):
         """`state` and `goal` for the worlds in `mask`, after the derived quantities `mj_step` leaves behind are refreshed
@@ -280,5 +298,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         mjw.subtree_vel(c.model, d)
         c.warp_tier.obs(self.num_envs, d, c.obs_out)
         wp.launch(E.observe, self.num_envs, [mask, d.xpos, d.xmat, d.qvel, d.subtree_com, d.subtree_linvel, d.userdata,
-                                             c.obs_out["wall_contact"], self.markers.centre, c.entry, self.markers.stride, self.entry_kill_z,
-                                             self.task_idx, success, self.state, self.goal])
+                                             c.obs_out["wall_contact"], self.markers.centre, self.todo, self.steps, c.entry,
+                                             self.markers.stride, self.markers.ntargets, self.markers.mode,
+                                             self.markers.survive, self.entry_max_steps, self.entry_kill_z, self.task_idx,
+                                             success, self.state, self.goal])

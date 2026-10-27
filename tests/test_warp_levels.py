@@ -102,6 +102,30 @@ def test_a_pool_with_bodies_raises_until_they_are_built():
         warp_env(2, [level(SPHERE), raft])
 
 
+def replay(venv, eps, labels):
+    """Feed each world the core states of its CPU episode; compare observations, rewards, flags and codes."""
+    worst = 0.0
+    for t in range(max(len(e["steps"]) for e in eps)):
+        states = np.stack([e["steps"][min(t, len(e["steps"]) - 1)][0] for e in eps])
+        obs, reward, terminated, truncated, info = venv.step_to(states)
+        for w, ep in enumerate(eps):
+            if t >= len(ep["steps"]):
+                continue
+            cpu_obs, cpu_r, cpu_term, cpu_trunc, cpu_info = ep["steps"][t][1:6]
+            where = f"{labels[w]} world {w} step {t}"
+            assert bool(terminated[w]) == cpu_term and bool(truncated[w]) == cpu_trunc, where
+            assert bool(info["success"][w]) == cpu_info["success"], where
+            assert int(info["failure_reason"][w]) == CODES[cpu_info["failure_reason"]], where
+            done = cpu_term or cpu_trunc
+            got = info["final_obs"] if done else obs
+            for k in ("state", "goal"):
+                g = got[k][w].cpu().numpy()
+                np.testing.assert_allclose(g, cpu_obs[k], **OBS, err_msg=f"{where} {k}")
+                worst = max(worst, float(np.abs(g - cpu_obs[k]).max()))
+            np.testing.assert_allclose(float(reward[w]), cpu_r, **OBS, err_msg=where)
+    return worst
+
+
 def test_step_to_matches_the_cpu_env_on_episodes_from_several_bank_levels():
     """Worlds forced onto different levels of one bank replay CPU episodes recorded on those levels."""
     kw = {"time_limit_s": 6, "shaped": True}
@@ -113,29 +137,66 @@ def test_step_to_matches_the_cpu_env_on_episodes_from_several_bank_levels():
     venv = warp_env(len(eps), bank, **kw)
     forced = torch.tensor([bank.index(lv) for lv, _, _ in cases])
     obs, _ = venv.reset(seed=0, options={"level_index": forced})
-    worst = 0.0
     for w, ep in enumerate(eps):
         for k in ("state", "goal"):
             np.testing.assert_allclose(obs[k][w].cpu().numpy(), ep["reset_obs"][k], **OBS, err_msg=f"reset {k}")
-    for t in range(max(len(e["steps"]) for e in eps)):
-        states = np.stack([e["steps"][min(t, len(e["steps"]) - 1)][0] for e in eps])
-        obs, reward, terminated, truncated, info = venv.step_to(states)
-        for w, ep in enumerate(eps):
-            if t >= len(ep["steps"]):
-                continue
-            _, cpu_obs, cpu_r, cpu_term, cpu_trunc, cpu_info = ep["steps"][t]
-            where = f"{cases[w][2]} world {w} step {t}"
-            assert bool(terminated[w]) == cpu_term and bool(truncated[w]) == cpu_trunc, where
-            assert bool(info["success"][w]) == cpu_info["success"], where
-            assert int(info["failure_reason"][w]) == CODES[cpu_info["failure_reason"]], where
-            done = cpu_term or cpu_trunc
-            got = info["final_obs"] if done else obs
-            for k in ("state", "goal"):
-                g = got[k][w].cpu().numpy()
-                np.testing.assert_allclose(g, cpu_obs[k], **OBS, err_msg=f"{where} {k}")
-                worst = max(worst, float(np.abs(g - cpu_obs[k]).max()))
-            np.testing.assert_allclose(float(reward[w]), cpu_r, **OBS, err_msg=where)
-    print(f"mixed bank: worst observation difference {worst:.3g}")
+    print(f"mixed bank: worst observation difference {replay(venv, eps, [c[2] for c in cases]):.3g}")
+
+
+def test_step_to_matches_the_cpu_env_on_episodes_of_different_tasks_in_one_bank():
+    """One bank of levels of five tasks' kinds: each world forced onto its level and task, with markers and looks."""
+    from test_warp_tasks import EDGE, LEFT, OUT_OF_ORDER, greedy, looks, make, same_looks, sph
+    from test_warp_tasks import record as record_task
+
+    from hamsterball.env import TASKS
+
+    kw = {"shaped": True}
+    stand = lambda obs, i: np.zeros(2, np.float32)  # noqa: E731
+    run = lambda obs, i: np.array([0.0, 1.0], np.float32)  # noqa: E731
+    cases = [
+        (level(SPHERE), "reach_goal", greedy, "success"),
+        (OUT_OF_ORDER, "waypoint_race", greedy, "success"),
+        (make("collect_items", items=[sph(0, 3, 0.5), sph(1, 5, 0.5)]), "collect_items", greedy, "success"),
+        (make("unlock_goal", keys=[sph(0, 3)], goal=sph(0, 6)), "unlock_goal", greedy, "success"),
+        (EDGE, "survive", run, "hazard"),
+        (LEFT, "survive", run, "left_region"),
+        (Level.load(LEVELS_DIR / "first_survive.yaml"), "survive", stand, "success"),
+    ]
+    eps = [record_task(lv, task, policy, kw) for lv, task, policy, _ in cases]
+    assert [e["outcome"] for e in eps] == [c[3] for c in cases]
+    bank = [c[0] for c in cases][::-1]
+    from hamsterball.gpu.vector_env import WarpVectorEnv
+
+    venv = WarpVectorEnv(len(eps), levels=bank, device=DEVICE, bank_size=4, **kw)  # all five tasks
+    forced = {"level_index": torch.tensor([bank.index(c[0]) for c in cases]),
+              "task_index": torch.tensor([TASKS.index(c[1]) for c in cases])}
+    obs, info = venv.reset(seed=0, options=forced)
+    assert np.array_equal(info["task_index"].cpu().numpy(), forced["task_index"].numpy())
+    for w, ep in enumerate(eps):
+        for k in ("state", "goal"):
+            np.testing.assert_allclose(obs[k][w].cpu().numpy(), ep["reset_obs"][k], **OBS, err_msg=f"reset {k}")
+        same_looks(looks(venv, w), ep["reset_rgba"], f"world {w} reset")
+    print(f"mixed tasks: worst observation difference {replay(venv, eps, [c[3] for c in cases]):.3g}")
+
+
+def test_a_level_with_two_tasks_draws_both_and_the_pool_honours_tasks():
+    from hamsterball.env import TASKS
+
+    spawn = {"pos": [0, 0, 0.5]}
+    both = Level.from_dict({"kill_plane_z": -5, "geoms": FAR.geoms, "tasks": {
+        "reach_goal": {"spawn": spawn, "goal": SPHERE, "time_limit_s": 5},
+        "survive": {"spawn": spawn, "region": {"type": "box", "pos": [0, 0, 0.5], "size": [2, 2, 1]}, "time_limit_s": 5}}})
+    from hamsterball.gpu.vector_env import WarpVectorEnv
+
+    venv = WarpVectorEnv(64, levels=[both, level(SPHERE)], tasks=["reach_goal", "survive"], device=DEVICE)
+    _, info = venv.reset(seed=0)
+    drawn = set(zip(info["level_index"].cpu().tolist(), info["task_index"].cpu().tolist()))
+    assert drawn == {(0, 0), (0, 4), (1, 0)}  # the second level has no survive; each of the first level's tasks is drawn
+    _, info = venv.reset(options={"task_index": TASKS.index("survive")})
+    assert (info["level_index"] == 0).all() and (info["task_index"] == 4).all()
+    only = WarpVectorEnv(8, levels=[both, level(SPHERE)], tasks=["reach_goal"], device=DEVICE)
+    _, info = only.reset(seed=0)
+    assert (info["task_index"] == 0).all()
 
 
 def test_a_generator_pool_is_a_bank_of_generated_levels():

@@ -112,7 +112,8 @@ class Bank:
     def tables(self, mjm):
         """The slot tables as numpy, one row per entry: what each world's model fields take for that (level, task).
         `mjm` is the compiled padded model, which gives the slot geom ids and the values a parked slot keeps."""
-        ids = [mjm.geom(self.name(s)).id for s in self.slots]
+        ids = self.slot_ids = [mjm.geom(self.name(s)).id for s in self.slots]
+        self.row_slots = []  # per entry, the slot of each marker row
         E, S = len(self.entries), len(self.slots)
         t = {"pos": np.zeros((E, S, 3), np.float32), "quat": np.zeros((E, S, 4), np.float32),
              "size": np.zeros((E, S, 3), np.float32), "aabb": np.zeros((E, S, 2, 3), np.float32),
@@ -124,9 +125,12 @@ class Bank:
             solids = [("s", g["type"], _geom_row(g, self.hfields)) for g in lv.geoms]
             marks = [("m", m["type"], _marker_row(m, rgba)) for m, rgba in marker_rows(lv, task)]
             used, filled = {}, {}
+            self.row_slots.append([])
             for kind, typ, row in solids + marks:
                 j = used[kind, typ] = used.get((kind, typ), -1) + 1
                 filled[kind, typ, j] = row
+                if kind == "m":
+                    self.row_slots[-1].append(self.slots.index((kind, typ, j)))
             park = lv.kill_plane_z - PARK_DEPTH
             for s, slot in enumerate(self.slots):
                 g = ids[s]
