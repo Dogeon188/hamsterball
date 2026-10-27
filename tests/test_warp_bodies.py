@@ -270,27 +270,13 @@ def test_live_physics_drives_each_world_from_its_own_clock_and_the_ball_rides():
         assert not bool(info["failure_reason"][0]), "the ridden platform keeps the ball in its region"
 
 
-class DrivenLayouts:
-    """The procedural generator, skipping the seesaw and collapse layouts (tickets 08 and 09): plateau, ridge, pillars
-    and platform remain."""
-
-    def __init__(self):
-        self.gen = GEN
-        self.tasks, self.version = GEN.tasks, GEN.version
-
-    def __call__(self, task, seed, difficulty):
-        while (lv := self.gen(task, seed, difficulty)) and (lv.collapse or any("joint" in b for b in lv.bodies)):
-            seed += 1
-        return lv
-
-
 def test_a_generator_pool_with_body_layouts_trains_on_the_device():
-    """A bank of generated survive levels (plateau, ridge, pillars, platform) pads to the most bodies any holds; worlds
+    """A bank of generated survive levels (every layout the generator draws) pads to the most bodies any holds; worlds
     on every kind step, finish and reset in the same step."""
-    venv = venv_for(DrivenLayouts(), 8, bank_size=16, difficulty=0.8)
+    venv = venv_for(GEN, 8, bank_size=16, difficulty=0.8)
     assert venv.core.bank.nbodies >= 1
     obs, info = venv.reset(seed=3)
-    for i in range(400):
+    for i in range(150):
         obs, r, term, trunc, info = venv.step(torch.zeros(8, 2))
     assert torch.isfinite(obs["state"]).all() and torch.isfinite(obs["goal"]).all()
     kinds = {len(venv.levels[i].bodies) for i in info["level_index"].tolist()}

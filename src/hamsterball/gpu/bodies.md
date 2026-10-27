@@ -28,7 +28,7 @@ All of it is float64, including the time (`data.time` is float32, widened). The 
 ## Known quirks
 
 - A world's sim time is Warp's float32 `data.time`, which accumulates one physics step's rounding at a time, so a long episode's bodies drift in phase from the CPU's (the CPU's time is float64). At the episode lengths in use (under a minute) it is below the test's tolerance on a loaded state, and Warp's own time keeps the drift ([batch_core.md](batch_core.md)).
-- Only free-joint bodies. A seesaw (a body with a `joint`) raises in the bank; ticket 08 adds it, and tiles (ticket 09) join the same slot pool.
+- Only driven (free-joint) bodies: `BodyTables` skips a level's seesaws (they have no motion; [seesaws.md](seesaws.md)), and its k-th row is the level's k-th driven body. `slot_qadr` lists every body slot's qpos address for attached markers. Tiles (ticket 08) join the same slot pool.
 
 ## Decisions
 

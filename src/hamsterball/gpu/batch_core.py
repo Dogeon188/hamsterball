@@ -16,8 +16,9 @@ from ..core.model import (FACING, GAME_SIZE, HAM, HAM_DOF, HAM_QPOS, PITCH, PITC
 from ..core.step import (DRAG_K, FIELD_HARD, FIELD_START, FRAME_SKIP, M_HAM, M_SHELL, MU, PITCH_MAX, PITCH_MIN, PITCH_STEP,
                          STATE, TAU, TURN_STEP)
 from .abstract_tier import WarpAbstractTier
-from .bank import BATCHED, TASK_NAMES, Bank, DeviceTables
+from .bank import BATCHED, TASK_NAMES, Bank, DeviceTables, body_kind
 from .bodies import BodyTables
+from .seesaws import SEESAW_FIELDS, SeesawTables
 from .tiles import TileTables
 
 # core.step's constants, as kernel constants
@@ -128,7 +129,7 @@ class BatchCore:
                  tasks=TASK_NAMES, keep=()):
         """`levels`: the bank, a list of `Level`s, padded into one model (see bank.py); `tasks` limits the (level, task)
         entries a world can be on, and `keep` appends entries a world still needs (see `bank.Bank`). `device`: "cpu" or
-        "cuda:N". Seesaws raise `NotImplementedError`."""
+        "cuda:N"."""
         tier = tier or AbstractTier()
         if type(tier) not in TIERS:
             raise NotImplementedError(f"{type(tier).__name__} has no batched drive/obs yet")
@@ -147,10 +148,14 @@ class BatchCore:
         self.cpu_model = build(tier, self.bank.mjcf(), GAME_SIZE, self.bank.body_mjcf() + self.bank.tile_mjcf(), self.bank.ntiles)
         self.adim = tier.action_space().shape[0] + 2 * camera_action
         with wp.ScopedDevice(self.device):
-            self.model = mjw.put_model(self.cpu_model, batch_sizes={k: num_envs for k in BATCHED})
+            seesaws = self.bank.nhinge + self.bank.nball > 0
+            self.model = mjw.put_model(self.cpu_model, batch_sizes={k: num_envs for k in BATCHED + (SEESAW_FIELDS if seesaws else ())})
+            if seesaws:  # the solver's tolerance scales with the level's mean inertia: one per world
+                self.model.stat.meaninertia = wp.zeros(num_envs, dtype=float)
             self.data = mjw.make_data(self.cpu_model, nworld=num_envs)
             self.tables = DeviceTables(self.bank, self.cpu_model, self.device)
             self.bodies = BodyTables(self.bank, self.cpu_model, self.device)
+            self.seesaws = SeesawTables(self.bank, self.cpu_model, self.device)
             self.tiles = TileTables(self.bank, self.cpu_model, tier, self.device)
             self.on = wp.ones(num_envs, dtype=wp.bool)
             self.entry = wp.zeros(num_envs, dtype=int)  # each world's (level, task) entry in the bank's tables
@@ -198,6 +203,7 @@ class BatchCore:
         """Write the masked worlds' levels into the model: each world's slots take its `entry`'s values, and the unused
         ones park. Positions refresh at the next step."""
         self.tables.load(mask, self.entry, self.model, self.data)
+        self.seesaws.load(mask, self.entry, self.model)
 
     def _refresh(self):
         """Positions (xpos, xipos, xmat, subtree_com) from qpos: what `mj_kinematics` and `mj_comPos` leave."""
@@ -262,61 +268,76 @@ class BatchCore:
         return {k: v.numpy() for k, v in self.obs_out.items()}
 
     def _state_layouts(self):
-        """The padded state vector's pools: each segment of it (time, qpos, qvel, warm start, `qfrc_applied`,
-        `xfrc_applied`, mocap, userdata) holds the body slots then the tile slots at its tail, so a level's CPU core-state
-        vector (`layout(bodies, tiles)`) is the padded one with each pool's unused tail cut. Also the padded vector of a
-        world with none of its slots in use."""
-        m, K, T = self.cpu_model, self.bank.nbodies, self.bank.ntiles
+        """The padded state vector's sizes per segment (time, qpos, qvel, warm start, `qfrc_applied`, `xfrc_applied`, mocap,
+        userdata), the address of each body slot in the segments that hold bodies, and the template of a world with none
+        of its slots in use. The body slots, then the tile slots, are the last bodies, joints and dofs of the model, in
+        `bank.body_names` order; a level's own bodies take the slots `bank.slot_of` gives, and its tiles the first tile
+        slots (see `_layout`). The tile slots are also the last userdata slots."""
+        m = self.cpu_model
         sizes = [1, m.nq, m.nv, m.nv, m.nv, 6 * m.nbody, 3 * m.nmocap, 4 * m.nmocap, m.nuserdata]
-        per = [(0, 0), (7, 7), (6, 6), (6, 6), (6, 6), (6, 6), (0, 0), (0, 0), (0, 1)]  # per body slot, per tile slot
         assert sum(sizes) == self.nstate, (sizes, self.nstate)
-        off = np.cumsum([0] + sizes)
-        self._layout_cache = {}
-
-        def layout(b, t):
-            if (b, t) not in self._layout_cache:
-                parts = []
-                for j, (ub, ut) in enumerate(per):
-                    head = sizes[j] - ub * K - ut * T
-                    parts.append(off[j] + np.concatenate([np.arange(head + ub * b), head + ub * K + np.arange(ut * t)]).astype(int))
-                self._layout_cache[b, t] = np.concatenate(parts)
-            return self._layout_cache[b, t]
-
+        ids = [m.body(n) for n in self.bank.body_names]
+        slots = [(int(m.jnt_qposadr[b.jntadr[0]]), int(m.jnt_dofadr[b.jntadr[0]]), int(b.id)) for b in ids]
         template = np.zeros(self.nstate, np.float32)
-        for q in self.bodies.qadr + self.tiles.qadr:  # an unused slot rests at the origin with a unit quaternion
-            template[1 + q + 3] = 1.0
-        return layout, template
+        template[1:1 + m.nq] = m.qpos0  # an unused slot rests at the model's qpos0 (a free joint's unit quaternion)
+        self._layout_cache = {}
+        return sizes, slots, template
 
-    def _counts(self, entries):
-        """For each entry, the (bodies, tiles) of its level."""
-        out = []
-        for e in entries:
-            lv = self.bank.levels[self.bank.entries[e][0]]
-            out.append((len(lv.bodies), len(lv.collapse["tiles"]) if lv.collapse else 0))
-        return out
+    def _layout(self, level):
+        """The indices into the padded state vector that make up the CPU core-state vector of `level`: each segment's
+        prefix (the shell, the hamster, the views), then the level's bodies in its own order, each at its slot's address.
+        then its collapsing tiles, each at its slot's address, and the first tile slots of userdata. Cached per sequence of
+        body kinds and tile count."""
+        sizes, slots, _ = self._layouts
+        tiles = self.tiles.slots
+        nt = len(level.collapse["tiles"]) if level.collapse else 0
+        kinds = tuple(body_kind(b) for b in level.bodies)
+        if (kinds, nt) not in self._layout_cache:
+            m = self.cpu_model
+            first = (slots + tiles)[0] if slots or tiles else (m.nq, m.nv, m.nbody)
+            nq0, nv0, nb0 = first
+            off = np.cumsum([0] + sizes)
+            qa, da, ba = [np.arange(nq0)], [np.arange(nv0)], [np.arange(nb0)]
+            for si, k in zip(self.bank.slot_of(level), kinds):
+                nq, nv = size[k]
+                qa.append(slots[si][0] + np.arange(nq)), da.append(slots[si][1] + np.arange(nv)), ba.append([slots[si][2]])
+            for q, d, b in tiles[:nt]:
+                qa.append(q + np.arange(7)), da.append(d + np.arange(6)), ba.append([b])
+            qa, da, ba = (np.concatenate(x).astype(int) for x in (qa, da, ba))
+            xf = (6 * ba[:, None] + np.arange(6)).ravel()
+            parts = [np.arange(1), off[1] + qa, off[2] + da, off[3] + da, off[4] + da, off[5] + xf]
+            parts += [np.arange(off[j], off[j + 1]) for j in (6, 7)]
+            parts.append(off[8] + np.arange(m.nuserdata - len(tiles) + nt))  # the tier's slots, then the level's tiles'
+            self._layout_cache[kinds, nt] = np.concatenate(parts)
+        return self._layout_cache[kinds, nt]
+
+    def _level_of(self, world_or_entry, entry=False):
+        """The `Level` a world (or an entry) is on."""
+        e = world_or_entry if entry else int(self.entry.numpy()[world_or_entry])
+        return self.bank.levels[self.bank.entries[e][0]]
 
     def state(self, world):
         """One world's state in the CPU core-state layout (`Core.state()`) of its level, float32 precision."""
         with wp.ScopedDevice(self.device):
             mjw.get_state(self.model, self.data, self._state, int(STATE))
-        return self._state.numpy()[world][self._layouts[0](*self._counts([int(self.entry.numpy()[world])])[0])].astype(np.float64)
+        return self._state.numpy()[world][self._layout(self._level_of(world))].astype(np.float64)
 
     def set_state(self, world, s):
         """Load a CPU core state into one world, as `Core.set_state` (float32 precision; the vector carries the
         solver's warm start, as on the CPU). `s` is in the layout of the world's level. Positions refresh at the next
         step."""
         row = self._state.numpy()
-        row[world] = self._pad(world, s, self._counts([int(self.entry.numpy()[world])])[0])
+        row[world] = self._pad(world, s, self._level_of(world))
         active = np.zeros(self.num_envs, bool)
         active[world] = True
         self._load(row, active)
 
-    def _pad(self, world, s, b):
-        layout, template = self._layouts
-        s, idx = np.asarray(s), layout(*b)
+    def _pad(self, world, s, level):
+        idx = self._layout(level)
+        s = np.asarray(s)
         if len(s) != len(idx):
             raise ValueError(f"world {world}: a state of {len(s)} numbers, its level's layout has {len(idx)}")
-        row = template.copy()
+        row = self._layouts[2].copy()
         row[idx] = s
         return row
 
@@ -331,13 +352,14 @@ class BatchCore:
         """Every world's state in the CPU layout of its level: a list of float32 vectors, which differ in length when the
         levels' bodies do."""
         rows, entry = self.states(), self.entry.numpy()
-        return [rows[w][self._layouts[0](*c)] for w, c in enumerate(self._counts(entry))]
+        return [rows[w][self._layout(self._level_of(e, True))] for w, e in enumerate(entry)]
 
     def set_states(self, states):
         """`set_state` for every world at once: a `(num_envs, size)` array, or a list of one vector per world, in each
         world's level's CPU layout."""
         entry = self.entry.numpy()
-        self._load(np.stack([self._pad(w, states[w], c) for w, c in enumerate(self._counts(entry))]), np.ones(self.num_envs, bool))
+        self._load(np.stack([self._pad(w, states[w], self._level_of(e, True)) for w, e in enumerate(entry)]),
+                   np.ones(self.num_envs, bool))
 
     def _load(self, rows, active):
         with wp.ScopedDevice(self.device):

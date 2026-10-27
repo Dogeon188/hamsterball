@@ -93,14 +93,13 @@ def test_every_level_of_a_bank_with_tiles_round_trips_its_cpu_state():
 
 def test_a_state_with_touched_and_untouched_tiles_round_trips_with_its_infinities():
     b = batch(BANK)
-    core = cpu_core(SMALL, 20)
+    core = cpu_core(MIXED, 20)  # the ball is on the box tile, the sphere and the capsule are untouched
     s = core.state().astype(np.float32)
-    _, nu = tile_slices(core)
-    assert np.isinf(s[-4:]).any() and np.isfinite(s[-4:]).any()  # some tiles touched, some not
-    b.reset([0], bank_index=0)
-    b.set_state(0, s)
-    got = b.state(0)
-    assert np.array_equal(got[-4:], s[-4:])  # inf stays inf, a stored time stays
+    assert np.isinf(s[-3:]).any() and np.isfinite(s[-3:]).any()  # some tiles touched, some not
+    b.reset([1], bank_index=1)
+    b.set_state(1, s)
+    got = b.state(1)
+    assert np.array_equal(got[-3:], s[-3:])  # inf stays inf, a stored time stays
 
 
 DROP = 0.05  # m: a ball spawned this high lands on the tiles after 0.1 s (a spawn at rest on them touches at distance 0,
@@ -348,16 +347,7 @@ def test_live_physics_collapses_each_world_from_its_own_trigger():
 
 def test_a_generator_pool_with_collapse_layouts_trains_on_the_device():
     """A bank of generated survive levels, collapse floors among them, steps, ends and resets worlds in the same step."""
-    class NoSeesaw:
-        def __init__(self):
-            self.tasks, self.version = GEN.tasks, GEN.version
-
-        def __call__(self, task, seed, difficulty):
-            while (lv := GEN(task, seed, difficulty)) and any("joint" in b for b in lv.bodies):
-                seed += 1
-            return lv
-
-    venv = venv_for(NoSeesaw(), 4, bank_size=8, difficulty=0.5)
+    venv = venv_for(GEN, 4, bank_size=8, difficulty=0.5)
     assert venv.core.bank.ntiles >= 1
     obs, info = venv.reset(seed=3)
     for _ in range(60):

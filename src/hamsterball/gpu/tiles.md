@@ -31,7 +31,7 @@ A tile slot a world's level uses sits at rest until `delay` after its trigger ti
 
 ## Decisions
 
-- 2026-10-27, ticket gpu-backend/08: tiles are a second free-joint pool after the body pool, with a geom slot per type per tile slot (one geom per tile, so at most one slot of one type per tile), in the CPU's body order (bodies, then tiles), so the CPU-layout state is the padded one with each pool's unused tail cut ([batch_core.md](batch_core.md)).
+- 2026-10-27, ticket gpu-backend/08: tiles are a second free-joint pool after the body pool, with a geom slot per type per tile slot (one geom per tile, so at most one slot of one type per tile), in the CPU's body order (bodies, then tiles), so the CPU-layout state is the padded one gathered by the level's tiles after its bodies ([batch_core.md](batch_core.md)).
 - 2026-10-27, ticket gpu-backend/08: one trigger-time userdata slot per tile slot, `+inf` set at reset; userdata is the model's last segment and tile slots its last slots, so a level's userdata is a tail cut too.
 - 2026-10-27, ticket gpu-backend/08: the warning colours are written by a kernel in `_look`, not on the host, from the state alone (sim time and trigger), so a re-render or `step_to` draws them the same.
 

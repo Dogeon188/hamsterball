@@ -19,10 +19,22 @@ TASK_NAMES = tuple(TASK_MARKERS)  # the goal one-hot's order, as env.TASKS
 STATIC_TYPES = ("plane", "hfield", "box", "sphere", "capsule")  # a level's solids, in slot order
 MARKER_TYPES = ("sphere", "capsule", "box")
 BODY_TYPES = ("box", "sphere", "capsule")  # a body's geoms (level.BODY_GEOMS), in slot order
+BODY_NAMES = {"b": "body", "h": "hinge", "n": "ball"}  # a body slot's kind (driven, hinge seesaw, ball seesaw): its model name
+SEESAW_RANGE = 170.0  # deg: a parked seesaw slot's joint range, wide because jnt_limited is shared across worlds
 GEOM_RGBA = (0.45, 0.5, 0.45, 1.0)  # a level solid's colour when it names none (level._geom_mjcf)
 PARK_DEPTH = 1000.0  # m below the kill plane an unused slot sits
 PARK_MARGIN = -1000.0  # an unused slot's geom_margin: nothing touches it (Warp shares contype across worlds)
 BATCHED = ("geom_pos", "geom_quat", "geom_size", "geom_rgba", "geom_margin", "geom_dataid", "geom_aabb", "geom_rbound")
+
+
+def body_kind(body):
+    """A level body's slot kind: `b` for a driven (free-joint) body, `h` a hinge seesaw, `n` a ball seesaw."""
+    return "b" if "motion" in body else "h" if body["joint"]["type"] == "hinge" else "n"
+
+
+def is_body(slot_kind):
+    """Whether a slot's kind names a body's geom (`b0`, `h0`, `n0`) and not a level solid (`s`) or marker (`m`)."""
+    return slot_kind not in ("s", "m")
 
 
 def marker_rows(level, task):
@@ -57,8 +69,6 @@ class Bank:
         self.n_pool = len(levels)
         pairs = [(lv, None) for lv in levels] + [(lv, t) for lv, t in keep]
         for lv, _ in pairs:
-            if any("joint" in b for b in lv.bodies):
-                raise NotImplementedError("seesaws come with a later ticket")
             if any(CONTACT.keys() & g.keys() for g in lv.geoms):
                 raise NotImplementedError("a geom with friction, solref or solimp is not batched yet")
         self.levels = [lv for lv, _ in pairs]
@@ -89,14 +99,18 @@ class Bank:
                 m[mk["type"]] += 1
             self.static_counts = {k: max(self.static_counts[k], n[k]) for k in STATIC_TYPES}
             self.marker_counts = {k: max(self.marker_counts[k], m[k]) for k in MARKER_TYPES}
-        # the body pool: as many free-joint slots as the most bodies a level has, each with its geom slots per type at the
-        # most any entry's body in that slot holds
-        self.nbodies = max([len(self.levels[i].bodies) for i, _ in self.entries], default=0)
-        self.body_counts = [{k: 0 for k in BODY_TYPES} for _ in range(self.nbodies)]
+        # the body pool: as many free-joint slots as the most driven bodies a level has, then the most hinge seesaws, then
+        # the most ball seesaws, each with its geom slots per type at the most any entry's body in that slot holds
+        most = {k: max([sum(body_kind(b) == k for b in self.levels[i].bodies) for i, _ in self.entries], default=0)
+                for k in BODY_NAMES}
+        self.nbodies, self.nhinge, self.nball = most["b"], most["h"], most["n"]
+        self.body_prefix = [f"{k}{j}" for k in BODY_NAMES for j in range(most[k])]  # a body slot's geom-slot prefix
+        self.body_names = [f"{BODY_NAMES[k]}{j}" for k in BODY_NAMES for j in range(most[k])]  # and its model body name
+        self.body_counts = [{k: 0 for k in BODY_TYPES} for _ in self.body_prefix]
         for i, _ in self.entries:
-            for slot, b in zip(self.body_counts, self.levels[i].bodies):
+            for si, b in zip(self.slot_of(self.levels[i]), self.levels[i].bodies):
                 for k in BODY_TYPES:
-                    slot[k] = max(slot[k], sum(g["type"] == k for g in b["geoms"]))
+                    self.body_counts[si][k] = max(self.body_counts[si][k], sum(g["type"] == k for g in b["geoms"]))
         # the tile pool (ticket 08): as many free-joint slots as the most tiles a level has, each with one geom slot per type
         # a tile of that slot has in any entry; a level's collapse tiles are its first slots
         self.ntiles = max([len(self.levels[i].collapse["tiles"]) if self.levels[i].collapse else 0 for i, _ in self.entries], default=0)
@@ -106,8 +120,18 @@ class Bank:
                 slot[g["type"]] = 1
         self.slots = [("s", k, j) for k in STATIC_TYPES for j in range(self.static_counts[k])] + [
             ("m", k, j) for k in MARKER_TYPES for j in range(self.marker_counts[k])] + [
-            (f"b{b}", k, j) for b in range(self.nbodies) for k in BODY_TYPES for j in range(self.body_counts[b][k])] + [
+            (p, k, j) for p, c in zip(self.body_prefix, self.body_counts) for k in BODY_TYPES for j in range(c[k])] + [
             (f"t{b}", k, j) for b in range(self.ntiles) for k in BODY_TYPES for j in range(self.tile_counts[b][k])]
+
+    def slot_of(self, level):
+        """For each of a level's bodies, the index in `body_names` of the slot it takes: the n-th driven body takes the
+        n-th free-joint slot, the n-th hinge seesaw the n-th hinge slot, and so on."""
+        seen, out = {}, []
+        for b in level.bodies:
+            k = body_kind(b)
+            out.append(self.body_prefix.index(f"{k}{seen.get(k, 0)}"))
+            seen[k] = seen.get(k, 0) + 1
+        return out
 
     def name(self, slot):
         return "/".join(map(str, slot))
@@ -123,8 +147,8 @@ class Bank:
         for slot in self.slots:
             kind, typ, _ = slot
             if kind != "m":  # contact on, like a level solid (level._geom_mjcf)
-                if kind[0] in "bt":
-                    continue  # a body's or tile's geoms are in its body (body_mjcf, tile_mjcf)
+                if is_body(kind):
+                    continue  # a body's geoms are in its body (body_mjcf)
                 shape = 'hfield="hfield0"' if typ == "hfield" else 'size="1 1 1"'
                 out.append(f'<geom name="{self.name(slot)}" type="{typ}" {shape} contype="1" conaffinity="1" group="0"/>')
             else:  # contact off, like a marker (level._marker_mjcf)
@@ -132,18 +156,28 @@ class Bank:
         return "<asset>{}</asset>\n<worldbody>\n{}\n</worldbody>".format("\n".join(assets), "\n".join(out))
 
     def body_mjcf(self):
-        """MJCF sections for `core.model.build`'s `bodies`: the body slots `body<k>`, each a kinematic body as the CPU
-        compiles one (`level._free_mjcf`) at the origin holding its geom slots, and a contact exclude from the world and
-        from each other. "" for a bank without bodies."""
-        if not self.nbodies:
-            return ""
-        names = [f"body{b}" for b in range(self.nbodies)]
+        """MJCF sections for `core.model.build`'s `bodies`: the body slots, each a body at the origin holding its geom
+        slots, and a contact exclude from the world and from each other. A driven slot is a kinematic body as the CPU
+        compiles one (`level._free_mjcf`); a seesaw slot is a gravity-compensated hinge or ball joint with a wide range
+        and an inertial of its own, which a world's level overwrites ([seesaws.md](seesaws.md)). "" for a bank without
+        bodies."""
         out = []
-        for b, n in enumerate(names):
-            geoms = "".join(f'<geom name="b{b}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
-                            for typ in BODY_TYPES for j in range(self.body_counts[b][typ]))
-            out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
-        return _sections(out, [("world", n) for n in names] + list(itertools.combinations(names, 2)))
+        for prefix, name, counts in zip(self.body_prefix, self.body_names, self.body_counts):
+            geoms = "".join(f'<geom name="{prefix}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
+                            for typ in BODY_TYPES for j in range(counts[typ]))
+            if prefix[0] == "b":
+                out.append(_free_mjcf(name, [0.0, 0.0, 0.0], geoms))
+                continue
+            joint = (f'type="hinge" axis="1 0 0" range="-{SEESAW_RANGE!r} {SEESAW_RANGE!r}"' if prefix[0] == "h"
+                     else f'type="ball" range="0 {SEESAW_RANGE!r}"')
+            # a ball slot's centre of mass is off its joint: MuJoCo marks a ball body with its centre at the joint "simple"
+            # (a diagonal block in the mass matrix) and Warp builds that sparsity once, but a level's seesaw may not be
+            com = "0.1 0 0" if prefix[0] == "n" else "0 0 0"
+            out.append(f'<body name="{name}" pos="0 0 0" gravcomp="1"><joint {joint} limited="true" stiffness="0" damping="0"/>'
+                       f'<inertial pos="{com}" mass="1" diaginertia="1 1 1"/>{geoms}</body>')
+        if not out:
+            return ""
+        return _sections(out, [("world", n) for n in self.body_names] + list(itertools.combinations(self.body_names, 2)))
 
     def tile_mjcf(self):
         """MJCF sections for `core.model.build`'s `bodies`, after `body_mjcf()`'s: the tile slots `tile<k>`, each a kinematic
@@ -157,8 +191,7 @@ class Bank:
             geoms = "".join(f'<geom name="t{k}/{typ}/{j}" type="{typ}" size="1 1 1" contype="1" conaffinity="1" group="0"/>'
                             for typ in BODY_TYPES for j in range(self.tile_counts[k][typ]))
             out.append(_free_mjcf(n, [0.0, 0.0, 0.0], geoms))
-        others = ["world", *(f"body{b}" for b in range(self.nbodies))]
-        return _sections(out, [(a, t) for t in names for a in others] + list(itertools.combinations(names, 2)))
+        return _sections(out, [(a, t) for t in names for a in ["world", *self.body_names]] + list(itertools.combinations(names, 2)))
 
     def tables(self, mjm):
         """The slot tables as numpy, one row per entry: what each world's model fields take for that (level, task).
@@ -175,7 +208,8 @@ class Bank:
         for e, (i, task) in enumerate(self.entries):
             lv = self.levels[i]
             solids = [("s", g["type"], _geom_row(g, self.hfields)) for g in lv.geoms]
-            solids += [(f"b{b}", g["type"], _geom_row(g, self.hfields)) for b, body in enumerate(lv.bodies) for g in body["geoms"]]
+            solids += [(self.body_prefix[si], g["type"], _geom_row(g, self.hfields))
+                       for si, body in zip(self.slot_of(lv), lv.bodies) for g in body["geoms"]]
             tiles = [(f"t{k}", g["type"], _geom_row({**g, "pos": [0.0, 0.0, 0.0]}, self.hfields))  # a tile geom is at its body's origin
                      for k, g in enumerate(lv.collapse["tiles"] if lv.collapse else [])]
             marks = [("m", m["type"], _marker_row(m, rgba)) for m, rgba in marker_rows(lv, task)]
@@ -200,7 +234,7 @@ class Bank:
                     margin = 0.0
                 else:  # parked: far under the kill plane (a body's geom, far under its body), no contacts, invisible; its
                     # compiled size and bounds stay
-                    pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if slot[0][0] in "bt" else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
+                    pos, quat, mat, margin = (0.0, 0.0, -PARK_DEPTH if is_body(slot[0]) else park), (1.0, 0, 0, 0), np.eye(3), PARK_MARGIN
                     size, aabb, rbound = mjm.geom_size[g], mjm.geom_aabb[g].reshape(2, 3), mjm.geom_rbound[g]
                     rgba, dataid = (*mjm.geom_rgba[g][:3], 0.0), int(mjm.geom_dataid[g])
                 if slot[1] == "plane":  # the plane's bounds are infinite, so they are the compiled ones

@@ -47,12 +47,14 @@ class BodyTables:
         self.K = K = bank.nbodies
         self.qadr = [int(cpu_model.jnt_qposadr[cpu_model.body_jntadr[cpu_model.body(f"body{k}").id]]) for k in range(K)]
         self.dadr = [int(cpu_model.jnt_dofadr[cpu_model.body_jntadr[cpu_model.body(f"body{k}").id]]) for k in range(K)]
+        # every body slot's qpos address, driven and seesaw, in `bank.body_names` order (what an attached marker reads)
+        self.slot_qadr = [int(cpu_model.jnt_qposadr[cpu_model.body_jntadr[cpu_model.body(n).id]]) for n in bank.body_names]
         E = len(bank.entries)
         f = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pos", "start", "count", "tilt", "axis", "amp", "tperiod", "tphase")}
         pts, cum = [[0, 0, 0]], [0.0]  # one padding point so the arrays are never empty
         nb = []
         for i, _ in bank.entries:
-            bodies = bank.levels[i].bodies
+            bodies = [b for b in bank.levels[i].bodies if "motion" in b]  # a seesaw is not driven
             nb.append(len(bodies))
             for k in range(K):
                 b = bodies[k] if k < len(bodies) else None

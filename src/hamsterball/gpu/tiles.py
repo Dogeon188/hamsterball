@@ -33,6 +33,7 @@ class TileTables:
         self.first_slot = CORE_SLOTS + tier.nuserdata  # the tile slots' userdata follow the tier's
         j = [cpu_model.body_jntadr[cpu_model.body(f"tile{k}").id] for k in range(T)]
         self.qadr = [int(cpu_model.jnt_qposadr[x]) for x in j]
+        self.slots = [(q, int(cpu_model.jnt_dofadr[x]), int(cpu_model.body(f"tile{k}").id)) for k, (q, x) in enumerate(zip(self.qadr, j))]
         self.body0 = int(cpu_model.body("tile0").id) if T else 0
         pos, bottom, count, delay = [], [], [], []
         for i, _ in bank.entries:

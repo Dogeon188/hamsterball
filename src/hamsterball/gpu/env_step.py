@@ -31,6 +31,8 @@ _FACING, _PITCH = wp.constant(0), wp.constant(1)  # model.FACING, model.PITCH
 _SHELL, _HAM, _SHELL_DOF = wp.constant(1), wp.constant(2), wp.constant(0)  # model.SHELL, HAM, SHELL_DOF
 STILL, OSCILLATE, PATH = 0, 1, 2  # a marker row's motion kind
 _STILL, _OSCILLATE = wp.constant(STILL), wp.constant(OSCILLATE)
+FREE, BALL, HINGE = 0, 1, 2  # what an attached body's qpos holds: a free joint, a ball joint, a hinge
+_FREE, _BALL, _HINGE = wp.constant(FREE), wp.constant(BALL), wp.constant(HINGE)
 _TWO_PI = wp.constant(2.0 * math.pi)
 
 
@@ -47,8 +49,10 @@ class Motion:
     """The marker rows' motions (`motion.pose`): per row its kind, period, phase, spin (rad/s), the offset's
     amplitude vector (oscillate: axis times amplitude), the point its spin turns about (`pivot`: `marker.centre` at
     sim time 0, so its authored centre plus its offset then), a path's slice (`start`, `count`) of `pts` and `cum` (its
-    closed polyline's points and cumulative lengths), and `qadr`: the qpos address of the free-joint body the row is
-    attached to (it is authored in that body's frame), -1 for a row that rides none."""
+    closed polyline's points and cumulative lengths), and `qadr`: the qpos address of the body the row is attached
+    to (it is authored in that body's frame), -1 for a row that rides none. `frame` says what that body's qpos holds
+    (`FREE`: a free joint's position and quaternion; `BALL`: a ball joint's quaternion about the fixed pivot `fpos`;
+    `HINGE`: an angle about the unit `faxis` through `fpos`), as `level.body_frame` reads it."""
 
     kind: wp.array(dtype=int)
     period: wp.array(dtype=float)
@@ -61,6 +65,9 @@ class Motion:
     pts: wp.array(dtype=wp.vec3)
     cum: wp.array(dtype=float)
     qadr: wp.array(dtype=int)
+    frame: wp.array(dtype=int)
+    fpos: wp.array(dtype=wp.vec3)
+    faxis: wp.array(dtype=wp.vec3)
 
 
 class Markers:
@@ -69,17 +76,18 @@ class Markers:
     `rot` and `half` the box's frame and half-sizes), and the rest of the block padding. `role` and `base` say how each
     target looks (see `look_markers`) and `motion` (a `Motion`) how it moves. Per entry: `ntargets`, `n` (targets and hazards), `mode`, `goal_row`, `survive`,
     `time_penalty`. `entries` is a list of `(task, block, hazards)`; `row_geom` maps each row to its geom in the model,
-    `row_slot` to its marker slot. `body_qadr[k]` is the qpos address of body slot k, for the rows attached to body k."""
+    `row_slot` to its marker slot. `frames[e][k]` is `(qadr, frame, pivot, axis)` of entry e's level's body k (see
+    `seesaws.attach_frames`), for the rows attached to it."""
 
-    def __init__(self, entries, device, body_qadr=()):
+    def __init__(self, entries, device, frames=()):
         self.stride = max(len(targets(t, b)) + len(h) for t, b, h in entries)
         self.max_targets = max(len(targets(t, b)) for t, b, _ in entries)
         pad = {"type": "sphere", "pos": [0, 0, 0], "radius": 0.0}
         kind, a, b, rad, rot, half, centre, role, base = [], [], [], [], [], [], [], [], []
         ntargets, n, mode, goal_row, survive, tp = [], [], [], [], [], []
-        mo = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pivot", "start", "count", "qadr")}
+        mo = {k: [] for k in ("kind", "period", "phase", "spin", "vec", "pivot", "start", "count", "qadr", "frame", "fpos", "faxis")}
         pts, cum = [[0, 0, 0]], [0.0]  # a path's closed polylines end to end (one padding point so the arrays are never empty)
-        for task, block, hazards in entries:
+        for ei, (task, block, hazards) in enumerate(entries):
             tgt = targets(task, block)
             ntargets.append(len(tgt)), n.append(len(tgt) + len(hazards)), mode.append(MODES[task])
             goal_row.append({"reach_goal": 0, "unlock_goal": len(tgt) - 1}.get(task, -1))  # the row that pays no +1 of its own
@@ -105,7 +113,8 @@ class Markers:
                 mo["vec"].append(np.array(motion["axis"]) * motion["amplitude"] if motion and motion["type"] == "oscillate" else [0, 0, 0])
                 mo["pivot"].append(marker_centre(m, 0.0))
                 mo["start"].append(len(pts)), mo["count"].append(0)
-                mo["qadr"].append(body_qadr[m["attach"]] if "attach" in m else -1)
+                att = frames[ei][m["attach"]] if "attach" in m else (-1, FREE, [0, 0, 0], [0, 0, 0])
+                mo["qadr"].append(att[0]), mo["frame"].append(att[1]), mo["fpos"].append(att[2]), mo["faxis"].append(att[3])
                 if motion and motion["type"] == "path":
                     closed = np.array(motion["points"] + motion["points"][:1])
                     pts += closed.tolist()
@@ -124,7 +133,8 @@ class Markers:
         self.time_penalty = f(tp, float)
         self.motion = Motion()
         self.motion.kind, self.motion.start, self.motion.count = i(mo["kind"]), i(mo["start"]), i(mo["count"])
-        self.motion.qadr = i(mo["qadr"])
+        self.motion.qadr, self.motion.frame = i(mo["qadr"]), i(mo["frame"])
+        self.motion.fpos, self.motion.faxis = f(mo["fpos"], wp.vec3), f(mo["faxis"], wp.vec3)
         self.motion.period, self.motion.phase, self.motion.spin = (f(mo[k], float) for k in ("period", "phase", "spin"))
         self.motion.vec, self.motion.pivot = f(mo["vec"], wp.vec3), f(mo["pivot"], wp.vec3)
         self.motion.pts, self.motion.cum = f(pts, wp.vec3), f(cum, float)
@@ -286,32 +296,53 @@ def quat_mat(a: float, b: float, c: float, d: float):
 
 
 @wp.func
+def frame_quat(w: int, r: int, qpos: wp.array2d(dtype=float), mo: Motion):
+    """The orientation (w, x, y, z) of the body row r is attached to, from its qpos (`level.body_frame`): a free joint's
+    quaternion, a ball joint's, or a hinge's angle about its axis."""
+    a = mo.qadr[r]
+    q = wp.vec4(qpos[w, a + 3], qpos[w, a + 4], qpos[w, a + 5], qpos[w, a + 6])
+    if mo.frame[r] == _BALL:
+        q = wp.vec4(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2], qpos[w, a + 3])
+    elif mo.frame[r] == _HINGE:
+        h = 0.5 * qpos[w, a]
+        ax = mo.faxis[r]
+        q = wp.vec4(wp.cos(h), wp.sin(h) * ax[0], wp.sin(h) * ax[1], wp.sin(h) * ax[2])
+    return q
+
+
+@wp.func
+def frame_pos(w: int, r: int, qpos: wp.array2d(dtype=float), mo: Motion):
+    """The position of the body row r is attached to: a free joint's qpos, else the fixed pivot."""
+    a = mo.qadr[r]
+    p = mo.fpos[r]
+    if mo.frame[r] == _FREE:
+        p = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2])
+    return p
+
+
+@wp.func
 def body_rot(w: int, r: int, qpos: wp.array2d(dtype=float), mo: Motion):
     """The rotation of the body row r is attached to, from its qpos."""
-    a = mo.qadr[r]
-    return quat_mat(qpos[w, a + 3], qpos[w, a + 4], qpos[w, a + 5], qpos[w, a + 6])
+    q = frame_quat(w, r, qpos, mo)
+    return quat_mat(q[0], q[1], q[2], q[3])
 
 
 @wp.func
 def to_body(w: int, r: int, p: wp.vec3, qpos: wp.array2d(dtype=float), mo: Motion):
     """crosses' frame: the point p in the frame of the body row r is attached to, R^T (p - pos) from the body's qpos (a
     row that rides none: p)."""
-    a = mo.qadr[r]
-    if a < 0:
+    if mo.qadr[r] < 0:
         return p
-    pos = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2])
-    return wp.transpose(body_rot(w, r, qpos, mo)) @ (p - pos)
+    return wp.transpose(body_rot(w, r, qpos, mo)) @ (p - frame_pos(w, r, qpos, mo))
 
 
 @wp.func
 def centre_at(w: int, r: int, centre: wp.array(dtype=wp.vec3), t: float, qpos: wp.array2d(dtype=float), mo: Motion):
     """marker.centre for row r at sim time t: an attached row's authored centre in its body's frame (the body's pos plus
     R c), else its authored centre plus its motion's offset."""
-    a = mo.qadr[r]
-    if a < 0:
+    if mo.qadr[r] < 0:
         return centre[r] + offset_of(r, t, mo)
-    pos = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2])
-    return pos + body_rot(w, r, qpos, mo) @ centre[r]
+    return frame_pos(w, r, qpos, mo) + body_rot(w, r, qpos, mo) @ centre[r]
 
 
 @wp.func
@@ -662,14 +693,13 @@ def pose_movers(
     q0 = slot_quat[e, s]
     p0 = slot_pos[e, s]
     if mo.qadr[r] >= 0:  # attached: the authored pose is in the body's frame, so the world pose is the body's times it
-        a = mo.qadr[r]
-        bq = wp.vec4(qpos[w, a + 3], qpos[w, a + 4], qpos[w, a + 5], qpos[w, a + 6])
+        bq = frame_quat(w, r, qpos, mo)
         # body quat * authored quat
         q = wp.quat(bq[0] * q0[0] - bq[1] * q0[1] - bq[2] * q0[2] - bq[3] * q0[3],
                     bq[0] * q0[1] + bq[1] * q0[0] + bq[2] * q0[3] - bq[3] * q0[2],
                     bq[0] * q0[2] - bq[1] * q0[3] + bq[2] * q0[0] + bq[3] * q0[1],
                     bq[0] * q0[3] + bq[1] * q0[2] - bq[2] * q0[1] + bq[3] * q0[0])
-        p = wp.vec3(qpos[w, a], qpos[w, a + 1], qpos[w, a + 2]) + body_rot(w, r, qpos, mo) @ p0
+        p = frame_pos(w, r, qpos, mo) + body_rot(w, r, qpos, mo) @ p0
     else:
         yaw = mo.spin[r] * t
         cz = wp.cos(0.5 * yaw)
