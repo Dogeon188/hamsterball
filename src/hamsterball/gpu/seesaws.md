@@ -25,7 +25,7 @@ Needs the `gpu` extra.
 
 - `uv run --extra gpu pytest tests/test_warp_seesaws.py` (`HAMSTERBALL_WARP_DEVICE=cuda:0` runs it on a GPU). Seam 1, on a bank of two hinge levels (different axis, stiffness, damping, range and mass), a ball seesaw level, one with a two-geom seesaw whose centre of mass is off its pivot, a ball seesaw before a driven body and a hinge seesaw after one, a raft and a floor: every level's CPU state round trips exactly, one physics step matches `Core` (`rtol=1e-4, atol=1e-5`), a world equals the same level in a bank of its own, each world's model fields equal the CPU model's, a reset equals the CPU reset. Seam 2: CPU episodes of the bundled ball seesaw, a hinge seesaw, a generated seesaw level, each tipped off (still ball, `left_region`) and balanced to time-up (chasing the region), and a seesaw after a driven body, replayed through `step_to`, alone and six together on one bank; a generator pool (seesaw layout among the others) steps and resets on the device.
 - Measured (Warp CPU device): one physics step from states 0, 30 and 150 env steps into a run, the largest difference from `Core` in a seesaw's qpos and qvel was 2.8e-11, 9.2e-8 and 7.1e-7; the observation in seam 2 at most 1.9e-6, the reward 0, the attached region's world pose 1.6e-7 (eight scenarios of up to 720 steps, flags, success and failure codes exact).
-- CUDA: see History.
+- CUDA (2026-10-27, Warp 1.18.0, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu` passed 133 of 133 on this tree, the 17 tests of `tests/test_warp_seesaws.py` among them: seam 2 observations within 1.9e-6, rewards exact, the attached region's pose within 1.3e-7, graph and eager steps equal.
 
 ## Known quirks
 
@@ -44,4 +44,4 @@ Needs the `gpu` extra.
 
 ## History
 
-- 2026-10-27, ticket gpu-backend/09: first version.
+- 2026-10-27, ticket gpu-backend/09: first version. CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 133 of 133 `gpu` tests passed (see Invariants and checks).
