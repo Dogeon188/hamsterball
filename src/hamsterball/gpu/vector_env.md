@@ -40,6 +40,16 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - `info["failure_reason"]` is a tensor of codes, not the CPU's string.
 - The tensors are views, see Interface.
 - **CUDA run** (2026-10-27, Warp 1.18.0, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu tests/test_warp_env.py tests/test_batch_core.py` passed, 38 of 38 (22 here, 16 of the batched core). The env step ran as one captured graph (physics, env-step kernels, autoreset). Parity differences matched the CPU device's: largest observation difference 5.7e-6, largest reward difference 4.7e-8.
+- **CUDA run with views** (2026-10-27, Warp 1.18.0, an NVIDIA GeForce RTX 2080 Ti, sm_75, on a GPU cluster): `HAMSTERBALL_WARP_DEVICE=cuda:0 pytest -m gpu tests` passed 90 of 90, the 12 view tests among them; the step graph and the autoreset graph ran on CUDA with the render between them.
+- **Render cost** (2026-10-27, 84x84, three bundled levels in the bank, one `Views.render` call for all worlds, no physics; Warp 1.18.0, `mujoco-warp` 3.16.0). Warp's CPU device on the laptop CPU: per world about 2.8 to 3.2 ms for `chase`, 3.1 to 3.5 ms for `follow`, 1.9 to 2.4 ms for `first_person`, and 7.7 to 8.6 ms for all three, flat in the batch size:
+
+  | N | chase | follow | first_person | all three | env step, no views | env step, all three |
+  |---|---|---|---|---|---|---|
+  | 1 | 3.2 ms | 3.5 ms | 2.4 ms | 8.6 ms | 61 ms | 69 ms |
+  | 4 | 11.3 ms | 12.9 ms | 8.6 ms | 31.9 ms | 64 ms | 96 ms |
+  | 16 | 44.1 ms | 49.3 ms | 30.3 ms | 123.5 ms | 86 ms | 216 ms |
+
+  On an NVIDIA GeForce RTX 2080 Ti on a GPU cluster (not asked for, measured for context): one render call for all worlds takes 0.56 ms at N=16 and 64 (the launch floor) and 0.7 to 1.0 ms at 256 for one view, and 3.2, 3.5 and 2.5 ms for `chase`, `follow` and `first_person` at N=1024 (about 3 microseconds per world and view); all three views cost 8.8 ms at N=1024. The whole env step (captured physics graph plus the render) takes 4.6 ms at N=16 (3,500 env steps/s) without views and 5.3 ms with all three (3,000/s); at N=1024, 7.9 ms (130,000/s) without and 15.1 ms (68,000/s) with. The render runs outside the captured graph, so a step with views at small batches is bound by kernel launches, not by drawing.
 
 ## Decisions
 
@@ -67,3 +77,4 @@ Needs the `gpu` extra (`mujoco-warp`, `warp-lang`, `torch`); importing the modul
 - 2026-10-27, ticket gpu-backend/05: level bank, sampling, reset options, `set_levels`, generator pools.
 - 2026-10-27, ticket gpu-backend/05: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 79 of 79 `gpu` tests passed (see batch_core.md); the draw, the level load and the autoreset ran inside the captured graph.
 - 2026-10-27, ticket gpu-backend/10: pixel views (see views.md); the unsupported-kwarg test no longer lists `views`.
+- 2026-10-27, ticket gpu-backend/10: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: 90 of 90 `gpu` tests passed, and the render costs above measured.

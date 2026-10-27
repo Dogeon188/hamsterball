@@ -44,3 +44,4 @@ The Warp vector env's pixel views ([vector_env.md](vector_env.md)): `core.views.
 ## History
 
 - 2026-10-27, ticket gpu-backend/10: first version. Agent finding while building: `get_rgb`'s camera argument is an index into the context's active cameras; passing the model camera id for `first_person` (2) in its own one-camera context segfaulted the process.
+- 2026-10-27, ticket gpu-backend/10: CUDA run on an NVIDIA GeForce RTX 2080 Ti on a GPU cluster: the view tests passed; render costs are in [vector_env.md](vector_env.md).
