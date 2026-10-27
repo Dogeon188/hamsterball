@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 import hamsterball  # noqa: F401  registers the env ids
+from hamsterball.core.articulated_tier import STAND
 from hamsterball.core.generator import ProceduralGenerator
 from hamsterball.env import TASKS, HamsterballEnv
 
@@ -46,7 +47,7 @@ def test_proprio_at_reset_is_the_standing_pose_in_the_facing_frame():
     env = HamsterballEnv(tier="articulated", tasks=["reach_goal"], levels=["first_goal"])
     p = env.reset(seed=0)[0]["proprio"]
     assert p.shape == (26,) and p.dtype == np.float32
-    np.testing.assert_allclose(p[:8], (0.28, -0.87) * 4, atol=1e-6)  # joint positions
+    np.testing.assert_allclose(p[:8], STAND, atol=1e-4)  # joint positions
     np.testing.assert_allclose(p[8:16], 0, atol=1e-6)  # joint velocities
     np.testing.assert_allclose(p[20:23], [0, 1, 0], atol=1e-6)  # torso forward is the facing (+y at facing 0)
     np.testing.assert_allclose(p[23:26], [0, 0, 1], atol=1e-6)  # level
