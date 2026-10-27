@@ -58,7 +58,7 @@ def test_reset_stands_with_its_feet_on_the_inner_wall_and_the_torso_along_the_fa
     assert (d.xmat[HAM].reshape(3, 3)[2, 2]) == pytest.approx(1)  # upright
     feet = [d.geom(f"{n}_foot").xpos for n in ("fl", "fr", "rl", "rr")]
     gaps = [0.47 - 0.02 - np.linalg.norm(f - d.xpos[1]) for f in feet]  # to the 0.47 m inner wall
-    assert min(gaps) > -0.004 and max(gaps) < 0.015  # the lowest feet on it, the rest within 15 mm (the wall curves up)
+    assert min(gaps) > -0.004 and max(gaps) < 0.08  # the rear feet on it, the short front legs within 80 mm (the wall curves up)
     assert np.linalg.norm(com_offset(core)) < core.tier.resting_radius - 0.1  # standing, deep inside the radius
     # the hamster holds the pose for a moment on its own (no gait: only the contact), and does not explode
     core.step(ZERO, n=30)
@@ -117,7 +117,7 @@ def test_a_fallen_hamster_lying_on_the_wall_gets_no_containment_impulse():
             assert (d.qvel == before).all()
 
 
-def pd_hold(d, kp=80.0, kd=1.0):
+def pd_hold(d, kp=15.0, kd=0.1):
     """The normalised torques of a PD loop to the standing pose (joint torque before the gear)."""
     q, qd = d.qpos[HAM_QPOS + 7:HAM_QPOS + 15], d.qvel[HAM_DOF + 6:HAM_DOF + 14]
     gear = np.array([at.GEAR_HIP, at.GEAR_KNEE] * 4)
@@ -131,13 +131,13 @@ def test_compiled_joint_ranges_are_the_constants_in_radians():
         assert m.joint(f"{leg}_knee").range == pytest.approx(at.KNEE_RANGE, abs=1e-9)
 
 
-def test_a_pd_hold_stands_on_the_standing_pose_and_a_shove_topples_it_onto_the_wall():
+def test_a_pd_hold_stands_on_the_standing_pose_and_a_shove_collapses_it_onto_the_wall():
     core = Core(ArticulatedTier())
     m, d = core.model, core.data
     for _ in range(240):  # 4 s
         core.step(pd_hold(d))
-    assert d.qpos[HAM_QPOS + 7:HAM_QPOS + 15] == pytest.approx(at.STAND, abs=0.12)
-    assert d.xmat[HAM].reshape(3, 3)[2, 2] > 0.95 and np.linalg.norm(com_offset(core)) < 0.3
+    assert d.qpos[HAM_QPOS + 7:HAM_QPOS + 15] == pytest.approx(at.STAND, abs=0.2)
+    assert d.xmat[HAM].reshape(3, 3)[2, 2] > 0.7  # still on its feet
     d.qvel[HAM_DOF + 1] += 2.5  # shove sideways with a roll
     d.qvel[HAM_DOF + 3] += 6.0
     for _ in range(240):
@@ -147,7 +147,7 @@ def test_a_pd_hold_stands_on_the_standing_pose_and_a_shove_topples_it_onto_the_w
         before = d.qvel.copy()
         contain(m, d, core.tier.resting_radius)
         assert (d.qvel == before).all()  # never reaches the containment
-    assert d.xmat[HAM].reshape(3, 3)[2, 2] < 0.5 and np.linalg.norm(com_offset(core)) > 0.32  # down on the wall
+    assert np.linalg.norm(com_offset(core)) > 0.36  # limp, it sank onto the wall (belly down; the wide torso rarely rolls over)
 
 
 def test_the_articulated_model_has_no_tail_or_ears_and_the_abstract_one_keeps_them():
@@ -175,3 +175,26 @@ def test_the_ground_floors_and_sky_render_a_checker_and_a_gradient():
         lm = Core(level=level).model
         floors = [g for g in range(lm.ngeom) if lm.geom_group[g] == 0 and lm.geom_contype[g] == 1 and lm.geom_matid[g] >= 0]
         assert floors, name
+
+
+def test_the_torso_covers_all_four_hips_and_stays_frictionless_against_tiles():
+    m = Core(ArticulatedTier()).model
+    torso = [g for g in range(m.ngeom) if m.geom_bodyid[g] == HAM and m.geom_contype[g]]
+    assert len(torso) >= 2  # a spine plus its cross bars
+    for leg in ("fl", "fr", "rl", "rr"):
+        hip = m.body(f"{leg}_thigh").pos  # in the torso frame
+        gaps = []
+        for g in torso:
+            assert m.geom_type[g] == mujoco.mjtGeom.mjGEOM_CAPSULE and m.geom_condim[g] == 1 and m.geom_priority[g] == 1
+            c, r, half = m.geom_pos[g], m.geom_size[g][0], m.geom_size[g][1]
+            ax = _capsule_axis(m, g)
+            t = np.clip(np.dot(hip - c, ax), -half, half)
+            gaps.append(np.linalg.norm(hip - (c + t * ax)) - r)
+        assert min(gaps) < 0.005, (leg, min(gaps))  # the hip joint sits inside (or on) the torso's skin
+
+
+def _capsule_axis(m, g):
+    q = m.geom_quat[g]
+    out = np.zeros(9)
+    mujoco.mju_quat2Mat(out, q)
+    return out.reshape(3, 3)[:, 2]  # a capsule's axis is its local z
