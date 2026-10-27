@@ -26,7 +26,7 @@ Contacts: torso, head, thighs and shins have `condim 1`, `priority 1`, so they a
 
 Masses are set per geom so the subtree is exactly 2.4 kg: torso 1.38, head 0.30, and per leg thigh 0.10, shin 0.06, foot 0.02.
 
-## Constants (second cut; play-test verdicts: first cut "stands and falls fine, barely moves the shell"; this cut **signed off at about 1 m/s**)
+## Constants (third cut after the units fix; the earlier play-test sign-off is void, see History)
 
 | | value |
 |---|---|
@@ -34,9 +34,9 @@ Masses are set per geom so the subtree is exactly 2.4 kg: torso 1.38, head 0.30,
 | head | sphere r 0.045 at (0.17, 0, 0.025) |
 | hips | (±0.08, ±0.085, −0.02) from the torso centre |
 | thigh, shin, foot | 0.09 m, 0.09 m, r 0.02 m (capsule radii 0.015 and 0.012) |
-| hip, knee range | −1.5..1.5 rad, −1.8..0.05 rad |
+| hip, knee range | −1.5..1.5 rad, −1.8..0.05 rad (written in degrees in the MJCF, see Decisions) |
 | gear hip, knee | 16.0, 12.8 N m |
-| joint damping, armature | 0.05, 0.002 |
+| joint damping, armature | 0.5, 0.01 |
 | standing pose | hip 0.28, knee −0.87 on every leg (positive hip swings the foot back, negative knee bends the shin forward) |
 | standing torso height | the COM stands 0.276 m from the shell centre; the front feet touch the wall, the rear ones sit 9 mm off it until the body settles |
 | resting radius | 0.40 m |
@@ -45,13 +45,13 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 
 ## Invariants and checks
 
-- The play-test's canned trot (`game/articulated_playtest.py`: hip swing 1.15 rad and knee lift 0.5 rad at 7.5 Hz, hip offset −0.3, a nose-down feedback on the knees (3.5 per unit) and front hips (−0.8), PD loop 80 / 1.0): the shell's speed swings between 0.8 and 1.6 m/s (1.0 m/s mean over 10 to 15 s, 1.4 m/s at 2 s), and the hamster never tilts past 72° over 15 s.
-- `uv run pytest tests/test_articulated_tier.py`: the fragment contract (free root `hamster`, 2.4 kg, group 2, `hamster_eye`, only MJX-supported joint, geom and actuator types), reset stands with its feet on the inner wall and the torso along the facing, a stored core state reproduces the run bit for bit with `ctrl` included, thrown hamsters sink no further than the hard stop plus a step (measured 0 / 20 / 20 / 20 mm for 0 / 4 / 8 / 12 m/s), a fallen hamster gets no containment impulse, the play-test's posture loop holds the stand until a shove topples it, and the trot pushes the shell above 0.8 m/s (last 5 s of 15) without tumbling.
+- The play-test's canned trot (`game/articulated_playtest.py`) was tuned on the broken skeleton and is not checked any more; pushing the shell is tested with the scripted gait (ticket 04).
+- `uv run pytest tests/test_articulated_tier.py`: the fragment contract (free root `hamster`, 2.4 kg, group 2, `hamster_eye`, only MJX-supported joint, geom and actuator types), reset stands with its feet on the inner wall and the torso along the facing, a stored core state reproduces the run bit for bit with `ctrl` included, thrown hamsters sink no further than the hard stop plus a step (measured 0 / 20 / 20 / 20 mm for 0 / 4 / 8 / 12 m/s), a fallen hamster gets no containment impulse, the compiled joint ranges equal the constants in radians, and a 60 Hz PD hold of the standing pose (kp 80, kd 1) keeps the joints within 0.12 rad of it and the torso upright until a shove topples it onto the wall with no containment impulse.
 
 ## Known quirks
 
 - The tier has no gait or balance: with zero torque it still stands on its legs for a while (the jointed legs hold the load), and a shove topples it onto its back or side where it lies at about 0.377 m.
-- Pushing is limited by the gait, not the skeleton's torque. Half the abstract tier's top speed (7.15 m/s of 14.3) is out of reach: the best non-tumbling gait found reaches about 1 m/s sustained (peaks 2.3 m/s). To hold still against a shell rolling at `v` the stance feet must travel back at `v` relative to the wall, so `v` is bounded by stride length times stride rate (about 0.3 m of foot travel at 7.5 Hz, under the 60 Hz control, is 8 samples per stride), and the open-loop trot has no attitude control: stronger trots pitch the torso nose-down and roll it over within a second. The abstract tier's feet are a force, with no such bound. The result is sensitive: rounding the gait constants in the 4th digit turned a 15 s non-tumbler into one that tumbles later, so the play-test's constants are one of the few of 40 roundings that held 30 s.
+- Pushing speeds below were measured on the broken skeleton (near-rigid legs) and are void; the rest of this item is kept as history. Pushing is limited by the gait, not the skeleton's torque. Half the abstract tier's top speed (7.15 m/s of 14.3) is out of reach: the best non-tumbling gait found reaches about 1 m/s sustained (peaks 2.3 m/s). To hold still against a shell rolling at `v` the stance feet must travel back at `v` relative to the wall, so `v` is bounded by stride length times stride rate (about 0.3 m of foot travel at 7.5 Hz, under the 60 Hz control, is 8 samples per stride), and the open-loop trot has no attitude control: stronger trots pitch the torso nose-down and roll it over within a second. The abstract tier's feet are a force, with no such bound. The result is sensitive: rounding the gait constants in the 4th digit turned a 15 s non-tumbler into one that tumbles later, so the play-test's constants are one of the few of 40 roundings that held 30 s.
 - `wall_contact` costs a collision pass per env step.
 
 ## Decisions
@@ -75,3 +75,4 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 - 2026-10-27, second play-test (user): "Stronger push". It stands and falls fine, but barely moves the shell. Retuned the gears (5.0/4.0 to 16.0/12.8 N m), hip range (±0.9 to ±1.5 rad), standing pose and the canned trot (see Tried and rejected); the shell constants are untouched. Measured about 1 m/s of shell speed, tumble-free over 15 s; the new play-test verdict is pending.
 - 2026-10-27, third play-test (user): signed off at about 1 m/s. Half the abstract top speed is out of reach with this skeleton and an open-loop trot; the user chose to accept it and leave push speed to the scripted gait (ticket 04), whose posture loop closes the balance the canned trot lacks. Matching the abstract feel stays out of scope.
 - 2026-10-27, ticket articulated-tier/03: `obs()` gains `proprio`; the env builds `tier="articulated"` from it.
+- 2026-10-27, bug found during ticket 04: the joint `range` attributes were radians but MJCF's compiler angle is degrees, so the compiled ranges were ±0.026 rad (hips) and −0.031..0.0009 rad (knees): the legs sat on near-zero stops and the standing keyframe lay outside them. Every earlier play-test (including the "about 1 m/s" sign-off) ran on that near-rigid skeleton, so the sign-off is void and is redone on the scripted gait's play-test. Fix: write the ranges with `math.degrees`; the model's compiler angle stays degrees, so levels are untouched. Real joints made the 60 Hz PD (kp 80, kd 1, ctrl held across 10 physics steps) unstable with damping 0.05 and armature 0.002 (the legs tumble in 2 s): damping 0.5 and armature 0.01 stabilise kd from 0.05 to 1 and kp 20 to 120. Peak torques, standing pose, masses, lengths and the resting radius check are unchanged. A test now compares the compiled ranges to the constants.
