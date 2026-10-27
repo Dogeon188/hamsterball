@@ -27,19 +27,22 @@ RESTING_RADIUS = 0.40
 LEGS = [("fl", 1, 1), ("fr", 1, -1), ("rl", -1, 1), ("rr", -1, -1)]  # name, x sign, y sign
 _GEOM = f'solref="{SOLREF}" contype="2" conaffinity="0" group="2"'
 _FROZEN = f'{_GEOM} priority="1" condim="1"'  # frictionless against the tiles
-_RGBA = 'rgba="1 .6 .2 1"'
+_RGBA = 'rgba="1 .6 .2 1"'  # torso
+_LEG = 'rgba=".62 .33 .12 1"'
+_HEAD = 'rgba="1 .88 .62 1"'
+_VISUAL = 'mass="0" contype="0" conaffinity="0" group="2"'  # marker geoms: no mass, no contact
 
 
 def _leg(name, sx, sy):
     return (
         f'<body name="{name}_thigh" pos="{sx * HIP_X} {sy * HIP_Y} {HIP_Z}">'
         f'<joint name="{name}_hip" axis="0 1 0" range="{HIP_RANGE[0]} {HIP_RANGE[1]}" damping="{DAMPING}" armature="{ARMATURE}"/>'
-        f'<geom type="capsule" fromto="0 0 0 0 0 {-THIGH}" size="0.015" mass="{MASS["thigh"]}" {_FROZEN} {_RGBA}/>'
+        f'<geom type="capsule" fromto="0 0 0 0 0 {-THIGH}" size="0.015" mass="{MASS["thigh"]}" {_FROZEN} {_LEG}/>'
         f'<body name="{name}_shin" pos="0 0 {-THIGH}">'
         f'<joint name="{name}_knee" axis="0 1 0" range="{KNEE_RANGE[0]} {KNEE_RANGE[1]}" damping="{DAMPING}" armature="{ARMATURE}"/>'
-        f'<geom type="capsule" fromto="0 0 0 0 0 {-SHIN}" size="0.012" mass="{MASS["shin"]}" {_FROZEN} {_RGBA}/>'
+        f'<geom type="capsule" fromto="0 0 0 0 0 {-SHIN}" size="0.012" mass="{MASS["shin"]}" {_FROZEN} {_LEG}/>'
         f'<geom name="{name}_foot" type="sphere" pos="0 0 {-SHIN}" size="{FOOT_R}" mass="{MASS["foot"]}" {_GEOM} '
-        f'margin="0.002" condim="3" rgba=".9 .4 .1 1"/>'
+        f'margin="0.002" condim="3" rgba=".25 .15 .1 1"/>'
         f'</body></body>'
     )
 
@@ -67,13 +70,18 @@ def _sections():
 
 class ArticulatedTier:
     nuserdata = 0
+    features = False  # no tail or ears: its own head and torso show which way it points
     resting_radius = RESTING_RADIUS
     fragment = (
         f'<body name="hamster" pos="0 0 {R + _stand_height()!r}"><freejoint/>'
         f'<geom type="capsule" fromto="{-TORSO_HALF} 0 0 {TORSO_HALF} 0 0" size="{TORSO_R}" mass="{MASS["torso"]}" '
         f'{_FROZEN} {_RGBA}/>'
         f'<body name="head" pos="{HEAD_POS[0]} {HEAD_POS[1]} {HEAD_POS[2]}">'
-        f'<geom type="sphere" size="{HEAD_R}" mass="{MASS["head"]}" {_FROZEN} {_RGBA}/>'
+        f'<geom type="sphere" size="{HEAD_R}" mass="{MASS["head"]}" {_FROZEN} {_HEAD}/>'
+        # nose and eyes, so the head reads as facing +x
+        f'<geom type="sphere" pos="{HEAD_R * 0.95} 0 -0.005" size="0.012" {_VISUAL} rgba=".15 .08 .08 1"/>'
+        f'<geom type="sphere" pos="{HEAD_R * 0.7} 0.025 0.025" size="0.01" {_VISUAL} rgba="0 0 0 1"/>'
+        f'<geom type="sphere" pos="{HEAD_R * 0.7} -0.025 0.025" size="0.01" {_VISUAL} rgba="0 0 0 1"/>'
         f'<site name="hamster_eye" pos="0.03 0 0.01"/></body>'
         + "".join(_leg(*leg) for leg in LEGS)
         + '</body>'

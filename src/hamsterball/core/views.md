@@ -7,8 +7,8 @@ The three views of spec §11 (`chase`, `follow`, `first_person`): a model `<came
 ## Interface
 
 - `VIEWS`: the view names, in that order.
-- `FRAGMENT`: MJCF for the three mocap bodies (`view_chase`, `view_follow`, `view_first_person`), each holding a camera named after its view, then the `features` mocap body holding the `tail`, `ear_left`, and `ear_right` sphere geoms. `model.build` appends it after the tier's fragment.
-- `pose(model, data, follow_yaw)`: writes the views' and the features' `mocap_pos` and `mocap_quat` from fresh positions (after `mj_kinematics`). The cameras move only on the next `mj_kinematics` plus `mj_camlight`.
+- `FRAGMENT`: MJCF for the three mocap bodies (`view_chase`, `view_follow`, `view_first_person`), each holding a camera named after its view, then (`FEATURES`, left out when the tier's `features` is false) the `features` mocap body holding the `tail`, `ear_left`, and `ear_right` sphere geoms. `model.build` appends it after the tier's fragment.
+- `pose(model, data, follow_yaw)`: writes the views' and, if the model has a `features` body, the features' `mocap_pos` and `mocap_quat` from fresh positions (after `mj_kinematics`). The cameras move only on the next `mj_kinematics` plus `mj_camlight`.
 - `option(view, hitboxes=False)`: a fresh `MjvOption`. Groups 0 to 2 shown and 3 to 5 hidden for `chase` and `follow`; only group 0 for `first_person`. `hitboxes=True` also shows group 4, the **hitbox view**'s geoms (GLOSSARY.md): the shell-centre dot ([model.md](model.md)); the game window adds the kill plane to its scene ([window.md](../game/window.md)). The env never passes it, so pixel observations never show hitboxes.
 
 The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
@@ -55,6 +55,8 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-22, spec §11 and issue 17 comments: views are model cameras on mocap bodies drawn through `mjCAMERA_FIXED`, not free `MjvCamera`s, so a later GPU renderer (which draws only model cameras) shares them.
 - 2026-10-22, ticket hamsterball-v1/06: `pose` lives in the core package but the env calls it, so `Core` keeps its constructor; the level's `follow_yaw_deg` reaches it as an argument.
 - 2026-10-23, ticket hitbox-view/03: the hitbox geoms get their own group, 4, which every default option already hid, so one flag shows them and no default changes.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): the tail and ears stay in the abstract tier only: `model.build` adds `FEATURES` only when `tier.features` is true, and `pose` skips a model without them. The articulated tier sets it false; the three spheres floated around the jointed body (sized for a 0.12 m sphere). Abstract models are unchanged.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): the ground is a checker and the sky a gradient skybox in every view; this supersedes the Known quirks line "a skybox needs a texture, and spec §11 rules textures out". See [model.md](model.md).
 
 ## Tried and rejected
 
@@ -75,3 +77,4 @@ The env ([env.md](../env.md)) calls `pose` every env step and owns the renderer.
 - 2026-10-23, user request: the tail cone became the hamster's **features**, a tail ball and two ears, all spheres in the hamster's orange on one `features` mocap body at the hamster centre (was the `tail` body behind it). The mesh asset (`ASSET`) is gone. Same mocap count, so the core state's length is unchanged. In a sample chase frame the ears read clearly from behind, where the cone had shown only end-on as a dark nub.
 - 2026-10-23, ticket hitbox-view/03: added `option`'s `hitboxes` flag. The geomgroup test checks group 4 is off in every default and on with the flag; the hitbox look constants join the table, needing play-test.
 - 2026-10-23, code review of hitbox-view: group 4 holds only the centre dot; the kill plane moved from the level's MJCF to the game window's scene, so the model's extent (and env pixels) match `main`.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): "model is off (three floating spheres with unknown purpose), and the uni-color ground makes it hard to observe hamster behavior"; both addressed as in Decisions.

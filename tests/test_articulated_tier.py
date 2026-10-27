@@ -34,7 +34,8 @@ def test_fragment_honours_the_tier_contract():
     assert m.body_subtreemass[HAM] == pytest.approx(2.4, abs=1e-9)
     geoms = hamster_geoms(m)
     assert len(geoms) > 8 and (m.geom_group[geoms] == 2).all()
-    assert (m.geom_contype[geoms] == 2).all()  # they hit tiles (tile conaffinity 2)...
+    solid = [g for g in geoms if m.geom_contype[g]]  # the rest are massless markers (nose, eyes)
+    assert len(solid) > 8 and (m.geom_contype[solid] == 2).all()  # they hit tiles (tile conaffinity 2)...
     assert not (m.geom_contype[geoms] & m.geom_conaffinity[geoms]).any()  # ...and never each other
     assert {mujoco.mjtGeom(t) for t in m.geom_type[geoms]} <= GEOMS
     hamster_joints = [j for j in range(m.njnt) if m.body_rootid[m.jnt_bodyid[j]] == HAM]
@@ -126,3 +127,30 @@ def test_the_playtest_posture_loop_holds_the_hamster_standing_and_a_shove_topple
     for _ in range(240):
         core.step(torques(d, d.time, limp=True))
     assert d.xmat[HAM].reshape(3, 3)[2, 2] < 0.5 and np.linalg.norm(com_offset(core)) > 0.32  # down on the wall
+
+
+def test_the_articulated_model_has_no_tail_or_ears_and_the_abstract_one_keeps_them():
+    from hamsterball.core import views
+    from hamsterball.core.abstract_tier import AbstractTier
+
+    m = Core(ArticulatedTier()).model
+    assert mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "features") < 0
+    assert mujoco.mj_name2id(Core(AbstractTier()).model, mujoco.mjtObj.mjOBJ_BODY, "features") >= 0
+    core = Core(ArticulatedTier())
+    views.pose(core.model, core.data, 0.0)  # poses the views without a features body
+
+
+def test_the_ground_floors_and_sky_render_a_checker_and_a_gradient():
+    import yaml
+    from hamsterball.core.level import Level
+    from hamsterball.env import LEVELS_DIR
+
+    core = Core(ArticulatedTier())
+    m = core.model
+    assert m.geom_matid[0] >= 0  # the flat ground
+    assert {mujoco.mjtTexture(t) for t in m.tex_type} >= {mujoco.mjtTexture.mjTEXTURE_SKYBOX, mujoco.mjtTexture.mjTEXTURE_2D}
+    for name in ("first_goal", "hill"):  # a box floor and an hfield
+        level = Level.from_dict(yaml.safe_load((LEVELS_DIR / f"{name}.yaml").read_text()), LEVELS_DIR)
+        lm = Core(level=level).model
+        floors = [g for g in range(lm.ngeom) if lm.geom_group[g] == 0 and lm.geom_contype[g] == 1 and lm.geom_matid[g] >= 0]
+        assert floors, name

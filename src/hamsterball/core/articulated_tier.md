@@ -9,6 +9,8 @@ The articulated control tier ([spec](../../../.scratch/articulated-tier/spec.md)
 `ArticulatedTier` implements `Tier`:
 
 - `fragment`: the free torso `hamster` (capsule), a `head` body (sphere, holds the site `hamster_eye`), and four legs `fl fr rl rr`, each a `<leg>_thigh` body with hinge `<leg>_hip` and a `<leg>_shin` body with hinge `<leg>_knee` and a sphere geom `<leg>_foot`. All hinges are about the torso's y axis. The torso's forward axis is +x.
+- `features = False`: no tail or ears (the user's play-test verdict; the head and torso show the facing).
+- Look: torso orange, head cream with a dark nose and two black eyes on its +x side (massless, contactless, group 2 sphere geoms), legs brown, feet dark.
 - `sections`: a top-level `<actuator>` (one `motor` per joint, `ctrlrange -1 1`, gear = peak torque, in the order fl hip, fl knee, fr hip, ... rr knee) and a `<keyframe>` `stand` (shell at (0, 0, 0.5), torso standing at the height where every foot just touches the inner wall, the standing joint angles). `model.build` appends it after the bodies (see [model.md](model.md)).
 - `nuserdata = 0`, `resting_radius = 0.40` m.
 - `action_space()`: `Box(-1, 1, (8,), float32)`, the torques, normalised by the gears.
@@ -57,6 +59,7 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 - 2026-10-27, ticket articulated-tier/02: `Tier` gains `sections` (top-level MJCF after the bodies), since a fragment inside `<worldbody>` cannot hold an `<actuator>` or a `<keyframe>`; the abstract tier's is `""`, so its model is unchanged.
 - 2026-10-27, ticket articulated-tier/02: `contype 2`, `conaffinity 0` on hamster geoms in place of the ticket's "bit 2 on both", so the legs never collide with one another.
 - 2026-10-27, ticket articulated-tier/02: `Core.reset` sets the facing and pitch before `tier.reset`, so a tier can point along the facing without a new protocol argument. Abstract-tier trajectories are unchanged.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): no features for this tier, and a checker ground with a gradient sky for both tiers (see [views.md](views.md), [model.md](model.md)); head, legs and feet get their own colours and the head a nose and eyes.
 
 ## Tried and rejected
 
@@ -65,3 +68,4 @@ Resting radius: limp hamsters dropped in random orientations settle with the COM
 ## History
 
 - 2026-10-27, ticket articulated-tier/02: built with the core-seam tests of the spec. The play-test (stand, push the shell, fall naturally) awaits the user.
+- 2026-10-27, ticket articulated-tier/02 play-test (user): "model is off (three floating spheres with unknown purpose), and the uni-color ground makes it hard to observe hamster behavior"; the constants are not yet judged.
