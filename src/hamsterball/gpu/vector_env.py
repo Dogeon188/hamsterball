@@ -22,6 +22,7 @@ from ..env import DIFFICULTY, LEVELS_DIR, TASKS, _file_pool_difficulty, _levels
 from . import bank as B
 from . import env_step as E
 from .batch_core import BatchCore
+from .seesaws import attach_frames
 from .views import Views
 
 class WarpVectorEnv(gym.vector.VectorEnv):
@@ -139,7 +140,7 @@ class WarpVectorEnv(gym.vector.VectorEnv):
         # the epsilon keeps a whole number of env steps from rounding up to one more, as in HamsterballEnv
         steps = [math.ceil(limit(b) / (self.frame_skip * DT) - 1e-9) for _, b, _ in rows]
         with wp.ScopedDevice(core.device):
-            self.markers = E.Markers(rows, core.device, core.bodies.qadr)
+            self.markers = E.Markers(rows, core.device, attach_frames(bank, core.bodies.slot_qadr))
             f = lambda x, dt: wp.array(x, dtype=dt)  # noqa: E731
             blocks = [b for _, b, _ in rows]
             self.entry_spawn = f(np.array([b["spawn"]["pos"] for b in blocks], np.float32), wp.vec3)
